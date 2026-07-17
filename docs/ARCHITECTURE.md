@@ -23,6 +23,8 @@ Integration adapters normalize Proxmox, Docker, Kubernetes, GitHub, Cloudflare a
 
 Every mutating use case follows `authenticate -> authorize -> classify target -> evaluate policy -> confirm -> audit intent -> enqueue/execute -> audit result`.
 
+Long-running operations use the PostgreSQL job queue. Providers never run inside browser requests. Proxmox synchronization, telemetry maintenance and future cloud operations share the same worker contract and retry model.
+
 ## Frontend boundaries
 
 Vue Router owns module navigation, Pinia owns ephemeral UI state, TanStack Query owns server state and caching, and TanStack Table owns large inventory projections. ECharts renders telemetry, xterm.js renders terminal streams, and splitpanes provides remote workspace layouts. Components under `components/ui` follow the shadcn-vue composition model and are locally owned.
@@ -30,4 +32,3 @@ Vue Router owns module navigation, Pinia owns ephemeral UI state, TanStack Query
 ## Deployment
 
 The initial Compose topology exposes only nginx. API and PostgreSQL remain on the private `control-plane` network. Production should terminate TLS through Cloudflare Tunnel or a host reverse proxy and restrict the origin to Cloudflare/private networks.
-

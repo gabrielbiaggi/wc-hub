@@ -14,15 +14,26 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	proxmoxadapter "github.com/webcreations/wc-hub/back/internal/adapters/proxmox"
 	auditrepo "github.com/webcreations/wc-hub/back/internal/audit/repository"
 	authapp "github.com/webcreations/wc-hub/back/internal/auth/application"
 	authdomain "github.com/webcreations/wc-hub/back/internal/auth/domain"
 	authrepo "github.com/webcreations/wc-hub/back/internal/auth/repository"
 	inventorydomain "github.com/webcreations/wc-hub/back/internal/inventory/domain"
 	inventoryrepo "github.com/webcreations/wc-hub/back/internal/inventory/repository"
+	jobapp "github.com/webcreations/wc-hub/back/internal/jobs/application"
+	jobdomain "github.com/webcreations/wc-hub/back/internal/jobs/domain"
+	jobrepo "github.com/webcreations/wc-hub/back/internal/jobs/repository"
 	overview "github.com/webcreations/wc-hub/back/internal/overview/application"
 	"github.com/webcreations/wc-hub/back/internal/platform/config"
+	proxmoxapp "github.com/webcreations/wc-hub/back/internal/proxmox/application"
+	proxmoxrepo "github.com/webcreations/wc-hub/back/internal/proxmox/repository"
+	schedulerrepo "github.com/webcreations/wc-hub/back/internal/scheduler/repository"
 	security "github.com/webcreations/wc-hub/back/internal/security/domain"
+	telemetryapp "github.com/webcreations/wc-hub/back/internal/telemetry/application"
+	telemetryrepo "github.com/webcreations/wc-hub/back/internal/telemetry/repository"
+	terminalapp "github.com/webcreations/wc-hub/back/internal/terminal/application"
+	terminalrepo "github.com/webcreations/wc-hub/back/internal/terminal/repository"
 )
 
 type contextKey string
@@ -31,14 +42,21 @@ const sessionContextKey contextKey = "session"
 const sessionCookie = "wc_hub_session"
 
 type App struct {
-	cfg       config.Config
-	logger    *slog.Logger
-	overview  *overview.Service
-	policy    *security.Engine
-	db        *pgxpool.Pool
-	auth      *authapp.Service
-	audit     *auditrepo.Postgres
-	inventory inventorydomain.Repository
+	cfg             config.Config
+	logger          *slog.Logger
+	overview        *overview.Service
+	policy          *security.Engine
+	db              *pgxpool.Pool
+	auth            *authapp.Service
+	audit           *auditrepo.Postgres
+	inventory       inventorydomain.Repository
+	jobs            *jobrepo.Postgres
+	proxmox         *proxmoxrepo.Postgres
+	proxmoxClient   *proxmoxadapter.Client
+	telemetry       *telemetryrepo.Postgres
+	terminal        *terminalrepo.Postgres
+	terminalGateway *terminalapp.Gateway
+	cancelWorkers   context.CancelFunc
 }
 
 func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, func(), error) {
@@ -60,7 +78,43 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, fun
 	}
 	application.audit = auditrepo.NewPostgres(pool)
 	application.inventory = inventoryrepo.NewPostgres(pool)
-	return application, func() { pool.Close() }, nil
+	application.jobs = jobrepo.NewPostgres(pool)
+	application.proxmox = proxmoxrepo.NewPostgres(pool)
+	application.telemetry = telemetryrepo.NewPostgres(pool)
+	application.terminal = terminalrepo.NewPostgres(pool)
+	if cfg.ProxmoxURL != "" {
+		client, clientErr := proxmoxadapter.New(cfg.ProxmoxURL, cfg.ProxmoxTokenID, []byte(cfg.ProxmoxSecret), cfg.ProxmoxTLSCA)
+		if clientErr != nil {
+			logger.Error("Proxmox adapter disabled", "error", clientErr)
+		} else {
+			application.proxmoxClient = client
+			if _, err = pool.Exec(ctx, `UPDATE schedules SET enabled=true,next_run_at=LEAST(next_run_at,now()) WHERE name='proxmox-inventory-sync'`); err != nil {
+				logger.Error("enable Proxmox schedule failed", "error", err)
+			}
+		}
+	}
+	if gateway, gatewayErr := terminalapp.NewGateway(application.terminal, cfg.SSHPrivateKeyPath, cfg.SSHKnownHostsPath, cfg.PublicURL); gatewayErr != nil {
+		logger.Warn("SSH terminal disabled", "error", gatewayErr)
+	} else {
+		application.terminalGateway = gateway
+		gateway.SetAudit(func(ctx context.Context, target terminalrepo.Target, status, reason string) {
+			_ = application.audit.Append(ctx, auditrepo.Record{ActorID: target.UserID, Action: "terminal.session." + status, Scope: security.ScopeRemote, ResourceType: "terminal_session", ResourceID: target.SessionID, TargetName: target.HostName, Risk: security.RiskDangerous, Decision: "allowed", Reason: reason})
+		})
+	}
+	workerCtx, cancelWorkers := context.WithCancel(ctx)
+	application.cancelWorkers = cancelWorkers
+	handlers := []jobdomain.Handler{proxmoxapp.NewSyncHandler(application.proxmoxClient, application.proxmox, cfg.ProxmoxURL), telemetryapp.NewMaintenanceHandler(application.telemetry)}
+	runner := jobapp.NewRunner(application.jobs, handlers, logger, cfg.WorkerID, cfg.WorkerCount)
+	runner.SetResultHook(func(ctx context.Context, job jobdomain.Job, status string, jobErr error) {
+		reason := ""
+		if jobErr != nil {
+			reason = jobErr.Error()
+		}
+		_ = application.audit.Append(ctx, auditrepo.Record{Action: "job." + status, Scope: security.ScopeRemote, ResourceType: "job", ResourceID: job.ID, TargetName: job.Kind, Risk: security.RiskDangerous, Decision: map[string]string{"succeeded": "allowed", "failed": "denied"}[status], Reason: reason})
+	})
+	runner.Start(workerCtx)
+	schedulerrepo.NewPostgres(pool, application.jobs).Start(workerCtx)
+	return application, func() { cancelWorkers(); pool.Close() }, nil
 }
 
 func (a *App) Handler() http.Handler {
@@ -92,6 +146,17 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/admin/permissions", a.protect("", a.adminOnly(a.listAdminPermissions)))
 	mux.HandleFunc("GET /api/v1/alerts", a.protect("overview.read", a.listAlerts))
 	mux.HandleFunc("PATCH /api/v1/alerts/{id}", a.protect("hosts.execute.safe", a.updateAlert))
+	mux.HandleFunc("GET /api/v1/proxmox/summary", a.protect("proxmox.read", a.proxmoxSummary))
+	mux.HandleFunc("POST /api/v1/proxmox/sync", a.protect("proxmox.sync", a.proxmoxSync))
+	mux.HandleFunc("GET /api/v1/jobs", a.protect("jobs.read", a.listJobs))
+	mux.HandleFunc("POST /api/v1/jobs", a.protect("jobs.manage", a.createJob))
+	mux.HandleFunc("POST /api/v1/agents/hosts/{host_id}/token", a.protect("agents.manage", a.provisionAgentToken))
+	mux.HandleFunc("POST /agent/v1/metrics", a.ingestAgentMetrics)
+	mux.HandleFunc("POST /agent/v1/events", a.ingestAgentEvent)
+	mux.HandleFunc("GET /api/v1/telemetry/hosts", a.protect("telemetry.read", a.hostTelemetry))
+	mux.HandleFunc("POST /api/v1/terminal/tickets", a.protect("terminal.connect", a.createTerminalTicket))
+	mux.HandleFunc("GET /api/v1/terminal/sessions", a.protect("audit.read", a.terminalSessions))
+	mux.HandleFunc("GET /ws/terminal", a.terminalWebSocket)
 	return a.middleware(mux)
 }
 

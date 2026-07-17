@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-const modules = ['proxmox','cloud','kubernetes','docker','github','tunnels','terraform','telemetry','remote-access','storage']
+const modules = ['cloud','kubernetes','docker','github','tunnels','terraform','storage']
 export default createRouter({
   history: createWebHistory(),
   routes: [
@@ -11,6 +11,10 @@ export default createRouter({
     { path: '/integrations', name: 'integrations', component: () => import('@/views/IntegrationsView.vue') },
     { path: '/notifications', name: 'notifications', component: () => import('@/views/NotificationsView.vue') },
     { path: '/settings', name: 'settings', component: () => import('@/views/SettingsView.vue') },
+    { path: '/proxmox', name: 'proxmox', component: () => import('@/views/ProxmoxView.vue') },
+    { path: '/telemetry', name: 'telemetry', component: () => import('@/views/TelemetryView.vue') },
+    { path: '/jobs', name: 'jobs', component: () => import('@/views/JobsView.vue') },
+    { path: '/remote-access', name: 'remote-access', component: () => import('@/views/TerminalView.vue') },
     ...modules.map((name) => ({ path: `/${name}`, name, component: () => import('@/views/ModuleView.vue'), props: { module: name } })),
   ],
 })

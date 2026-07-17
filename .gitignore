@@ -13,3 +13,5 @@ back/coverage.out
 infra/terraform/.terraform/
 infra/terraform/*.tfstate*
 ops/data/
+ops/secrets/*
+!ops/secrets/README.md

@@ -16,3 +16,6 @@ button, a, input { -webkit-tap-highlight-color: transparent; }
 ::-webkit-scrollbar-thumb { background: #263247; border-radius: 8px; }
 ::-webkit-scrollbar-thumb:hover { background: #35445e; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
+.splitpanes.default-theme .splitpanes__pane { background: transparent; }
+.splitpanes.default-theme .splitpanes__splitter { background: #111a28; border: 0; min-width: 5px; }
+.splitpanes.default-theme .splitpanes__splitter::before, .splitpanes.default-theme .splitpanes__splitter::after { background: #334155; }

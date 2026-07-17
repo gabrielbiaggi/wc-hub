@@ -17,6 +17,9 @@ export interface AdminUser { id:string; email:string; display_name:string; totp_
 export interface Role { id:string; slug:string; name:string; description:string; permissions:string[]; user_count:number }
 export interface Permission { id:string; slug:string; description:string; risk:'safe'|'dangerous'|'critical' }
 export interface Alert { id:string; resource_type:string; resource_id?:string; severity:string; title:string; description:string; status:'open'|'acknowledged'|'resolved'; acknowledged_at?:string; resolved_at?:string; created_at:string }
+export interface ProxmoxSummary { configured:boolean; status:string; last_checked_at?:string; nodes:number; virtual_machines:number; containers:number; storage_pools:number }
+export interface Job { id:string; kind:string; payload:Record<string,unknown>; status:string; priority:number; attempts:number; max_attempts:number; run_after:string; locked_by?:string; last_error?:string; created_at:string; started_at?:string; finished_at?:string }
+export interface HostMetric { host_id:string; host_name:string; metric:string; value:number; unit:string; captured_at:string }
 
 export const getOverview = async () => (await api.get<Overview>('/v1/overview')).data
 export const getIntegrations = async () => (await api.get<{items:Integration[]}>('/v1/integrations')).data.items
@@ -37,3 +40,9 @@ export const getAlerts = async () => (await api.get<{items:Alert[]}>('/v1/alerts
 export const updateAlert = async (id:string,status:Alert['status']) => (await api.patch<Alert>(`/v1/alerts/${id}`,{status})).data
 export const enrollTOTP = async () => (await api.post<{secret:string;otpauth_uri:string}>('/v1/auth/totp/enroll', {})).data
 export const confirmTOTP = async (code:string) => (await api.post<{totp_enabled:boolean}>('/v1/auth/totp/confirm', {code})).data
+export const getProxmoxSummary = async () => (await api.get<ProxmoxSummary>('/v1/proxmox/summary')).data
+export const syncProxmox = async () => (await api.post<Job>('/v1/proxmox/sync', {})).data
+export const getJobs = async () => (await api.get<{items:Job[]}>('/v1/jobs')).data.items
+export const enqueueJob = async (kind:string) => (await api.post<Job>('/v1/jobs', {kind,payload:{},priority:100,max_attempts:5})).data
+export const getHostTelemetry = async () => (await api.get<{items:HostMetric[]}>('/v1/telemetry/hosts')).data.items
+export const createTerminalTicket = async (host_id:string,confirmation:string,totp_code:string) => (await api.post<{ticket:string;session_id:string;expires_in:number}>('/v1/terminal/tickets',{host_id,confirmation,totp_code})).data

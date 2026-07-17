@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -9,8 +10,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/webcreations/wc-hub/back/internal/app"
 	"github.com/webcreations/wc-hub/back/internal/platform/config"
+	telemetryrepo "github.com/webcreations/wc-hub/back/internal/telemetry/repository"
 )
 
 func main() {
@@ -21,6 +24,25 @@ func main() {
 		if err != nil || resp.StatusCode != http.StatusOK {
 			os.Exit(1)
 		}
+		return
+	}
+	if len(os.Args) == 3 && os.Args[1] == "provision-agent-token" {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+		if err != nil {
+			panic(err)
+		}
+		defer pool.Close()
+		var hostID string
+		if err = pool.QueryRow(ctx, `SELECT id::text FROM hosts WHERE name=$1`, os.Args[2]).Scan(&hostID); err != nil {
+			panic(err)
+		}
+		token, err := telemetryrepo.NewPostgres(pool).ProvisionToken(ctx, hostID, "")
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println(token)
 		return
 	}
 

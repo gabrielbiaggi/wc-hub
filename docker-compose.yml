@@ -44,9 +44,19 @@ services:
       WC_HUB_SECURE_COOKIES: ${WC_HUB_SECURE_COOKIES:-false}
       WC_HUB_ENCRYPTION_KEY: ${WC_HUB_ENCRYPTION_KEY:-}
       WC_HUB_TOTP_ISSUER: ${WC_HUB_TOTP_ISSUER:-WC Hub}
+      WC_HUB_WORKER_ID: ${WC_HUB_WORKER_ID:-wc-hub-1}
+      WC_HUB_WORKER_COUNT: ${WC_HUB_WORKER_COUNT:-2}
+      PROXMOX_API_URL: ${PROXMOX_API_URL:-}
+      PROXMOX_API_TOKEN_ID: ${PROXMOX_API_TOKEN_ID:-}
+      PROXMOX_API_TOKEN_SECRET: ${PROXMOX_API_TOKEN_SECRET:-}
+      PROXMOX_TLS_CA_PATH: ${PROXMOX_TLS_CA_PATH:-/run/secrets/proxmox_ca.pem}
+      WC_HUB_SSH_PRIVATE_KEY_PATH: ${WC_HUB_SSH_PRIVATE_KEY_PATH:-/run/secrets/ssh_private_key}
+      WC_HUB_SSH_KNOWN_HOSTS_PATH: ${WC_HUB_SSH_KNOWN_HOSTS_PATH:-/run/secrets/ssh_known_hosts}
     depends_on:
       migrate:
         condition: service_completed_successfully
+    volumes:
+      - ./ops/secrets:/run/secrets:ro
     healthcheck:
       test: ["CMD", "/app/wc-hub", "healthcheck"]
       interval: 10s
@@ -72,6 +82,66 @@ services:
     restart: unless-stopped
     read_only: true
     tmpfs: [/var/cache/nginx, /var/run, /tmp]
+    security_opt: [no-new-privileges:true]
+
+  node-exporter:
+    image: quay.io/prometheus/node-exporter:v1.11.1
+    profiles: [agent]
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro,rslave
+    networks: [control-plane]
+    restart: unless-stopped
+    read_only: true
+    security_opt: [no-new-privileges:true]
+
+  host-agent:
+    build:
+      context: ./back
+      target: agent
+    profiles: [agent]
+    environment:
+      WC_AGENT_TOKEN: ${WC_AGENT_TOKEN:-}
+      WC_HUB_URL: http://back:8080
+      NODE_EXPORTER_URL: http://node-exporter:9100/metrics
+      DCGM_EXPORTER_URL: ${DCGM_EXPORTER_URL:-}
+      WC_AGENT_INTERVAL: ${WC_AGENT_INTERVAL:-15s}
+      WC_AGENT_SELF_PROTECTED: ${WC_AGENT_SELF_PROTECTED:-true}
+      WC_AGENT_LISTEN: 127.0.0.1:9105
+    depends_on:
+      back:
+        condition: service_healthy
+      node-exporter:
+        condition: service_started
+    volumes:
+      - ./ops/secrets:/run/secrets:ro
+    networks: [control-plane]
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+
+  dcgm-exporter:
+    image: nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless
+    profiles: [nvidia]
+    cap_add: [SYS_ADMIN]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks: [control-plane]
+    restart: unless-stopped
+    read_only: true
     security_opt: [no-new-privileges:true]
 
 networks:

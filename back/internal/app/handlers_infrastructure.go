@@ -1,0 +1,215 @@
+package app
+
+import (
+	"encoding/json"
+	auditrepo "github.com/webcreations/wc-hub/back/internal/audit/repository"
+	jobs "github.com/webcreations/wc-hub/back/internal/jobs/domain"
+	security "github.com/webcreations/wc-hub/back/internal/security/domain"
+	telemetrydomain "github.com/webcreations/wc-hub/back/internal/telemetry/domain"
+	"net/http"
+	"strings"
+	"time"
+)
+
+func (a *App) proxmoxSummary(w http.ResponseWriter, r *http.Request) {
+	summary, err := a.proxmox.Summary(r.Context(), a.proxmoxClient != nil)
+	if err != nil {
+		writeError(w, 500, "proxmox_summary_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, summary)
+}
+func (a *App) proxmoxSync(w http.ResponseWriter, r *http.Request) {
+	if a.proxmoxClient == nil {
+		writeError(w, 409, "proxmox_unconfigured", "Set PROXMOX_API_URL and scoped API token credentials.")
+		return
+	}
+	session := currentSession(r)
+	job, err := a.jobs.Enqueue(r.Context(), jobs.Enqueue{Kind: "proxmox.sync", Payload: map[string]any{"requested_at": time.Now().UTC()}, Priority: 50, CreatedBy: session.User.ID})
+	if err != nil {
+		writeError(w, 500, "enqueue_failed", err.Error())
+		return
+	}
+	_ = a.audit.Append(r.Context(), auditrepo.Record{ActorID: session.User.ID, Action: "proxmox.sync.enqueue", Scope: security.ScopeRemote, ResourceType: "job", ResourceID: job.ID, TargetName: "Proxmox", Risk: security.RiskDangerous, Decision: "allowed", RequestID: requestID(r.Context()), SourceIP: remoteIP(r)})
+	writeJSON(w, 202, job)
+}
+func (a *App) listJobs(w http.ResponseWriter, r *http.Request) {
+	items, err := a.jobs.List(r.Context(), 100)
+	if err != nil {
+		writeError(w, 500, "jobs_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"items": items})
+}
+func (a *App) createJob(w http.ResponseWriter, r *http.Request) {
+	var input jobs.Enqueue
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	allowed := map[string]bool{"proxmox.sync": true, "telemetry.maintenance": true}
+	if !allowed[input.Kind] {
+		writeError(w, 400, "job_kind_denied", "Job kind is not manually allowlisted.")
+		return
+	}
+	session := currentSession(r)
+	input.CreatedBy = session.User.ID
+	job, err := a.jobs.Enqueue(r.Context(), input)
+	if err != nil {
+		writeError(w, 500, "enqueue_failed", err.Error())
+		return
+	}
+	_ = a.audit.Append(r.Context(), auditrepo.Record{ActorID: session.User.ID, Action: "job.enqueue", Scope: security.ScopeRemote, ResourceType: "job", ResourceID: job.ID, TargetName: job.Kind, Risk: security.RiskDangerous, Decision: "allowed", RequestID: requestID(r.Context()), SourceIP: remoteIP(r)})
+	writeJSON(w, 202, job)
+}
+
+type strongConfirmation struct {
+	Confirmation string `json:"confirmation"`
+	TOTPCode     string `json:"totp_code"`
+}
+
+func (a *App) provisionAgentToken(w http.ResponseWriter, r *http.Request) {
+	var req strongConfirmation
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	session := currentSession(r)
+	hostID := r.PathValue("host_id")
+	var name string
+	var self bool
+	if err := a.db.QueryRow(r.Context(), `SELECT name,self_protected FROM hosts WHERE id=$1`, hostID).Scan(&name, &self); err != nil {
+		writeError(w, 404, "host_not_found", "Host was not found.")
+		return
+	}
+	if self {
+		writeError(w, 403, "self_protected", "Agent token rotation for the self target requires offline administration.")
+		return
+	}
+	if req.Confirmation != name || !session.User.TOTPEnabled {
+		writeError(w, 403, "strong_confirmation_failed", "Exact host name and enabled TOTP are required.")
+		return
+	}
+	verified, _ := a.auth.VerifyTOTP(r.Context(), session.User.ID, req.TOTPCode)
+	if !verified {
+		writeError(w, 403, "totp_invalid", "A valid TOTP code is required.")
+		return
+	}
+	token, err := a.telemetry.ProvisionToken(r.Context(), hostID, session.User.ID)
+	if err != nil {
+		writeError(w, 500, "agent_token_failed", err.Error())
+		return
+	}
+	_ = a.audit.Append(r.Context(), auditrepo.Record{ActorID: session.User.ID, Action: "agent.token.provision", Scope: security.ScopeRemote, ResourceType: "host", ResourceID: hostID, TargetName: name, Risk: security.RiskCritical, Decision: "allowed", RequestID: requestID(r.Context()), SourceIP: remoteIP(r)})
+	writeJSON(w, 201, map[string]string{"token": token})
+}
+func (a *App) ingestAgentMetrics(w http.ResponseWriter, r *http.Request) {
+	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	hostID, err := a.telemetry.Authenticate(r.Context(), token)
+	if err != nil {
+		writeError(w, 401, "agent_unauthorized", "Agent token is invalid.")
+		return
+	}
+	var batch telemetrydomain.Batch
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<20))
+	if err = decoder.Decode(&batch); err != nil {
+		writeError(w, 400, "metrics_invalid", "Metrics batch is invalid.")
+		return
+	}
+	if err = a.telemetry.Ingest(r.Context(), hostID, batch); err != nil {
+		writeError(w, 400, "metrics_rejected", err.Error())
+		return
+	}
+	w.WriteHeader(204)
+}
+func (a *App) ingestAgentEvent(w http.ResponseWriter, r *http.Request) {
+	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	hostID, err := a.telemetry.Authenticate(r.Context(), token)
+	if err != nil {
+		writeError(w, 401, "agent_unauthorized", "Agent token is invalid.")
+		return
+	}
+	var event struct {
+		Action   string `json:"action"`
+		Decision string `json:"decision"`
+		Reason   string `json:"reason"`
+	}
+	if !decodeJSON(w, r, &event) {
+		return
+	}
+	allowed := map[string]bool{"system.uptime": true, "docker.ps": true, "journal.tail": true, "invalid": true}
+	if !allowed[event.Action] || !(event.Decision == "allowed" || event.Decision == "denied") {
+		writeError(w, 400, "event_invalid", "Agent event is invalid.")
+		return
+	}
+	var name string
+	_ = a.db.QueryRow(r.Context(), `SELECT name FROM hosts WHERE id=$1`, hostID).Scan(&name)
+	risk := security.RiskSafe
+	if event.Action != "system.uptime" {
+		risk = security.RiskDangerous
+	}
+	_ = a.audit.Append(r.Context(), auditrepo.Record{Action: "agent." + event.Action, Scope: security.ScopeRemote, ResourceType: "host", ResourceID: hostID, TargetName: name, Risk: risk, Decision: event.Decision, Reason: event.Reason, RequestID: requestID(r.Context()), SourceIP: remoteIP(r)})
+	w.WriteHeader(204)
+}
+func (a *App) hostTelemetry(w http.ResponseWriter, r *http.Request) {
+	items, err := a.telemetry.Latest(r.Context())
+	if err != nil {
+		writeError(w, 500, "telemetry_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"items": items})
+}
+func (a *App) createTerminalTicket(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		HostID string `json:"host_id"`
+		strongConfirmation
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	session := currentSession(r)
+	var name string
+	var self bool
+	var scope string
+	if err := a.db.QueryRow(r.Context(), `SELECT name,self_protected,scope::text FROM hosts WHERE id=$1`, req.HostID).Scan(&name, &self, &scope); err != nil {
+		writeError(w, 404, "host_not_found", "Host was not found.")
+		return
+	}
+	if self || scope == "local" {
+		writeError(w, 403, "self_protected", "Terminal access to the local target is blocked.")
+		return
+	}
+	if a.terminalGateway == nil {
+		writeError(w, 503, "terminal_unavailable", "SSH key and known_hosts are not configured.")
+		return
+	}
+	if req.Confirmation != name || !session.User.TOTPEnabled {
+		writeError(w, 403, "strong_confirmation_failed", "Exact host name and enabled TOTP are required.")
+		return
+	}
+	verified, _ := a.auth.VerifyTOTP(r.Context(), session.User.ID, req.TOTPCode)
+	if !verified {
+		writeError(w, 403, "totp_invalid", "A valid TOTP code is required.")
+		return
+	}
+	token, sessionID, err := a.terminal.CreateTicket(r.Context(), session.User.ID, req.HostID, remoteIP(r))
+	if err != nil {
+		writeError(w, 400, "terminal_ticket_failed", err.Error())
+		return
+	}
+	_ = a.audit.Append(r.Context(), auditrepo.Record{ActorID: session.User.ID, Action: "terminal.ticket.create", Scope: security.ScopeRemote, ResourceType: "terminal_session", ResourceID: sessionID, TargetName: name, Risk: security.RiskDangerous, Decision: "allowed", RequestID: requestID(r.Context()), SourceIP: remoteIP(r)})
+	writeJSON(w, 201, map[string]any{"ticket": token, "session_id": sessionID, "expires_in": 45})
+}
+func (a *App) terminalSessions(w http.ResponseWriter, r *http.Request) {
+	items, err := a.terminal.Recent(r.Context())
+	if err != nil {
+		writeError(w, 500, "terminal_sessions_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"items": items})
+}
+func (a *App) terminalWebSocket(w http.ResponseWriter, r *http.Request) {
+	if a.terminalGateway == nil {
+		http.Error(w, "terminal gateway is not configured", http.StatusServiceUnavailable)
+		return
+	}
+	a.terminalGateway.ServeHTTP(w, r)
+}
