@@ -33,7 +33,7 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('keydown', 
         </div>
         <button class="hidden h-9 min-w-56 cursor-pointer items-center gap-2 rounded-lg border border-line bg-panel/70 px-3 text-left text-xs text-muted transition-colors hover:border-slate-600 hover:text-slate-300 md:flex" @click="ui.commandOpen = true"><Search class="h-3.5 w-3.5" /><span class="flex-1">Comandos e recursos</span><kbd class="rounded border border-line px-1.5 py-0.5 font-mono text-[9px]">⌘ K</kbd></button>
         <div class="hidden border-l border-line pl-4 text-right xl:block"><p class="font-mono text-xs text-slate-300">{{ now.toLocaleTimeString('pt-BR') }}</p><p class="text-[10px] text-muted">America/Belem</p></div>
-        <Button variant="ghost" class="relative px-2.5" aria-label="Notificações"><Bell class="h-4 w-4" /><span class="absolute right-2 top-1.5 h-1.5 w-1.5 rounded-full bg-warning" /></Button>
+        <RouterLink to="/notifications"><Button variant="ghost" class="relative px-2.5" aria-label="Notificações"><Bell class="h-4 w-4" /><span class="absolute right-2 top-1.5 h-1.5 w-1.5 rounded-full bg-warning" /></Button></RouterLink>
         <button class="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-signal/20 bg-signal/10 font-mono text-xs font-bold text-signal transition-colors hover:bg-signal/20" :title="`${auth.user?.display_name} · sair`" aria-label="Encerrar sessão" @click="auth.logout()">{{ auth.user?.display_name?.slice(0,2).toUpperCase() ?? 'WC' }}</button>
       </header>
       <main class="relative p-4 md:p-7"><slot /></main>

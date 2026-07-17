@@ -13,6 +13,10 @@ export interface Overview { generated_at: string; environment: string; self_prot
 export interface Integration { id:string; name:string; provider:string; status:string; config:Record<string,unknown>; last_checked_at?:string; created_at:string }
 export interface Host { id:string; integration_id?:string; name:string; hostname:string; scope:'local'|'remote'|'cloud'; status:string; self_protected:boolean; labels:Record<string,unknown>; facts:Record<string,unknown>; last_seen_at?:string; created_at:string }
 export interface AuditEntry { id:string; actor_email?:string; action:string; scope:string; resource_type:string; resource_id?:string; target_name?:string; risk:string; decision:string; reason?:string; request_id?:string; occurred_at:string; event_hash:string }
+export interface AdminUser { id:string; email:string; display_name:string; totp_enabled:boolean; disabled_at?:string; last_login_at?:string; created_at:string; roles:string[] }
+export interface Role { id:string; slug:string; name:string; description:string; permissions:string[]; user_count:number }
+export interface Permission { id:string; slug:string; description:string; risk:'safe'|'dangerous'|'critical' }
+export interface Alert { id:string; resource_type:string; resource_id?:string; severity:string; title:string; description:string; status:'open'|'acknowledged'|'resolved'; acknowledged_at?:string; resolved_at?:string; created_at:string }
 
 export const getOverview = async () => (await api.get<Overview>('/v1/overview')).data
 export const getIntegrations = async () => (await api.get<{items:Integration[]}>('/v1/integrations')).data.items
@@ -20,5 +24,16 @@ export const createIntegration = async (body:Pick<Integration,'name'|'provider'>
 export const getHosts = async () => (await api.get<{items:Host[]}>('/v1/hosts')).data.items
 export const createHost = async (body:Pick<Host,'name'|'hostname'|'scope'|'self_protected'> & Partial<Host>) => (await api.post<Host>('/v1/hosts', body)).data
 export const getAudit = async () => (await api.get<{items:AuditEntry[]}>('/v1/audit')).data.items
+export const getAdminUsers = async () => (await api.get<{items:AdminUser[]}>('/v1/admin/users')).data.items
+export const createAdminUser = async (body:{email:string;display_name:string;password:string;role_ids:string[]}) => (await api.post<AdminUser>('/v1/admin/users',body)).data
+export const updateAdminUser = async (id:string,body:{email:string;display_name:string;disabled:boolean;role_ids:string[]}) => (await api.patch<AdminUser>(`/v1/admin/users/${id}`,body)).data
+export const disableAdminUser = async (id:string) => api.delete(`/v1/admin/users/${id}`)
+export const getRoles = async () => (await api.get<{items:Role[]}>('/v1/admin/roles')).data.items
+export const createRole = async (body:{slug:string;name:string;description:string;permission_ids:string[]}) => (await api.post<Role>('/v1/admin/roles',body)).data
+export const updateRole = async (id:string,body:{name:string;description:string;permission_ids:string[]}) => (await api.patch<Role>(`/v1/admin/roles/${id}`,body)).data
+export const deleteRole = async (id:string) => api.delete(`/v1/admin/roles/${id}`)
+export const getPermissions = async () => (await api.get<{items:Permission[]}>('/v1/admin/permissions')).data.items
+export const getAlerts = async () => (await api.get<{items:Alert[]}>('/v1/alerts')).data.items
+export const updateAlert = async (id:string,status:Alert['status']) => (await api.patch<Alert>(`/v1/alerts/${id}`,{status})).data
 export const enrollTOTP = async () => (await api.post<{secret:string;otpauth_uri:string}>('/v1/auth/totp/enroll', {})).data
 export const confirmTOTP = async (code:string) => (await api.post<{totp_enabled:boolean}>('/v1/auth/totp/confirm', {code})).data
