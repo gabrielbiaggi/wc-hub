@@ -2,7 +2,7 @@
 
 Central de operações para infraestrutura, projetos e acesso remoto. O WC Hub é um monorepo com um backend Go responsável por políticas, integrações, execução de jobs e auditoria, e um shell Vue focado em observabilidade e controle.
 
-> Estado: scaffold operacional. A API, o dashboard inicial, o schema, o modo `self-protected` e o ambiente Compose estão funcionais; adapters externos começam com contratos explícitos e devem receber credenciais pela camada segura de configurações.
+> Estado: control plane inicial funcional. Autenticação, bootstrap único, sessões HttpOnly, CSRF, RBAC, TOTP criptografado, audit trail encadeado, inventário, dashboard e ambiente Compose estão operacionais. Adapters externos começam com contratos explícitos e devem receber credenciais pela camada segura de configurações.
 
 ## Arquitetura
 

@@ -40,6 +40,10 @@ services:
       WC_HUB_SELF_PROTECTED: ${WC_HUB_SELF_PROTECTED:-true}
       WC_HUB_LOCAL_TARGET_NAME: ${WC_HUB_LOCAL_TARGET_NAME:-wc-hub-local}
       WC_HUB_LOCAL_COMMAND_ALLOWLIST: ${WC_HUB_LOCAL_COMMAND_ALLOWLIST:-uptime,df,free,ip,ss,journalctl,docker,kubectl}
+      WC_HUB_SESSION_TTL: ${WC_HUB_SESSION_TTL:-12h}
+      WC_HUB_SECURE_COOKIES: ${WC_HUB_SECURE_COOKIES:-false}
+      WC_HUB_ENCRYPTION_KEY: ${WC_HUB_ENCRYPTION_KEY:-}
+      WC_HUB_TOTP_ISSUER: ${WC_HUB_TOTP_ISSUER:-WC Hub}
     depends_on:
       migrate:
         condition: service_completed_successfully

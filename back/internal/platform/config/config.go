@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -16,6 +17,10 @@ type Config struct {
 	SelfProtected   bool
 	LocalAllowlist  []string
 	LogLevelValue   string
+	SessionTTL      time.Duration
+	SecureCookies   bool
+	EncryptionKey   string
+	TOTPIssuer      string
 }
 
 func Load() Config {
@@ -28,7 +33,19 @@ func Load() Config {
 		SelfProtected:   envBool("WC_HUB_SELF_PROTECTED", true),
 		LocalAllowlist:  split(env("WC_HUB_LOCAL_COMMAND_ALLOWLIST", "uptime,df,free,ip,ss,journalctl,docker,kubectl")),
 		LogLevelValue:   env("WC_HUB_LOG_LEVEL", "info"),
+		SessionTTL:      envDuration("WC_HUB_SESSION_TTL", 12*time.Hour),
+		SecureCookies:   envBool("WC_HUB_SECURE_COOKIES", false),
+		EncryptionKey:   env("WC_HUB_ENCRYPTION_KEY", ""),
+		TOTPIssuer:      env("WC_HUB_TOTP_ISSUER", "WC Hub"),
 	}
+}
+
+func envDuration(key string, fallback time.Duration) time.Duration {
+	value, err := time.ParseDuration(os.Getenv(key))
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
 }
 
 func (c Config) LogLevel() slog.Level {

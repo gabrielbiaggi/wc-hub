@@ -5,7 +5,7 @@ import { Activity, Boxes, Cloud, Container, FolderGit2, Gauge, GitBranch, HardDr
 import { useUiStore } from '@/stores/ui'
 const route = useRoute(); const ui = useUiStore()
 const groups = [
-  { label: 'Command', items: [{to:'/', label:'Overview', icon:PanelsTopLeft},{to:'/telemetry', label:'Telemetry', icon:Activity}] },
+  { label: 'Command', items: [{to:'/', label:'Overview', icon:PanelsTopLeft},{to:'/inventory', label:'Inventory', icon:Boxes},{to:'/telemetry', label:'Telemetry', icon:Activity}] },
   { label: 'Infrastructure', items: [{to:'/proxmox',label:'Proxmox',icon:Server},{to:'/cloud',label:'Oracle / Cloud',icon:Cloud},{to:'/kubernetes',label:'K3s / Kubernetes',icon:Waypoints},{to:'/docker',label:'Docker',icon:Container}] },
   { label: 'Delivery', items: [{to:'/github',label:'GitHub',icon:FolderGit2},{to:'/tunnels',label:'Tunnels',icon:Network},{to:'/terraform',label:'Terraform',icon:GitBranch}] },
   { label: 'Access', items: [{to:'/remote-access',label:'Remote Access',icon:TerminalSquare},{to:'/storage',label:'Storage',icon:HardDrive}] },
@@ -23,4 +23,3 @@ const isActive = (to:string) => computed(() => route.path === to).value
     <div class="m-3 rounded-xl border border-line bg-panel/60 p-3"><div class="flex items-center gap-2"><RadioTower class="h-3.5 w-3.5 text-signal" /><span class="font-mono text-[10px] uppercase tracking-wider text-slate-300">Control plane</span><span class="ml-auto h-1.5 w-1.5 animate-pulse rounded-full bg-signal" /></div><div class="mt-3 flex items-center gap-2 text-[11px] text-muted"><Boxes class="h-3.5 w-3.5" /><span>Self-protected</span><span class="ml-auto font-mono text-signal">ON</span></div></div>
   </aside>
 </template>
-

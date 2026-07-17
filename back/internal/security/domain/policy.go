@@ -28,7 +28,8 @@ type ActionRequest struct {
 	TargetName          string `json:"target_name"`
 	TargetSelfProtected bool   `json:"target_self_protected"`
 	Confirmation        string `json:"confirmation,omitempty"`
-	TOTPVerified        bool   `json:"totp_verified"`
+	TOTPVerified        bool   `json:"-"`
+	TOTPCode            string `json:"totp_code,omitempty"`
 }
 
 type Decision struct {
