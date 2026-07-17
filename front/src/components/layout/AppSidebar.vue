@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Activity, Boxes, Cloud, Container, FolderGit2, Gauge, GitBranch, HardDrive, Network, PanelsTopLeft, RadioTower, Server, Settings, ShieldCheck, TerminalSquare, Waypoints, X } from 'lucide-vue-next'
+import { Activity, Bell, Boxes, Cloud, CloudCog, Container, FolderGit2, Gauge, GitBranch, HardDrive, Network, PanelsTopLeft, RadioTower, Server, Settings, ShieldCheck, TerminalSquare, UserRoundCog, Waypoints, X } from 'lucide-vue-next'
 import { useUiStore } from '@/stores/ui'
 const route = useRoute(); const ui = useUiStore()
 const groups = [
@@ -9,7 +9,7 @@ const groups = [
   { label: 'Infrastructure', items: [{to:'/proxmox',label:'Proxmox',icon:Server},{to:'/cloud',label:'Oracle / Cloud',icon:Cloud},{to:'/kubernetes',label:'K3s / Kubernetes',icon:Waypoints},{to:'/docker',label:'Docker',icon:Container}] },
   { label: 'Delivery', items: [{to:'/github',label:'GitHub',icon:FolderGit2},{to:'/tunnels',label:'Tunnels',icon:Network},{to:'/terraform',label:'Terraform',icon:GitBranch},{to:'/jobs',label:'Jobs',icon:RadioTower}] },
   { label: 'Access', items: [{to:'/remote-access',label:'Remote Access',icon:TerminalSquare},{to:'/storage',label:'Storage',icon:HardDrive}] },
-  { label: 'Governance', items: [{to:'/audit',label:'Audit Logs',icon:ShieldCheck},{to:'/settings',label:'Settings',icon:Settings}] },
+  { label: 'Governance', items: [{to:'/admin',label:'Access control',icon:UserRoundCog},{to:'/integrations',label:'Integrations',icon:CloudCog},{to:'/notifications',label:'Notifications',icon:Bell},{to:'/audit',label:'Audit Logs',icon:ShieldCheck},{to:'/settings',label:'Settings',icon:Settings}] },
 ]
 const isActive = (to:string) => computed(() => route.path === to).value
 </script>
