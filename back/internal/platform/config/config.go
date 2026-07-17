@@ -9,40 +9,63 @@ import (
 )
 
 type Config struct {
-	Environment     string
-	HTTPAddr        string
-	PublicURL       string
-	DatabaseURL     string
-	LocalTargetName string
-	SelfProtected   bool
-	LocalAllowlist  []string
-	LogLevelValue   string
-	SessionTTL      time.Duration
-	SecureCookies   bool
-	EncryptionKey   string
-	TOTPIssuer      string
+	Environment       string
+	HTTPAddr          string
+	PublicURL         string
+	DatabaseURL       string
+	LocalTargetName   string
+	SelfProtected     bool
+	LocalAllowlist    []string
+	LogLevelValue     string
+	SessionTTL        time.Duration
+	SecureCookies     bool
+	EncryptionKey     string
+	TOTPIssuer        string
+	ProxmoxURL        string
+	ProxmoxTokenID    string
+	ProxmoxSecret     string
+	ProxmoxTLSCA      string
+	WorkerID          string
+	WorkerCount       int
+	SSHPrivateKeyPath string
+	SSHKnownHostsPath string
 }
 
 func Load() Config {
 	return Config{
-		Environment:     env("WC_HUB_ENV", "development"),
-		HTTPAddr:        env("WC_HUB_HTTP_ADDR", ":8080"),
-		PublicURL:       env("WC_HUB_PUBLIC_URL", "http://localhost:5173"),
-		DatabaseURL:     env("WC_HUB_DATABASE_URL", ""),
-		LocalTargetName: env("WC_HUB_LOCAL_TARGET_NAME", "wc-hub-local"),
-		SelfProtected:   envBool("WC_HUB_SELF_PROTECTED", true),
-		LocalAllowlist:  split(env("WC_HUB_LOCAL_COMMAND_ALLOWLIST", "uptime,df,free,ip,ss,journalctl,docker,kubectl")),
-		LogLevelValue:   env("WC_HUB_LOG_LEVEL", "info"),
-		SessionTTL:      envDuration("WC_HUB_SESSION_TTL", 12*time.Hour),
-		SecureCookies:   envBool("WC_HUB_SECURE_COOKIES", false),
-		EncryptionKey:   env("WC_HUB_ENCRYPTION_KEY", ""),
-		TOTPIssuer:      env("WC_HUB_TOTP_ISSUER", "WC Hub"),
+		Environment:       env("WC_HUB_ENV", "development"),
+		HTTPAddr:          env("WC_HUB_HTTP_ADDR", ":8080"),
+		PublicURL:         env("WC_HUB_PUBLIC_URL", "http://localhost:5173"),
+		DatabaseURL:       env("WC_HUB_DATABASE_URL", ""),
+		LocalTargetName:   env("WC_HUB_LOCAL_TARGET_NAME", "wc-hub-local"),
+		SelfProtected:     envBool("WC_HUB_SELF_PROTECTED", true),
+		LocalAllowlist:    split(env("WC_HUB_LOCAL_COMMAND_ALLOWLIST", "uptime,df,free,ip,ss,journalctl,docker,kubectl")),
+		LogLevelValue:     env("WC_HUB_LOG_LEVEL", "info"),
+		SessionTTL:        envDuration("WC_HUB_SESSION_TTL", 12*time.Hour),
+		SecureCookies:     envBool("WC_HUB_SECURE_COOKIES", false),
+		EncryptionKey:     env("WC_HUB_ENCRYPTION_KEY", ""),
+		TOTPIssuer:        env("WC_HUB_TOTP_ISSUER", "WC Hub"),
+		ProxmoxURL:        strings.TrimRight(env("PROXMOX_API_URL", ""), "/"),
+		ProxmoxTokenID:    env("PROXMOX_API_TOKEN_ID", ""),
+		ProxmoxSecret:     env("PROXMOX_API_TOKEN_SECRET", ""),
+		ProxmoxTLSCA:      env("PROXMOX_TLS_CA_PATH", ""),
+		WorkerID:          env("WC_HUB_WORKER_ID", "wc-hub-1"),
+		WorkerCount:       envInt("WC_HUB_WORKER_COUNT", 2),
+		SSHPrivateKeyPath: env("WC_HUB_SSH_PRIVATE_KEY_PATH", ""),
+		SSHKnownHostsPath: env("WC_HUB_SSH_KNOWN_HOSTS_PATH", ""),
 	}
 }
 
 func envDuration(key string, fallback time.Duration) time.Duration {
 	value, err := time.ParseDuration(os.Getenv(key))
 	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
+}
+func envInt(key string, fallback int) int {
+	value, err := strconv.Atoi(os.Getenv(key))
+	if err != nil || value < 1 {
 		return fallback
 	}
 	return value

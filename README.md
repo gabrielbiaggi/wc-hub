@@ -2,7 +2,7 @@
 
 Central de operações para infraestrutura, projetos e acesso remoto. O WC Hub é um monorepo com um backend Go responsável por políticas, integrações, execução de jobs e auditoria, e um shell Vue focado em observabilidade e controle.
 
-> Estado: control plane inicial funcional. Autenticação, bootstrap único, sessões HttpOnly, CSRF, RBAC, TOTP criptografado, audit trail encadeado, inventário, dashboard e ambiente Compose estão operacionais. Adapters externos começam com contratos explícitos e devem receber credenciais pela camada segura de configurações.
+> Estado: control plane funcional em expansão. Além da identidade e governança, já existem adapter Proxmox read-only, inventário transacional, agent Linux, node_exporter/DCGM ingestion, fila PostgreSQL, scheduler, workers e terminal SSH/WebSocket por ticket descartável. Docker, Kubernetes, GitHub, Cloudflare, storage e Terraform ainda avançam por adapters separados.
 
 ## Arquitetura
 
@@ -54,6 +54,8 @@ Overview, Proxmox, Oracle/Cloud, Kubernetes/K3s, Docker, GitHub, Tunnels, Terraf
 ## DNS e deploy
 
 O destino inicial é uma VM Ubuntu Server no Proxmox. Publique o serviço em `hub.webcreations.com.br` por Cloudflare Tunnel ou reverse proxy TLS; nunca exponha Docker socket, SSH ou Postgres à internet. A topologia é portátil para Hostinger KVM 4 por Docker Compose.
+
+Para configurar a infraestrutura real, consulte [docs/INFRASTRUCTURE_RUNTIME.md](docs/INFRASTRUCTURE_RUNTIME.md).
 
 ## Convenções
 
