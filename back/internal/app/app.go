@@ -81,6 +81,17 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/hosts", a.protect("overview.read", a.listHosts))
 	mux.HandleFunc("POST /api/v1/hosts", a.protect("hosts.execute.safe", a.createHost))
 	mux.HandleFunc("GET /api/v1/audit", a.protect("audit.read", a.listAudit))
+	mux.HandleFunc("GET /api/v1/admin/users", a.protect("", a.adminOnly(a.listAdminUsers)))
+	mux.HandleFunc("POST /api/v1/admin/users", a.protect("", a.adminOnly(a.createAdminUser)))
+	mux.HandleFunc("PATCH /api/v1/admin/users/{id}", a.protect("", a.adminOnly(a.updateAdminUser)))
+	mux.HandleFunc("DELETE /api/v1/admin/users/{id}", a.protect("", a.adminOnly(a.disableAdminUser)))
+	mux.HandleFunc("GET /api/v1/admin/roles", a.protect("", a.adminOnly(a.listAdminRoles)))
+	mux.HandleFunc("POST /api/v1/admin/roles", a.protect("", a.adminOnly(a.createAdminRole)))
+	mux.HandleFunc("PATCH /api/v1/admin/roles/{id}", a.protect("", a.adminOnly(a.updateAdminRole)))
+	mux.HandleFunc("DELETE /api/v1/admin/roles/{id}", a.protect("", a.adminOnly(a.deleteAdminRole)))
+	mux.HandleFunc("GET /api/v1/admin/permissions", a.protect("", a.adminOnly(a.listAdminPermissions)))
+	mux.HandleFunc("GET /api/v1/alerts", a.protect("overview.read", a.listAlerts))
+	mux.HandleFunc("PATCH /api/v1/alerts/{id}", a.protect("hosts.execute.safe", a.updateAlert))
 	return a.middleware(mux)
 }
 
