@@ -1,0 +1,9 @@
+tunnel: REPLACE_WITH_TUNNEL_ID
+credentials-file: /etc/cloudflared/REPLACE_WITH_TUNNEL_ID.json
+ingress:
+  - hostname: hub.webcreations.com.br
+    service: http://127.0.0.1:8088
+    originRequest:
+      noTLSVerify: false
+  - service: http_status:404
+

@@ -1,0 +1,15 @@
+.env
+.DS_Store
+node_modules/
+front/dist/
+front/*.tsbuildinfo
+front/vite.config.js
+front/vite.config.d.ts
+back/bin/
+back/coverage.out
+*.log
+.idea/
+.vscode/
+infra/terraform/.terraform/
+infra/terraform/*.tfstate*
+ops/data/

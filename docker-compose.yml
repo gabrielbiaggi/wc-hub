@@ -1,0 +1,78 @@
+name: wc-hub
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: wc_hub
+      POSTGRES_USER: wc_hub
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wc_hub -d wc_hub"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [control-plane]
+    restart: unless-stopped
+
+  migrate:
+    image: migrate/migrate:v4.18.2
+    command: ["-path", "/migrations", "-database", "postgres://wc_hub:${POSTGRES_PASSWORD:-change-me}@postgres:5432/wc_hub?sslmode=disable", "up"]
+    volumes:
+      - ./back/db/migrations:/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [control-plane]
+    restart: "no"
+
+  back:
+    build:
+      context: ./back
+      target: runtime
+    environment:
+      WC_HUB_ENV: ${WC_HUB_ENV:-production}
+      WC_HUB_HTTP_ADDR: :8080
+      WC_HUB_PUBLIC_URL: ${WC_HUB_PUBLIC_URL:-http://localhost:5173}
+      WC_HUB_DATABASE_URL: postgres://wc_hub:${POSTGRES_PASSWORD:-change-me}@postgres:5432/wc_hub?sslmode=disable
+      WC_HUB_SELF_PROTECTED: ${WC_HUB_SELF_PROTECTED:-true}
+      WC_HUB_LOCAL_TARGET_NAME: ${WC_HUB_LOCAL_TARGET_NAME:-wc-hub-local}
+      WC_HUB_LOCAL_COMMAND_ALLOWLIST: ${WC_HUB_LOCAL_COMMAND_ALLOWLIST:-uptime,df,free,ip,ss,journalctl,docker,kubectl}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/app/wc-hub", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [control-plane]
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+
+  front:
+    build:
+      context: ./front
+      args:
+        VITE_API_URL: /api
+    ports:
+      - "${WC_HUB_PORT:-8088}:8080"
+    depends_on:
+      back:
+        condition: service_healthy
+    networks: [control-plane]
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/var/cache/nginx, /var/run, /tmp]
+    security_opt: [no-new-privileges:true]
+
+networks:
+  control-plane:
+    driver: bridge
+
+volumes:
+  postgres_data:
