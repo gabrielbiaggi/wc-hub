@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/rand"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -53,6 +54,36 @@ type CredentialSourceFunc func(context.Context) (TokenEnvelope, error)
 
 func (f CredentialSourceFunc) EncryptedToken(ctx context.Context) (TokenEnvelope, error) {
 	return f(ctx)
+}
+
+// SealToken immediately converts a bootstrap secret into the envelope format
+// consumed by Client, so the adapter never retains the plaintext credential.
+func SealToken(kek, plaintext []byte) (TokenEnvelope, error) {
+	if len(kek) != 32 || len(plaintext) < 20 {
+		return TokenEnvelope{}, fmt.Errorf("Cloudflare KEK and scoped token are invalid")
+	}
+	dek := make([]byte, 32)
+	if _, err := rand.Read(dek); err != nil {
+		return TokenEnvelope{}, err
+	}
+	defer zero(dek)
+	keyAEAD, err := newGCM(kek)
+	if err != nil {
+		return TokenEnvelope{}, err
+	}
+	credentialAEAD, err := newGCM(dek)
+	if err != nil {
+		return TokenEnvelope{}, err
+	}
+	keyNonce := make([]byte, keyAEAD.NonceSize())
+	credentialNonce := make([]byte, credentialAEAD.NonceSize())
+	if _, err = rand.Read(keyNonce); err != nil {
+		return TokenEnvelope{}, err
+	}
+	if _, err = rand.Read(credentialNonce); err != nil {
+		return TokenEnvelope{}, err
+	}
+	return TokenEnvelope{WrappedKey: keyAEAD.Seal(nil, keyNonce, dek, []byte("wc-hub/cloudflare/dek/v1")), KeyNonce: keyNonce, Ciphertext: credentialAEAD.Seal(nil, credentialNonce, plaintext, []byte("wc-hub/cloudflare/token/v1")), CredentialNonce: credentialNonce}, nil
 }
 
 // EnvelopeDecryptor unwraps a credential at the immediate adapter boundary.

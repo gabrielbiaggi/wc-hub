@@ -2,7 +2,7 @@ package dockerapp
 
 import "net/http"
 
-const ReadPermission = "overview.read"
+const ReadPermission = "docker.read"
 
 type AuthMiddleware func(permission string, next http.HandlerFunc) http.HandlerFunc
 

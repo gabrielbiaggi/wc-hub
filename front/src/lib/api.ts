@@ -46,3 +46,10 @@ export const getJobs = async () => (await api.get<{items:Job[]}>('/v1/jobs')).da
 export const enqueueJob = async (kind:string) => (await api.post<Job>('/v1/jobs', {kind,payload:{},priority:100,max_attempts:5})).data
 export const getHostTelemetry = async () => (await api.get<{items:HostMetric[]}>('/v1/telemetry/hosts')).data.items
 export const createTerminalTicket = async (host_id:string,confirmation:string,totp_code:string) => (await api.post<{ticket:string;session_id:string;expires_in:number}>('/v1/terminal/tickets',{host_id,confirmation,totp_code})).data
+
+export * from './api_docker'
+export * from './api_kubernetes'
+export * from './api_cloudflare'
+export * from './api_github'
+export * from './api_terraform'
+export * from './api_storage'

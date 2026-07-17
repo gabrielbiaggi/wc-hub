@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -14,26 +15,38 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	cloudflareadapter "github.com/webcreations/wc-hub/back/internal/adapters/cloudflare"
+	dockeradapter "github.com/webcreations/wc-hub/back/internal/adapters/docker"
+	githubadapter "github.com/webcreations/wc-hub/back/internal/adapters/github"
+	kubernetesadapter "github.com/webcreations/wc-hub/back/internal/adapters/kubernetes"
+	mergerfsadapter "github.com/webcreations/wc-hub/back/internal/adapters/mergerfs"
 	proxmoxadapter "github.com/webcreations/wc-hub/back/internal/adapters/proxmox"
+	terraformadapter "github.com/webcreations/wc-hub/back/internal/adapters/terraform"
 	auditrepo "github.com/webcreations/wc-hub/back/internal/audit/repository"
 	authapp "github.com/webcreations/wc-hub/back/internal/auth/application"
 	authdomain "github.com/webcreations/wc-hub/back/internal/auth/domain"
 	authrepo "github.com/webcreations/wc-hub/back/internal/auth/repository"
+	cloudflareapp "github.com/webcreations/wc-hub/back/internal/cloudflareapp"
+	dockerapp "github.com/webcreations/wc-hub/back/internal/dockerapp"
+	githubapp "github.com/webcreations/wc-hub/back/internal/githubapp"
 	inventorydomain "github.com/webcreations/wc-hub/back/internal/inventory/domain"
 	inventoryrepo "github.com/webcreations/wc-hub/back/internal/inventory/repository"
 	jobapp "github.com/webcreations/wc-hub/back/internal/jobs/application"
 	jobdomain "github.com/webcreations/wc-hub/back/internal/jobs/domain"
 	jobrepo "github.com/webcreations/wc-hub/back/internal/jobs/repository"
+	kubernetesapp "github.com/webcreations/wc-hub/back/internal/kubernetesapp"
 	overview "github.com/webcreations/wc-hub/back/internal/overview/application"
 	"github.com/webcreations/wc-hub/back/internal/platform/config"
 	proxmoxapp "github.com/webcreations/wc-hub/back/internal/proxmox/application"
 	proxmoxrepo "github.com/webcreations/wc-hub/back/internal/proxmox/repository"
 	schedulerrepo "github.com/webcreations/wc-hub/back/internal/scheduler/repository"
 	security "github.com/webcreations/wc-hub/back/internal/security/domain"
+	storageapp "github.com/webcreations/wc-hub/back/internal/storageapp"
 	telemetryapp "github.com/webcreations/wc-hub/back/internal/telemetry/application"
 	telemetryrepo "github.com/webcreations/wc-hub/back/internal/telemetry/repository"
 	terminalapp "github.com/webcreations/wc-hub/back/internal/terminal/application"
 	terminalrepo "github.com/webcreations/wc-hub/back/internal/terminal/repository"
+	terraformapp "github.com/webcreations/wc-hub/back/internal/terraformapp"
 )
 
 type contextKey string
@@ -42,21 +55,27 @@ const sessionContextKey contextKey = "session"
 const sessionCookie = "wc_hub_session"
 
 type App struct {
-	cfg             config.Config
-	logger          *slog.Logger
-	overview        *overview.Service
-	policy          *security.Engine
-	db              *pgxpool.Pool
-	auth            *authapp.Service
-	audit           *auditrepo.Postgres
-	inventory       inventorydomain.Repository
-	jobs            *jobrepo.Postgres
-	proxmox         *proxmoxrepo.Postgres
-	proxmoxClient   *proxmoxadapter.Client
-	telemetry       *telemetryrepo.Postgres
-	terminal        *terminalrepo.Postgres
-	terminalGateway *terminalapp.Gateway
-	cancelWorkers   context.CancelFunc
+	cfg               config.Config
+	logger            *slog.Logger
+	overview          *overview.Service
+	policy            *security.Engine
+	db                *pgxpool.Pool
+	auth              *authapp.Service
+	audit             *auditrepo.Postgres
+	inventory         inventorydomain.Repository
+	jobs              *jobrepo.Postgres
+	proxmox           *proxmoxrepo.Postgres
+	proxmoxClient     *proxmoxadapter.Client
+	dockerClient      *dockeradapter.Client
+	kubernetesClient  *kubernetesadapter.Client
+	cloudflareHandler *cloudflareapp.Handler
+	githubClient      *githubadapter.Client
+	terraformRunner   *terraformadapter.Runner
+	storageClient     *mergerfsadapter.Client
+	telemetry         *telemetryrepo.Postgres
+	terminal          *terminalrepo.Postgres
+	terminalGateway   *terminalapp.Gateway
+	cancelWorkers     context.CancelFunc
 }
 
 func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, func(), error) {
@@ -91,6 +110,73 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, fun
 			if _, err = pool.Exec(ctx, `UPDATE schedules SET enabled=true,next_run_at=LEAST(next_run_at,now()) WHERE name='proxmox-inventory-sync'`); err != nil {
 				logger.Error("enable Proxmox schedule failed", "error", err)
 			}
+		}
+	}
+	if cfg.DockerEndpoint != "" {
+		client, clientErr := dockeradapter.NewWithConfig(dockeradapter.Config{Endpoint: cfg.DockerEndpoint, CACertificatePath: cfg.DockerTLSCA, ClientCertPath: cfg.DockerClientCert, ClientKeyPath: cfg.DockerClientKey})
+		if clientErr != nil {
+			logger.Error("Docker adapter disabled", "error", clientErr)
+		} else {
+			application.dockerClient = client
+		}
+	}
+	if cfg.KubernetesURL != "" {
+		client, clientErr := kubernetesadapter.New(kubernetesadapter.Config{Endpoint: cfg.KubernetesURL, TokenPath: cfg.KubernetesToken, CAPath: cfg.KubernetesCA})
+		if clientErr != nil {
+			logger.Error("Kubernetes adapter disabled", "error", clientErr)
+		} else {
+			application.kubernetesClient = client
+		}
+	}
+	if cfg.CloudflareToken != "" && (len(cfg.CloudflareAccounts) > 0 || len(cfg.CloudflareZones) > 0) {
+		kek, decodeErr := base64.StdEncoding.DecodeString(cfg.EncryptionKey)
+		if decodeErr != nil || len(kek) != 32 {
+			logger.Error("Cloudflare adapter disabled", "error", "WC_HUB_ENCRYPTION_KEY must be base64-encoded 32 bytes")
+		} else {
+			envelope, sealErr := cloudflareadapter.SealToken(kek, []byte(cfg.CloudflareToken))
+			decryptor, decryptErr := cloudflareadapter.NewAESGCMEnvelopeDecryptor(kek)
+			if sealErr != nil || decryptErr != nil {
+				logger.Error("Cloudflare adapter disabled", "seal_error", sealErr, "decryptor_error", decryptErr)
+			} else {
+				source := cloudflareadapter.CredentialSourceFunc(func(context.Context) (cloudflareadapter.TokenEnvelope, error) { return envelope, nil })
+				client, clientErr := cloudflareadapter.New(cloudflareadapter.Config{CredentialSource: source, Decryptor: decryptor, AllowedAccounts: cfg.CloudflareAccounts, AllowedZones: cfg.CloudflareZones})
+				if clientErr != nil {
+					logger.Error("Cloudflare adapter disabled", "error", clientErr)
+				} else {
+					handler, handlerErr := cloudflareapp.NewHandler(client, cloudflareapp.Config{Audit: func(ctx context.Context, event cloudflareapp.AuditEvent) {
+						_ = application.audit.Append(ctx, auditrepo.Record{Action: event.Action, Scope: security.ScopeCloud, ResourceType: event.ResourceType, TargetName: event.TargetName, Risk: security.RiskSafe, Decision: event.Decision, Reason: event.Reason, Payload: event.Payload})
+					}})
+					if handlerErr != nil {
+						logger.Error("Cloudflare handler disabled", "error", handlerErr)
+					} else {
+						application.cloudflareHandler = handler
+					}
+				}
+			}
+		}
+	}
+	if cfg.GitHubToken != "" && len(cfg.GitHubRepositories) > 0 {
+		client, clientErr := githubadapter.New(githubadapter.Config{Token: []byte(cfg.GitHubToken), Repositories: cfg.GitHubRepositories})
+		if clientErr != nil {
+			logger.Error("GitHub adapter disabled", "error", clientErr)
+		} else {
+			application.githubClient = client
+		}
+	}
+	if cfg.TerraformWorkerURL != "" && cfg.TerraformWorkerToken != "" {
+		runner, runnerErr := terraformadapter.New(terraformadapter.Config{WorkerURL: cfg.TerraformWorkerURL, WorkerToken: []byte(cfg.TerraformWorkerToken), Workspaces: cfg.TerraformWorkspaces})
+		if runnerErr != nil {
+			logger.Error("Terraform adapter disabled", "error", runnerErr)
+		} else {
+			application.terraformRunner = runner
+		}
+	}
+	if cfg.MergerFSRoot != "" {
+		client, clientErr := mergerfsadapter.New(cfg.MergerFSRoot)
+		if clientErr != nil {
+			logger.Error("MergerFS adapter disabled", "error", clientErr)
+		} else {
+			application.storageClient = client
 		}
 	}
 	if gateway, gatewayErr := terminalapp.NewGateway(application.terminal, cfg.SSHPrivateKeyPath, cfg.SSHKnownHostsPath, cfg.PublicURL); gatewayErr != nil {
@@ -157,6 +243,12 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/terminal/tickets", a.protect("terminal.connect", a.createTerminalTicket))
 	mux.HandleFunc("GET /api/v1/terminal/sessions", a.protect("audit.read", a.terminalSessions))
 	mux.HandleFunc("GET /ws/terminal", a.terminalWebSocket)
+	dockerapp.MountRoutes(mux, a.protect, a.dockerClient)
+	kubernetesapp.MountRoutes(mux, a.protect, a.kubernetesClient)
+	cloudflareapp.MountRoutes(mux, a.protect, a.cloudflareHandler)
+	githubapp.MountRoutes(mux, a.protect, a.githubClient)
+	terraformapp.MountRoutes(mux, a.protect, a.terraformRunner)
+	storageapp.MountRoutes(mux, a.protect, a.storageClient)
 	return a.middleware(mux)
 }
 

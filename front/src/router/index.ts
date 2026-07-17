@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-const modules = ['cloud','kubernetes','docker','github','tunnels','terraform','storage']
+const modules = ['cloud']
 export default createRouter({
   history: createWebHistory(),
   routes: [
@@ -15,6 +15,13 @@ export default createRouter({
     { path: '/telemetry', name: 'telemetry', component: () => import('@/views/TelemetryView.vue') },
     { path: '/jobs', name: 'jobs', component: () => import('@/views/JobsView.vue') },
     { path: '/remote-access', name: 'remote-access', component: () => import('@/views/TerminalView.vue') },
+    { path: '/docker', name: 'docker', component: () => import('@/views/docker/DockerView.vue') },
+    { path: '/kubernetes', name: 'kubernetes', component: () => import('@/views/kubernetes/KubernetesView.vue') },
+    { path: '/cloudflare', name: 'cloudflare', component: () => import('@/views/cloudflare/CloudflareView.vue') },
+    { path: '/tunnels', redirect: '/cloudflare' },
+    { path: '/github', name: 'github', component: () => import('@/views/github/GitHubView.vue') },
+    { path: '/terraform', name: 'terraform', component: () => import('@/views/terraform/TerraformView.vue') },
+    { path: '/storage', name: 'storage', component: () => import('@/views/storage/MergerFSView.vue') },
     ...modules.map((name) => ({ path: `/${name}`, name, component: () => import('@/views/ModuleView.vue'), props: { module: name } })),
   ],
 })

@@ -10,8 +10,17 @@ type AuthMiddleware func(permission string, next http.HandlerFunc) http.HandlerF
 // MountRoutes registers only read-only Cloudflare routes. The caller owns
 // authentication, RBAC, CSRF and global request middleware.
 func MountRoutes(mux *http.ServeMux, authMiddleware AuthMiddleware, handler *Handler) {
-	if mux == nil || authMiddleware == nil || handler == nil {
-		panic("cloudflareapp: mux, auth middleware and handler are required")
+	if mux == nil || authMiddleware == nil {
+		panic("cloudflareapp: mux and auth middleware are required")
+	}
+	if handler == nil {
+		unavailable := func(w http.ResponseWriter, _ *http.Request) {
+			writeError(w, http.StatusServiceUnavailable, "cloudflare_unconfigured", "Cloudflare encrypted credentials and allowlists are not configured.")
+		}
+		mux.HandleFunc("GET /api/v1/cloudflare/overview", authMiddleware(defaultPermission, unavailable))
+		mux.HandleFunc("GET /api/v1/cloudflare/accounts/{account_id}/tunnels", authMiddleware(defaultPermission, unavailable))
+		mux.HandleFunc("GET /api/v1/cloudflare/zones/{zone_id}/dns-records", authMiddleware(defaultPermission, unavailable))
+		return
 	}
 	permission := handler.Permission()
 	mux.HandleFunc("GET /api/v1/cloudflare/overview", authMiddleware(permission, handler.Overview))
