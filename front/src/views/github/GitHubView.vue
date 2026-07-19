@@ -1,17 +1,24 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
-import { Box, ExternalLink, GitBranch, Lock, PlayCircle, RefreshCw, RotateCcw, ShieldCheck, Square, Star, Tag } from 'lucide-vue-next'
+import { Box, Code2, ExternalLink, FileCode2, GitBranch, Lock, PlayCircle, RefreshCw, RotateCcw, ShieldCheck, Square, Tag } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
-import { getGitHubOverview, runGitHubWorkflowAction, type GitHubProject } from '@/lib/api_github'
+import { getGitHubCommit, getGitHubCommits, getGitHubOverview, getGitHubWorkflowFile, getGitHubWorkflows, runGitHubWorkflow, runGitHubWorkflowAction, updateGitHubWorkflowFile, type GitHubProject, type GitHubWorkflow } from '@/lib/api_github'
 import { traduzirTexto } from '@/lib/ptbr'
 
 const client = useQueryClient()
 const selectedRepository = ref('')
+const selectedCommitSHA = ref('')
+const workflowEditor = ref<{ workflow: GitHubWorkflow; path: string; sha: string; content: string; branch: string; message: string } | null>(null)
+const dispatchRef = ref('main')
 const query = useQuery({ queryKey: ['github-overview'], queryFn: getGitHubOverview, refetchInterval: 60_000 })
 const projects = computed(() => query.data.value?.projects ?? [])
 const selected = computed<GitHubProject | undefined>(() => projects.value.find((project) => project.repository.full_name === selectedRepository.value) ?? projects.value[0])
+const selectedName = computed(() => selected.value?.repository.full_name ?? '')
+const commitsQuery = useQuery({ queryKey: ['github-commits', selectedName], queryFn: () => getGitHubCommits(selectedName.value), enabled: computed(() => !!selectedName.value) })
+const workflowsQuery = useQuery({ queryKey: ['github-workflows', selectedName], queryFn: () => getGitHubWorkflows(selectedName.value), enabled: computed(() => !!selectedName.value) })
+const commitQuery = useQuery({ queryKey: ['github-commit', selectedName, selectedCommitSHA], queryFn: () => getGitHubCommit(selectedName.value, selectedCommitSHA.value), enabled: computed(() => !!selectedName.value && !!selectedCommitSHA.value) })
 const runs = computed(() => projects.value.flatMap((project) => project.workflow_runs.map((run) => ({ ...run, repo: project.repository.full_name }))))
 const releases = computed(() => projects.value.flatMap((project) => project.releases.map((release) => ({ ...release, repo: project.repository.full_name }))))
 const active = computed(() => runs.value.filter((run) => run.status !== 'completed').length)
@@ -21,11 +28,29 @@ const action = useMutation({
   mutationFn: (input: { repository: string; runID: number; action: 'rerun' | 'cancel' }) => runGitHubWorkflowAction(input.repository, input.runID, input.action),
   onSuccess: () => setTimeout(() => client.invalidateQueries({ queryKey: ['github-overview'] }), 1200),
 })
+const workflowAction = useMutation({
+  mutationFn: (input: { workflow: GitHubWorkflow; operation: 'dispatch' | 'enable' | 'disable' }) => runGitHubWorkflow(selectedName.value, input.workflow.id, input.operation, { ref: dispatchRef.value }),
+  onSuccess: () => setTimeout(() => workflowsQuery.refetch(), 800),
+})
+const workflowSave = useMutation({
+  mutationFn: () => updateGitHubWorkflowFile(selectedName.value, workflowEditor.value!),
+  onSuccess: () => { workflowEditor.value = null; setTimeout(() => workflowsQuery.refetch(), 800) },
+})
 const tone = (status: string, conclusion: string) => status !== 'completed' ? 'info' : conclusion === 'success' ? 'healthy' : conclusion === 'failure' ? 'critical' : 'warning'
 const execute = (repository: string, runID: number, operation: 'rerun' | 'cancel') => {
   const verb = operation === 'rerun' ? 'reexecutar' : 'cancelar'
   if (window.confirm(`Confirma ${verb} o workflow #${runID} de ${repository}?`)) action.mutate({ repository, runID, action: operation })
 }
+const decodeBase64 = (content: string) => new TextDecoder().decode(Uint8Array.from(atob(content.replace(/\s/g, '')), (char) => char.charCodeAt(0)))
+const editWorkflow = async (workflow: GitHubWorkflow) => {
+  const file = await getGitHubWorkflowFile(selectedName.value, workflow.path, selected.value?.repository.default_branch)
+  workflowEditor.value = { workflow, path: file.path, sha: file.sha, content: decodeBase64(file.content), branch: selected.value?.repository.default_branch || 'main', message: `chore(actions): atualiza ${workflow.name}` }
+}
+const operateWorkflow = (workflow: GitHubWorkflow, operation: 'dispatch' | 'enable' | 'disable') => {
+  const label = operation === 'dispatch' ? 'executar' : operation === 'enable' ? 'ativar' : 'desativar'
+  if (window.confirm(`Confirma ${label} o workflow ${workflow.name}?`)) workflowAction.mutate({ workflow, operation })
+}
+const saveWorkflow = () => { if (window.confirm('Salvar o YAML criará um novo commit. Confirma?')) workflowSave.mutate() }
 </script>
 
 <template>
@@ -67,8 +92,30 @@ const execute = (repository: string, runID: number, operation: 'rerun' | 'cancel
 
         <article class="overflow-hidden rounded-xl border border-line bg-panel/65"><header class="border-b border-line p-4"><h2 class="text-sm font-medium">Execuções de workflow</h2></header><div class="divide-y divide-line/60"><div v-for="run in selected.workflow_runs" :key="run.id" class="grid gap-3 p-4 lg:grid-cols-[1fr_130px_190px] lg:items-center"><div class="flex gap-3"><GitBranch class="mt-0.5 h-4 w-4 text-pulse"/><div><a :href="run.html_url" target="_blank" rel="noreferrer" class="text-sm text-slate-200 hover:text-white">{{run.display_title || run.name}}</a><p class="mt-1 font-mono text-[9px] text-muted">{{run.head_branch}} · {{run.event}} · #{{run.run_number}} · {{run.head_sha.slice(0,7)}}</p></div></div><StatusBadge :status="tone(run.status,run.conclusion)" :label="run.conclusion || run.status"/><div class="flex justify-end gap-2"><Button v-if="run.status === 'completed'" size="sm" variant="outline" :disabled="action.isPending.value" @click="execute(selected.repository.full_name,run.id,'rerun')"><RotateCcw class="h-3.5 w-3.5"/>Reexecutar</Button><Button v-else size="sm" variant="danger" :disabled="action.isPending.value" @click="execute(selected.repository.full_name,run.id,'cancel')"><Square class="h-3.5 w-3.5"/>Cancelar</Button></div></div><p v-if="!selected.workflow_runs.length" class="p-10 text-center text-sm text-muted">Nenhum workflow encontrado.</p></div></article>
 
+        <section class="grid gap-5 2xl:grid-cols-2">
+          <article class="overflow-hidden rounded-xl border border-line bg-panel/65">
+            <header class="border-b border-line p-4"><h2 class="text-sm font-medium">Commits e diferenças</h2><p class="mt-1 text-[10px] text-muted">Selecione um commit para ver arquivos, adições, remoções e o patch completo.</p></header>
+            <div class="grid min-h-[380px] lg:grid-cols-[250px_1fr]">
+              <div class="max-h-[560px] divide-y divide-line/60 overflow-auto border-r border-line">
+                <button v-for="commit in commitsQuery.data.value ?? []" :key="commit.sha" class="w-full p-3 text-left hover:bg-white/[.03]" @click="selectedCommitSHA=commit.sha"><p class="line-clamp-2 text-xs text-slate-200">{{commit.commit.message}}</p><p class="mt-2 font-mono text-[9px] text-muted">{{commit.sha.slice(0,7)}} · {{commit.commit.author.name}}</p></button>
+              </div>
+              <div class="max-h-[560px] overflow-auto p-4">
+                <p v-if="!selectedCommitSHA" class="py-20 text-center text-xs text-muted">Escolha um commit para inspecionar o diff.</p>
+                <div v-else-if="commitQuery.data.value" class="space-y-4"><div><p class="text-sm text-white">{{commitQuery.data.value.commit.message}}</p><p class="mt-2 font-mono text-[9px] text-muted">+{{commitQuery.data.value.stats?.additions ?? 0}} / -{{commitQuery.data.value.stats?.deletions ?? 0}}</p></div><div v-for="file in commitQuery.data.value.files ?? []" :key="file.filename" class="rounded-lg border border-line"><header class="flex items-center justify-between border-b border-line p-3"><span class="break-all font-mono text-[10px] text-pulse">{{file.filename}}</span><span class="font-mono text-[9px] text-muted">+{{file.additions}} -{{file.deletions}}</span></header><pre class="overflow-auto p-3 text-[10px] leading-5 text-slate-300">{{file.patch || 'Patch não disponibilizado pela API para este arquivo.'}}</pre></div></div>
+              </div>
+            </div>
+          </article>
+
+          <article class="overflow-hidden rounded-xl border border-line bg-panel/65">
+            <header class="border-b border-line p-4"><h2 class="text-sm font-medium">Definições do GitHub Actions</h2><p class="mt-1 text-[10px] text-muted">Execute, ative, desative ou edite o YAML versionado. Toda edição gera um commit.</p></header>
+            <div class="divide-y divide-line/60"><div v-for="workflow in workflowsQuery.data.value ?? []" :key="workflow.id" class="p-4"><div class="flex flex-wrap items-center justify-between gap-3"><div><div class="flex items-center gap-2"><FileCode2 class="h-4 w-4 text-signal"/><p class="text-sm text-slate-200">{{workflow.name}}</p></div><p class="mt-1 font-mono text-[9px] text-muted">{{workflow.path}} · {{traduzirTexto(workflow.state)}}</p></div><div class="flex flex-wrap gap-2"><Button size="sm" variant="outline" @click="editWorkflow(workflow)"><Code2 class="h-3.5 w-3.5"/>Editar YAML</Button><Button size="sm" variant="outline" @click="operateWorkflow(workflow, workflow.state === 'active' ? 'disable' : 'enable')">{{workflow.state === 'active' ? 'Desativar' : 'Ativar'}}</Button><Button size="sm" @click="operateWorkflow(workflow,'dispatch')"><PlayCircle class="h-3.5 w-3.5"/>Executar</Button></div></div></div><p v-if="!(workflowsQuery.data.value?.length)" class="p-10 text-center text-xs text-muted">Nenhuma definição encontrada.</p></div>
+          </article>
+        </section>
+
         <article class="overflow-hidden rounded-xl border border-line bg-panel/55"><header class="border-b border-line p-4"><h2 class="text-sm font-medium">Releases</h2></header><div class="grid gap-px bg-line/60 sm:grid-cols-2"><a v-for="release in selected.releases" :key="release.id" :href="release.html_url" target="_blank" rel="noreferrer" class="bg-panel p-4 hover:bg-slate-900"><div class="flex items-center gap-2"><Tag class="h-3.5 w-3.5 text-signal"/><p class="text-sm text-slate-200">{{release.name || release.tag_name}}</p></div><p class="mt-2 font-mono text-[9px] text-muted">{{release.tag_name}} · {{release.prerelease ? 'pré-lançamento' : 'estável'}}</p></a><p v-if="!selected.releases.length" class="col-span-2 p-8 text-center text-xs text-muted">Nenhuma release publicada.</p></div></article>
       </div>
     </section>
+
+    <div v-if="workflowEditor" class="fixed inset-0 z-50 grid place-items-center bg-slate-950/85 p-4"><section class="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-line bg-panel shadow-2xl"><header class="flex items-center justify-between border-b border-line p-4"><div><h2 class="text-sm font-medium">Editar {{workflowEditor.workflow.name}}</h2><p class="mt-1 font-mono text-[9px] text-muted">{{workflowEditor.path}}</p></div><Button variant="ghost" @click="workflowEditor=null">Fechar</Button></header><div class="grid gap-3 border-b border-line p-4 md:grid-cols-2"><label class="text-xs text-muted">Ramificação<input v-model="workflowEditor.branch" class="mt-2 w-full rounded-lg border border-line bg-slate-950 p-2 text-slate-200"/></label><label class="text-xs text-muted">Mensagem do commit<input v-model="workflowEditor.message" class="mt-2 w-full rounded-lg border border-line bg-slate-950 p-2 text-slate-200"/></label></div><textarea v-model="workflowEditor.content" spellcheck="false" class="min-h-[480px] flex-1 resize-none bg-slate-950 p-4 font-mono text-xs leading-5 text-slate-200 outline-none"/><footer class="flex justify-end gap-2 border-t border-line p-4"><Button variant="outline" @click="workflowEditor=null">Cancelar</Button><Button :disabled="workflowSave.isPending.value" @click="saveWorkflow">Criar commit com alteração</Button></footer></section></div>
   </div>
 </template>

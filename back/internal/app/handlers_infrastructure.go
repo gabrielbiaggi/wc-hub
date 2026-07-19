@@ -44,8 +44,8 @@ func (a *App) proxmoxInventory(w http.ResponseWriter, r *http.Request) {
 	for _, client := range a.proxmoxClients {
 		cluster, err := client.Snapshot(r.Context())
 		if err != nil {
-			writeError(w, 502, "proxmox_inventory_failed", "One or more Proxmox clusters could not be loaded.")
-			return
+			snapshot.Warnings = append(snapshot.Warnings, "Cluster "+client.ID()+" indisponível: "+err.Error())
+			continue
 		}
 		snapshot.Nodes = append(snapshot.Nodes, cluster.Nodes...)
 		snapshot.VMs = append(snapshot.VMs, cluster.VMs...)
@@ -66,7 +66,11 @@ func (a *App) proxmoxPowerAction(w http.ResponseWriter, r *http.Request) {
 	}
 	node, kind, action := r.PathValue("node"), r.PathValue("kind"), r.PathValue("action")
 	var target *proxmoxadapter.Client
+	requestedCluster := strings.TrimSpace(r.URL.Query().Get("cluster"))
 	for _, client := range a.proxmoxClients {
+		if requestedCluster != "" && client.ID() != requestedCluster {
+			continue
+		}
 		snapshot, snapshotErr := client.Snapshot(r.Context())
 		if snapshotErr != nil {
 			continue
@@ -92,6 +96,95 @@ func (a *App) proxmoxPowerAction(w http.ResponseWriter, r *http.Request) {
 	session := currentSession(r)
 	_ = a.audit.Append(r.Context(), auditrepo.Record{ActorID: session.User.ID, Action: "proxmox." + kind + "." + action, Scope: security.ScopeRemote, ResourceType: kind, ResourceID: strconv.Itoa(vmid), TargetName: node, Risk: security.RiskCritical, Decision: "allowed", RequestID: requestID(r.Context()), SourceIP: remoteIP(r)})
 	writeJSON(w, 202, map[string]any{"node": node, "kind": kind, "vmid": vmid, "action": action, "status": "accepted"})
+}
+
+func (a *App) proxmoxClientFor(cluster string) *proxmoxadapter.Client {
+	for _, client := range a.proxmoxClients {
+		if client.ID() == cluster {
+			return client
+		}
+	}
+	return nil
+}
+
+func (a *App) proxmoxCreateQEMU(w http.ResponseWriter, r *http.Request) {
+	var input proxmoxadapter.CreateQEMUInput
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	target := a.proxmoxClientFor(input.Cluster)
+	if target == nil {
+		writeError(w, 404, "proxmox_cluster_not_found", "O cluster Proxmox não foi encontrado.")
+		return
+	}
+	if err := target.CreateQEMU(r.Context(), input); err != nil {
+		writeError(w, 502, "proxmox_create_failed", "O Proxmox rejeitou a criação da VM.")
+		return
+	}
+	session := currentSession(r)
+	_ = a.audit.Append(r.Context(), auditrepo.Record{ActorID: session.User.ID, Action: "proxmox.qemu.create", Scope: security.ScopeRemote, ResourceType: "qemu", ResourceID: strconv.Itoa(input.VMID), TargetName: input.Cluster + "/" + input.Node, Risk: security.RiskCritical, Decision: "allowed", RequestID: requestID(r.Context()), SourceIP: remoteIP(r), Payload: map[string]any{"name": input.Name, "cores": input.Cores, "memory_mb": input.MemoryMB, "disk_gb": input.DiskGB}})
+	writeJSON(w, 202, map[string]any{"status": "accepted", "vmid": input.VMID})
+}
+
+func (a *App) proxmoxCreateLXC(w http.ResponseWriter, r *http.Request) {
+	var input proxmoxadapter.CreateLXCInput
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	target := a.proxmoxClientFor(input.Cluster)
+	if target == nil {
+		writeError(w, 404, "proxmox_cluster_not_found", "O cluster Proxmox não foi encontrado.")
+		return
+	}
+	if err := target.CreateLXC(r.Context(), input); err != nil {
+		writeError(w, 502, "proxmox_create_failed", "O Proxmox rejeitou a criação do container LXC.")
+		return
+	}
+	input.Password = ""
+	input.SSHPublicKeys = ""
+	session := currentSession(r)
+	_ = a.audit.Append(r.Context(), auditrepo.Record{ActorID: session.User.ID, Action: "proxmox.lxc.create", Scope: security.ScopeRemote, ResourceType: "lxc", ResourceID: strconv.Itoa(input.VMID), TargetName: input.Cluster + "/" + input.Node, Risk: security.RiskCritical, Decision: "allowed", RequestID: requestID(r.Context()), SourceIP: remoteIP(r), Payload: map[string]any{"hostname": input.Hostname, "cores": input.Cores, "memory_mb": input.MemoryMB, "rootfs_gb": input.RootFSGB}})
+	writeJSON(w, 202, map[string]any{"status": "accepted", "vmid": input.VMID})
+}
+
+func (a *App) proxmoxClone(w http.ResponseWriter, r *http.Request) {
+	var input proxmoxadapter.CloneInput
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	target := a.proxmoxClientFor(input.Cluster)
+	if target == nil {
+		writeError(w, 404, "proxmox_cluster_not_found", "O cluster Proxmox não foi encontrado.")
+		return
+	}
+	if err := target.Clone(r.Context(), input); err != nil {
+		writeError(w, 502, "proxmox_clone_failed", "O Proxmox rejeitou a clonagem.")
+		return
+	}
+	session := currentSession(r)
+	_ = a.audit.Append(r.Context(), auditrepo.Record{ActorID: session.User.ID, Action: "proxmox." + input.Kind + ".clone", Scope: security.ScopeRemote, ResourceType: input.Kind, ResourceID: strconv.Itoa(input.NewVMID), TargetName: input.Cluster + "/" + input.Node, Risk: security.RiskCritical, Decision: "allowed", RequestID: requestID(r.Context()), SourceIP: remoteIP(r), Payload: map[string]any{"source_vmid": input.SourceVMID, "name": input.Name, "full": input.Full}})
+	writeJSON(w, 202, map[string]any{"status": "accepted", "vmid": input.NewVMID})
+}
+
+func (a *App) proxmoxDeleteGuest(w http.ResponseWriter, r *http.Request) {
+	vmid, err := strconv.Atoi(r.PathValue("vmid"))
+	if err != nil {
+		writeError(w, 400, "invalid_resource", "VMID inválido.")
+		return
+	}
+	cluster, node, kind := r.URL.Query().Get("cluster"), r.PathValue("node"), r.PathValue("kind")
+	target := a.proxmoxClientFor(cluster)
+	if target == nil {
+		writeError(w, 404, "proxmox_cluster_not_found", "O cluster Proxmox não foi encontrado.")
+		return
+	}
+	if err = target.DeleteGuest(r.Context(), node, kind, vmid, r.URL.Query().Get("purge") == "true"); err != nil {
+		writeError(w, 502, "proxmox_delete_failed", "O Proxmox rejeitou a exclusão.")
+		return
+	}
+	session := currentSession(r)
+	_ = a.audit.Append(r.Context(), auditrepo.Record{ActorID: session.User.ID, Action: "proxmox." + kind + ".delete", Scope: security.ScopeRemote, ResourceType: kind, ResourceID: strconv.Itoa(vmid), TargetName: cluster + "/" + node, Risk: security.RiskCritical, Decision: "allowed", RequestID: requestID(r.Context()), SourceIP: remoteIP(r)})
+	w.WriteHeader(204)
 }
 func (a *App) listJobs(w http.ResponseWriter, r *http.Request) {
 	items, err := a.jobs.List(r.Context(), 100)

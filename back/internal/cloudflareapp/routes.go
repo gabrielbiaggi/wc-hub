@@ -28,4 +28,8 @@ func MountRoutes(mux *http.ServeMux, authMiddleware AuthMiddleware, handler *Han
 	mux.HandleFunc("POST /api/v1/cloudflare/zones/{zone_id}/dns-records", authMiddleware("cloudflare.manage", handler.CreateDNSRecord))
 	mux.HandleFunc("PUT /api/v1/cloudflare/zones/{zone_id}/dns-records/{record_id}", authMiddleware("cloudflare.manage", handler.UpdateDNSRecord))
 	mux.HandleFunc("DELETE /api/v1/cloudflare/zones/{zone_id}/dns-records/{record_id}", authMiddleware("cloudflare.manage", handler.DeleteDNSRecord))
+	mux.HandleFunc("GET /api/v1/cloudflare/zones/{zone_id}/settings", authMiddleware(permission, handler.ZoneSettings))
+	mux.HandleFunc("PATCH /api/v1/cloudflare/zones/{zone_id}/settings/{setting}", authMiddleware("cloudflare.manage", handler.UpdateZoneSetting))
+	mux.HandleFunc("POST /api/v1/cloudflare/zones/{zone_id}/purge-cache", authMiddleware("cloudflare.manage", handler.PurgeCache))
+	mux.HandleFunc("GET /api/v1/cloudflare/zones/{zone_id}/rulesets", authMiddleware(permission, handler.Rulesets))
 }

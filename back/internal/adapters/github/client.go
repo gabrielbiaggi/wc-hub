@@ -16,6 +16,8 @@ import (
 )
 
 var repoPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$`)
+var shaPattern = regexp.MustCompile(`^[a-fA-F0-9]{7,64}$`)
+var workflowPathPattern = regexp.MustCompile(`^\.github/workflows/[A-Za-z0-9_.-]+\.ya?ml$`)
 
 type Config struct {
 	Token        []byte
@@ -68,6 +70,49 @@ type Release struct {
 	Draft       bool      `json:"draft"`
 	Prerelease  bool      `json:"prerelease"`
 	PublishedAt time.Time `json:"published_at"`
+}
+type Commit struct {
+	SHA     string `json:"sha"`
+	HTMLURL string `json:"html_url"`
+	Commit  struct {
+		Message string `json:"message"`
+		Author  struct {
+			Name  string    `json:"name"`
+			Email string    `json:"email"`
+			Date  time.Time `json:"date"`
+		} `json:"author"`
+	} `json:"commit"`
+	Stats struct {
+		Additions int `json:"additions"`
+		Deletions int `json:"deletions"`
+		Total     int `json:"total"`
+	} `json:"stats"`
+	Files []CommitFile `json:"files,omitempty"`
+}
+type CommitFile struct {
+	Filename         string `json:"filename"`
+	PreviousFilename string `json:"previous_filename,omitempty"`
+	Status           string `json:"status"`
+	Additions        int    `json:"additions"`
+	Deletions        int    `json:"deletions"`
+	Changes          int    `json:"changes"`
+	Patch            string `json:"patch,omitempty"`
+}
+type Workflow struct {
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
+	Path      string    `json:"path"`
+	State     string    `json:"state"`
+	HTMLURL   string    `json:"html_url"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+type WorkflowFile struct {
+	Name     string `json:"name"`
+	Path     string `json:"path"`
+	SHA      string `json:"sha"`
+	Content  string `json:"content"`
+	Encoding string `json:"encoding"`
 }
 type Project struct {
 	Repository   Repository    `json:"repository"`
@@ -185,6 +230,77 @@ func (c *Client) RunAction(ctx context.Context, fullName string, runID int64, ac
 	return c.request(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/actions/runs/%d/%s", fullName, runID, action), nil)
 }
 
+func (c *Client) Commits(ctx context.Context, fullName string) ([]Commit, error) {
+	if !c.repositoryAllowed(fullName) {
+		return nil, errors.New("GitHub repository is not allowlisted")
+	}
+	items := []Commit{}
+	err := c.get(ctx, "/repos/"+fullName+"/commits?per_page=40", &items)
+	return items, err
+}
+
+func (c *Client) Commit(ctx context.Context, fullName, sha string) (Commit, error) {
+	if !c.repositoryAllowed(fullName) || !shaPattern.MatchString(sha) {
+		return Commit{}, errors.New("GitHub repository or commit is invalid")
+	}
+	var item Commit
+	err := c.get(ctx, "/repos/"+fullName+"/commits/"+sha, &item)
+	return item, err
+}
+
+func (c *Client) Workflows(ctx context.Context, fullName string) ([]Workflow, error) {
+	if !c.repositoryAllowed(fullName) {
+		return nil, errors.New("GitHub repository is not allowlisted")
+	}
+	result := struct {
+		Workflows []Workflow `json:"workflows"`
+	}{}
+	err := c.get(ctx, "/repos/"+fullName+"/actions/workflows?per_page=100", &result)
+	return result.Workflows, err
+}
+
+func (c *Client) WorkflowAction(ctx context.Context, fullName string, workflowID int64, action, ref string, inputs map[string]string) error {
+	if !c.repositoryAllowed(fullName) || workflowID <= 0 {
+		return errors.New("GitHub workflow is invalid")
+	}
+	path := fmt.Sprintf("/repos/%s/actions/workflows/%d", fullName, workflowID)
+	switch action {
+	case "enable", "disable":
+		return c.requestJSON(ctx, http.MethodPut, path+"/"+action, nil, nil)
+	case "dispatch":
+		if strings.TrimSpace(ref) == "" || len(ref) > 255 || len(inputs) > 20 {
+			return errors.New("GitHub workflow dispatch input is invalid")
+		}
+		return c.requestJSON(ctx, http.MethodPost, path+"/dispatches", map[string]any{"ref": ref, "inputs": inputs}, nil)
+	default:
+		return errors.New("unsupported GitHub workflow action")
+	}
+}
+
+func (c *Client) WorkflowFile(ctx context.Context, fullName, path, ref string) (WorkflowFile, error) {
+	if !c.repositoryAllowed(fullName) || !workflowPathPattern.MatchString(path) {
+		return WorkflowFile{}, errors.New("GitHub workflow path is invalid")
+	}
+	var item WorkflowFile
+	query := ""
+	if strings.TrimSpace(ref) != "" {
+		query = "?ref=" + url.QueryEscape(ref)
+	}
+	err := c.get(ctx, "/repos/"+fullName+"/contents/"+path+query, &item)
+	return item, err
+}
+
+func (c *Client) UpdateWorkflowFile(ctx context.Context, fullName, path, branch, sha, message, contentBase64 string) error {
+	if !c.repositoryAllowed(fullName) || !workflowPathPattern.MatchString(path) || !shaPattern.MatchString(sha) {
+		return errors.New("GitHub workflow update target is invalid")
+	}
+	if strings.TrimSpace(branch) == "" || len(branch) > 255 || strings.TrimSpace(message) == "" || len(message) > 500 || len(contentBase64) > 2<<20 {
+		return errors.New("GitHub workflow update input is invalid")
+	}
+	body := map[string]string{"message": message, "content": contentBase64, "sha": sha, "branch": branch}
+	return c.requestJSON(ctx, http.MethodPut, "/repos/"+fullName+"/contents/"+path, body, nil)
+}
+
 func (c *Client) repositoryAllowed(fullName string) bool {
 	for _, allowed := range c.repositories {
 		if allowed == fullName {
@@ -198,6 +314,10 @@ func (c *Client) get(ctx context.Context, path string, destination any) error {
 }
 
 func (c *Client) request(ctx context.Context, method, path string, destination any) error {
+	return c.requestJSON(ctx, method, path, nil, destination)
+}
+
+func (c *Client) requestJSON(ctx context.Context, method, path string, payload any, destination any) error {
 	cleanPath := path
 	rawQuery := ""
 	if index := strings.Index(path, "?"); index >= 0 {
@@ -205,13 +325,24 @@ func (c *Client) request(ctx context.Context, method, path string, destination a
 		rawQuery = path[index+1:]
 	}
 	endpoint := &url.URL{Scheme: "https", Host: "api.github.com", Path: cleanPath, RawQuery: rawQuery}
-	req, err := http.NewRequestWithContext(ctx, method, endpoint.String(), nil)
+	var requestBody io.Reader
+	if payload != nil {
+		encoded, marshalErr := json.Marshal(payload)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		requestBody = strings.NewReader(string(encoded))
+	}
+	req, err := http.NewRequestWithContext(ctx, method, endpoint.String(), requestBody)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+string(c.token))
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	response, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("GitHub request: %w", err)

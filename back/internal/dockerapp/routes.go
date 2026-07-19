@@ -16,4 +16,5 @@ func MountRoutes(mux *http.ServeMux, authMiddleware AuthMiddleware, reader Reade
 	mux.HandleFunc("GET /api/v1/docker/images", authMiddleware(ReadPermission, handler.Images))
 	mux.HandleFunc("GET /api/v1/docker/stats", authMiddleware(ReadPermission, handler.Stats))
 	mux.HandleFunc("POST /api/v1/docker/containers/{id}/{action}", authMiddleware("docker.manage", handler.ContainerAction))
+	mux.HandleFunc("POST /api/v1/docker/containers/{id}/exec", authMiddleware("docker.manage", handler.Exec))
 }

@@ -79,6 +79,10 @@ services:
     volumes:
       - ./ops/secrets:/run/secrets:ro
       - ${MERGERFS_HOST_ROOT:-./ops/storage}:/mnt/drive:rw
+    extra_hosts:
+      - "prox-genesys:100.127.253.121"
+      - "prox-ai:100.96.36.16"
+      - "genesys-ubuntu:100.98.249.29"
     healthcheck:
       test: ["CMD", "/app/wc-hub", "healthcheck"]
       interval: 10s

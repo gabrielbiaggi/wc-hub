@@ -201,6 +201,21 @@ type DNSRecordInput struct {
 	TTL     int    `json:"ttl"`
 	Comment string `json:"comment,omitempty"`
 }
+type ZoneSetting struct {
+	ID         string    `json:"id"`
+	Value      any       `json:"value"`
+	Editable   bool      `json:"editable"`
+	ModifiedAt time.Time `json:"modified_on"`
+}
+type Ruleset struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Kind        string    `json:"kind"`
+	Phase       string    `json:"phase"`
+	Version     string    `json:"version"`
+	LastUpdated time.Time `json:"last_updated"`
+}
 
 type ClientError struct {
 	StatusCode int
@@ -416,6 +431,52 @@ func (c *Client) DeleteDNSRecord(ctx context.Context, zoneID, recordID string) e
 	}
 	_, err := c.do(ctx, http.MethodDelete, "/zones/"+url.PathEscape(zoneID)+"/dns_records/"+url.PathEscape(recordID), nil, nil, &result)
 	return err
+}
+
+func (c *Client) ListZoneSettings(ctx context.Context, zoneID string) ([]ZoneSetting, error) {
+	if !c.ZoneAllowed(zoneID) {
+		return nil, ErrZoneNotAllowed
+	}
+	var settings []ZoneSetting
+	_, err := c.do(ctx, http.MethodGet, "/zones/"+url.PathEscape(zoneID)+"/settings", nil, nil, &settings)
+	return settings, err
+}
+
+func (c *Client) UpdateZoneSetting(ctx context.Context, zoneID, setting string, value any) (ZoneSetting, error) {
+	if !c.ZoneAllowed(zoneID) {
+		return ZoneSetting{}, ErrZoneNotAllowed
+	}
+	if !regexp.MustCompile(`^[a-z0-9_]{1,80}$`).MatchString(setting) {
+		return ZoneSetting{}, errors.New("invalid Cloudflare zone setting")
+	}
+	body, err := json.Marshal(map[string]any{"value": value})
+	if err != nil {
+		return ZoneSetting{}, err
+	}
+	var result ZoneSetting
+	_, err = c.do(ctx, http.MethodPatch, "/zones/"+url.PathEscape(zoneID)+"/settings/"+url.PathEscape(setting), nil, body, &result)
+	return result, err
+}
+
+func (c *Client) PurgeCache(ctx context.Context, zoneID string) error {
+	if !c.ZoneAllowed(zoneID) {
+		return ErrZoneNotAllowed
+	}
+	body, _ := json.Marshal(map[string]bool{"purge_everything": true})
+	var result struct {
+		ID string `json:"id"`
+	}
+	_, err := c.do(ctx, http.MethodPost, "/zones/"+url.PathEscape(zoneID)+"/purge_cache", nil, body, &result)
+	return err
+}
+
+func (c *Client) ListRulesets(ctx context.Context, zoneID string) ([]Ruleset, error) {
+	if !c.ZoneAllowed(zoneID) {
+		return nil, ErrZoneNotAllowed
+	}
+	var result []Ruleset
+	err := c.list(ctx, "/zones/"+url.PathEscape(zoneID)+"/rulesets", url.Values{"per_page": {"100"}}, &result)
+	return result, err
 }
 
 func (c *Client) list(ctx context.Context, path string, query url.Values, destination any) error {

@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
-import { Box, Boxes, Container, Cpu, Database, HardDrive, Network, Play, RefreshCw, RotateCcw, ShieldCheck, Square } from 'lucide-vue-next'
+import { Box, Boxes, Container, Cpu, Database, HardDrive, Network, Play, RefreshCw, RotateCcw, ShieldCheck, Square, Terminal } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
-import { getDockerInventory, runDockerContainerAction, type DockerContainerStats } from '@/lib/api_docker'
+import { execDockerContainer, getDockerInventory, runDockerContainerAction, type DockerContainer, type DockerContainerStats } from '@/lib/api_docker'
 
 const tab = ref<'containers' | 'images'>('containers')
 const queryClient = useQueryClient()
 const query = useQuery({ queryKey: ['docker-inventory'], queryFn: getDockerInventory, refetchInterval: 15_000 })
 const action = useMutation({ mutationFn: (input: { id: string; action: 'start' | 'stop' | 'restart' }) => runDockerContainerAction(input.id, input.action), onSuccess: () => setTimeout(() => queryClient.invalidateQueries({ queryKey: ['docker-inventory'] }), 800) })
+const terminal=ref<{container:DockerContainer;command:string;output:string}|null>(null)
+const exec=useMutation({mutationFn:()=>execDockerContainer(terminal.value!.container.id,['sh','-lc',terminal.value!.command]),onSuccess:(result)=>{if(terminal.value)terminal.value.output=result.output}})
 const containers = computed(() => query.data.value?.containers ?? [])
 const images = computed(() => query.data.value?.images ?? [])
 const running = computed(() => containers.value.filter((item) => item.state === 'running').length)
@@ -27,6 +29,8 @@ const statsOf = (id: string): DockerContainerStats | undefined => statsByContain
 const execute = (id: string, operation: 'start' | 'stop' | 'restart') => {
   if (window.confirm(`Confirma a operação no container ${shortID(id)}?`)) action.mutate({ id, action: operation })
 }
+const openTerminal=(container:DockerContainer)=>{terminal.value={container,command:'id && uname -a',output:''}}
+const runCommand=()=>{if(terminal.value&&window.confirm(`Executar no container ${nameOf(terminal.value.container.names)}?`))exec.mutate()}
 </script>
 
 <template>
@@ -74,7 +78,7 @@ const execute = (id: string, operation: 'start' | 'stop' | 'restart') => {
           <div class="flex min-w-0 items-center gap-3"><div class="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-line bg-slate-950/50"><Container class="h-4 w-4 text-slate-300" /></div><div class="min-w-0"><p class="truncate text-sm text-slate-200">{{ nameOf(container.names) }}</p><p class="mt-1 truncate font-mono text-[10px] text-muted">{{ shortID(container.id) }} · {{ container.image }}</p></div></div>
           <div><StatusBadge :status="container.state === 'running' ? 'healthy' : container.state === 'exited' ? 'critical' : 'warning'" :label="container.state" /><p class="mt-2 truncate text-[10px] text-muted">{{ container.status }}</p></div>
           <div v-if="statsOf(container.id)" class="grid grid-cols-2 gap-x-4 gap-y-2 font-mono text-[10px]"><span class="flex items-center gap-1.5 text-muted"><Cpu class="h-3 w-3" />CPU</span><span class="text-right text-slate-300">{{ statsOf(container.id)?.cpu_percent.toFixed(1) }}%</span><span class="flex items-center gap-1.5 text-muted"><HardDrive class="h-3 w-3" />MEM</span><span class="text-right text-slate-300">{{ formatBytes(statsOf(container.id)?.memory_usage) }}</span><span class="flex items-center gap-1.5 text-muted"><Network class="h-3 w-3" />REDE</span><span class="text-right text-slate-300">{{ formatBytes((statsOf(container.id)?.network_rx ?? 0) + (statsOf(container.id)?.network_tx ?? 0)) }}</span></div><p v-else class="text-xs text-muted">Estatísticas disponíveis quando estiver em execução.</p>
-          <div class="flex flex-wrap justify-end gap-2"><Button v-if="container.state !== 'running'" variant="outline" :disabled="action.isPending.value" @click="execute(container.id,'start')"><Play class="h-3.5 w-3.5"/>Iniciar</Button><Button v-if="container.state === 'running'" variant="outline" :disabled="action.isPending.value" @click="execute(container.id,'restart')"><RotateCcw class="h-3.5 w-3.5"/>Reiniciar</Button><Button v-if="container.state === 'running'" variant="danger" :disabled="action.isPending.value" @click="execute(container.id,'stop')"><Square class="h-3.5 w-3.5"/>Parar</Button></div>
+          <div class="flex flex-wrap justify-end gap-2"><Button v-if="container.state === 'running'" variant="outline" @click="openTerminal(container)"><Terminal class="h-3.5 w-3.5"/>Terminal</Button><Button v-if="container.state !== 'running'" variant="outline" :disabled="action.isPending.value" @click="execute(container.id,'start')"><Play class="h-3.5 w-3.5"/>Iniciar</Button><Button v-if="container.state === 'running'" variant="outline" :disabled="action.isPending.value" @click="execute(container.id,'restart')"><RotateCcw class="h-3.5 w-3.5"/>Reiniciar</Button><Button v-if="container.state === 'running'" variant="danger" :disabled="action.isPending.value" @click="execute(container.id,'stop')"><Square class="h-3.5 w-3.5"/>Parar</Button></div>
         </article>
         <div v-if="!containers.length" class="grid min-h-64 place-items-center text-center"><div><Container class="mx-auto h-7 w-7 text-muted" /><p class="mt-3 text-sm text-muted">Nenhum container encontrado.</p></div></div>
       </div>
@@ -84,5 +88,6 @@ const execute = (id: string, operation: 'start' | 'stop' | 'restart') => {
         <div v-if="!images.length" class="grid min-h-64 place-items-center text-center"><div><Box class="mx-auto h-7 w-7 text-muted" /><p class="mt-3 text-sm text-muted">Nenhuma imagem encontrada.</p></div></div>
       </div>
     </section>
+    <div v-if="terminal" class="fixed inset-0 z-50 grid place-items-center bg-slate-950/85 p-4"><section class="w-full max-w-4xl overflow-hidden rounded-xl border border-line bg-panel"><header class="flex items-center justify-between border-b border-line p-4"><div><h2 class="text-sm text-white">Terminal Docker · {{nameOf(terminal.container.names)}}</h2><p class="mt-1 text-[10px] text-warning">Executa um comando sem TTY dentro do container. Saída limitada a 2 MB.</p></div><Button variant="ghost" @click="terminal=null">Fechar</Button></header><form class="flex gap-2 border-b border-line p-4" @submit.prevent="runCommand"><input v-model="terminal.command" required class="flex-1 rounded-lg border border-line bg-slate-950 p-2 font-mono text-xs" placeholder="comando shell"/><Button type="submit" :disabled="exec.isPending.value"><Terminal class="h-4 w-4"/>Executar</Button></form><pre class="min-h-80 max-h-[55vh] overflow-auto bg-slate-950 p-4 font-mono text-xs leading-5 text-slate-200">{{terminal.output||'A saída aparecerá aqui.'}}</pre></section></div>
   </div>
 </template>

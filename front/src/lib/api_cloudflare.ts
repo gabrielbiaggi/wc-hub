@@ -70,3 +70,9 @@ export interface CloudflareDNSInput { type:string; name:string; content:string; 
 export const createCloudflareDNSRecord = async(zoneID:string,input:CloudflareDNSInput)=>(await api.post<CloudflareDNSRecord>(`/v1/cloudflare/zones/${encodeURIComponent(zoneID)}/dns-records`,input)).data
 export const updateCloudflareDNSRecord = async(zoneID:string,recordID:string,input:CloudflareDNSInput)=>(await api.put<CloudflareDNSRecord>(`/v1/cloudflare/zones/${encodeURIComponent(zoneID)}/dns-records/${encodeURIComponent(recordID)}`,input)).data
 export const deleteCloudflareDNSRecord = async(zoneID:string,recordID:string)=>api.delete(`/v1/cloudflare/zones/${encodeURIComponent(zoneID)}/dns-records/${encodeURIComponent(recordID)}`)
+export interface CloudflareZoneSetting{id:string;value:unknown;editable:boolean;modified_on:string}
+export interface CloudflareRuleset{id:string;name:string;description:string;kind:string;phase:string;version:string;last_updated:string}
+export const getCloudflareZoneSettings=async(zoneID:string)=>(await api.get<{items:CloudflareZoneSetting[]}>(`/v1/cloudflare/zones/${encodeURIComponent(zoneID)}/settings`)).data.items
+export const updateCloudflareZoneSetting=async(zoneID:string,setting:string,value:unknown)=>(await api.patch<CloudflareZoneSetting>(`/v1/cloudflare/zones/${encodeURIComponent(zoneID)}/settings/${encodeURIComponent(setting)}`,{value})).data
+export const purgeCloudflareCache=async(zoneID:string)=>(await api.post<{status:string}>(`/v1/cloudflare/zones/${encodeURIComponent(zoneID)}/purge-cache`,{})).data
+export const getCloudflareRulesets=async(zoneID:string)=>(await api.get<{items:CloudflareRuleset[]}>(`/v1/cloudflare/zones/${encodeURIComponent(zoneID)}/rulesets`)).data.items

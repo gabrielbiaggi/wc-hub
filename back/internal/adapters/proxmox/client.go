@@ -23,6 +23,7 @@ type Client struct {
 	http             *http.Client
 }
 type Node struct {
+	Cluster   string  `json:"cluster"`
 	Node      string  `json:"node"`
 	Status    string  `json:"status"`
 	CPU       float64 `json:"cpu"`
@@ -33,6 +34,7 @@ type Node struct {
 	Level     string  `json:"level"`
 }
 type VM struct {
+	Cluster   string      `json:"cluster"`
 	VMID      int         `json:"vmid"`
 	Name      string      `json:"name"`
 	Status    string      `json:"status"`
@@ -47,6 +49,7 @@ type VM struct {
 	Template  json.Number `json:"template,omitempty"`
 }
 type Storage struct {
+	Cluster   string `json:"cluster"`
 	Storage   string `json:"storage"`
 	Type      string `json:"type"`
 	Status    string `json:"status"`
@@ -63,6 +66,47 @@ type Snapshot struct {
 	VMs        []VM      `json:"virtual_machines"`
 	Containers []VM      `json:"containers"`
 	Storage    []Storage `json:"storage"`
+	Warnings   []string  `json:"warnings"`
+}
+type CreateQEMUInput struct {
+	Cluster  string `json:"cluster"`
+	Node     string `json:"node"`
+	VMID     int    `json:"vmid"`
+	Name     string `json:"name"`
+	Cores    int    `json:"cores"`
+	MemoryMB int    `json:"memory_mb"`
+	Storage  string `json:"storage"`
+	DiskGB   int    `json:"disk_gb"`
+	ISO      string `json:"iso"`
+	Bridge   string `json:"bridge"`
+	Start    bool   `json:"start"`
+}
+type CreateLXCInput struct {
+	Cluster       string `json:"cluster"`
+	Node          string `json:"node"`
+	VMID          int    `json:"vmid"`
+	Hostname      string `json:"hostname"`
+	Cores         int    `json:"cores"`
+	MemoryMB      int    `json:"memory_mb"`
+	Storage       string `json:"storage"`
+	RootFSGB      int    `json:"rootfs_gb"`
+	Template      string `json:"template"`
+	Bridge        string `json:"bridge"`
+	Password      string `json:"password"`
+	SSHPublicKeys string `json:"ssh_public_keys"`
+	Unprivileged  bool   `json:"unprivileged"`
+	Start         bool   `json:"start"`
+}
+type CloneInput struct {
+	Cluster    string `json:"cluster"`
+	Node       string `json:"node"`
+	Kind       string `json:"kind"`
+	SourceVMID int    `json:"source_vmid"`
+	NewVMID    int    `json:"new_vmid"`
+	Name       string `json:"name"`
+	TargetNode string `json:"target_node"`
+	Storage    string `json:"storage"`
+	Full       bool   `json:"full"`
 }
 type envelope[T any] struct {
 	Data T `json:"data"`
@@ -125,11 +169,21 @@ func NewFromEnvFile(path string) (*Client, error) {
 	return New(values["PROXMOX_API_URL"], values["PROXMOX_API_TOKEN_ID"], []byte(values["PROXMOX_API_TOKEN_SECRET"]), values["PROXMOX_TLS_CA_PATH"])
 }
 func (c *Client) Configured() bool { return c != nil && c.baseURL != "" }
+func (c *Client) ID() string {
+	parsed, _ := url.Parse(c.baseURL)
+	if parsed == nil {
+		return "proxmox"
+	}
+	return parsed.Hostname()
+}
 func (c *Client) Snapshot(ctx context.Context) (Snapshot, error) {
 	var result Snapshot
 	result.CapturedAt = time.Now().UTC()
 	if err := c.get(ctx, "/api2/json/nodes", &result.Nodes); err != nil {
 		return result, err
+	}
+	for i := range result.Nodes {
+		result.Nodes[i].Cluster = c.ID()
 	}
 	for _, node := range result.Nodes {
 		var qemu, lxc []VM
@@ -137,6 +191,7 @@ func (c *Client) Snapshot(ctx context.Context) (Snapshot, error) {
 			return result, err
 		}
 		for i := range qemu {
+			qemu[i].Cluster = c.ID()
 			qemu[i].Node = node.Node
 			qemu[i].Type = "qemu"
 		}
@@ -145,6 +200,7 @@ func (c *Client) Snapshot(ctx context.Context) (Snapshot, error) {
 			return result, err
 		}
 		for i := range lxc {
+			lxc[i].Cluster = c.ID()
 			lxc[i].Node = node.Node
 			lxc[i].Type = "lxc"
 		}
@@ -154,11 +210,83 @@ func (c *Client) Snapshot(ctx context.Context) (Snapshot, error) {
 			return result, err
 		}
 		for i := range stores {
+			stores[i].Cluster = c.ID()
 			stores[i].Node = node.Node
 		}
 		result.Storage = append(result.Storage, stores...)
 	}
 	return result, nil
+}
+
+func (c *Client) CreateQEMU(ctx context.Context, input CreateQEMUInput) error {
+	if !nodeNamePattern.MatchString(input.Node) || input.VMID < 1 || strings.TrimSpace(input.Name) == "" || input.Cores < 1 || input.MemoryMB < 128 || input.DiskGB < 1 || !nodeNamePattern.MatchString(input.Storage) {
+		return fmt.Errorf("invalid QEMU configuration")
+	}
+	bridge := input.Bridge
+	if bridge == "" {
+		bridge = "vmbr0"
+	}
+	values := url.Values{"vmid": {strconv.Itoa(input.VMID)}, "name": {input.Name}, "cores": {strconv.Itoa(input.Cores)}, "memory": {strconv.Itoa(input.MemoryMB)}, "scsihw": {"virtio-scsi-single"}, "scsi0": {fmt.Sprintf("%s:%d,discard=on,iothread=1", input.Storage, input.DiskGB)}, "net0": {"virtio,bridge=" + bridge}, "ostype": {"l26"}}
+	if strings.TrimSpace(input.ISO) != "" {
+		values.Set("ide2", input.ISO+",media=cdrom")
+		values.Set("boot", "order=scsi0;ide2")
+	}
+	if input.Start {
+		values.Set("start", "1")
+	}
+	return c.requestForm(ctx, http.MethodPost, fmt.Sprintf("/api2/json/nodes/%s/qemu", url.PathEscape(input.Node)), values, nil)
+}
+
+func (c *Client) CreateLXC(ctx context.Context, input CreateLXCInput) error {
+	if !nodeNamePattern.MatchString(input.Node) || input.VMID < 1 || strings.TrimSpace(input.Hostname) == "" || input.Cores < 1 || input.MemoryMB < 128 || input.RootFSGB < 1 || !nodeNamePattern.MatchString(input.Storage) || strings.TrimSpace(input.Template) == "" {
+		return fmt.Errorf("invalid LXC configuration")
+	}
+	bridge := input.Bridge
+	if bridge == "" {
+		bridge = "vmbr0"
+	}
+	values := url.Values{"vmid": {strconv.Itoa(input.VMID)}, "hostname": {input.Hostname}, "cores": {strconv.Itoa(input.Cores)}, "memory": {strconv.Itoa(input.MemoryMB)}, "rootfs": {fmt.Sprintf("%s:%d", input.Storage, input.RootFSGB)}, "ostemplate": {input.Template}, "net0": {"name=eth0,bridge=" + bridge + ",ip=dhcp"}}
+	if input.Unprivileged {
+		values.Set("unprivileged", "1")
+	}
+	if input.Start {
+		values.Set("start", "1")
+	}
+	if input.Password != "" {
+		values.Set("password", input.Password)
+	}
+	if input.SSHPublicKeys != "" {
+		values.Set("ssh-public-keys", input.SSHPublicKeys)
+	}
+	return c.requestForm(ctx, http.MethodPost, fmt.Sprintf("/api2/json/nodes/%s/lxc", url.PathEscape(input.Node)), values, nil)
+}
+
+func (c *Client) Clone(ctx context.Context, input CloneInput) error {
+	if !nodeNamePattern.MatchString(input.Node) || (input.Kind != "qemu" && input.Kind != "lxc") || input.SourceVMID < 1 || input.NewVMID < 1 || strings.TrimSpace(input.Name) == "" {
+		return fmt.Errorf("invalid clone configuration")
+	}
+	values := url.Values{"newid": {strconv.Itoa(input.NewVMID)}, "name": {input.Name}}
+	if input.Full {
+		values.Set("full", "1")
+	}
+	if input.TargetNode != "" {
+		values.Set("target", input.TargetNode)
+	}
+	if input.Storage != "" {
+		values.Set("storage", input.Storage)
+	}
+	return c.requestForm(ctx, http.MethodPost, fmt.Sprintf("/api2/json/nodes/%s/%s/%d/clone", url.PathEscape(input.Node), input.Kind, input.SourceVMID), values, nil)
+}
+
+func (c *Client) DeleteGuest(ctx context.Context, node, kind string, vmid int, purge bool) error {
+	if !nodeNamePattern.MatchString(node) || (kind != "qemu" && kind != "lxc") || vmid < 1 {
+		return fmt.Errorf("invalid guest")
+	}
+	path := fmt.Sprintf("/api2/json/nodes/%s/%s/%d", url.PathEscape(node), kind, vmid)
+	if purge {
+		path += "?purge=1&destroy-unreferenced-disks=1"
+	}
+	return c.request(ctx, http.MethodDelete, path, nil)
 }
 func (c *Client) Version(ctx context.Context) (map[string]any, error) {
 	var result map[string]any
@@ -185,12 +313,22 @@ func (c *Client) get(ctx context.Context, path string, destination any) error {
 	return c.request(ctx, http.MethodGet, path, destination)
 }
 func (c *Client) request(ctx context.Context, method, path string, destination any) error {
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, nil)
+	return c.requestForm(ctx, method, path, nil, destination)
+}
+func (c *Client) requestForm(ctx context.Context, method, path string, values url.Values, destination any) error {
+	var requestBody io.Reader
+	if values != nil {
+		requestBody = strings.NewReader(values.Encode())
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, requestBody)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Authorization", "PVEAPIToken="+c.tokenID+"="+string(c.secret))
 	req.Header.Set("Accept", "application/json")
+	if values != nil {
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
 	response, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("proxmox request: %w", err)

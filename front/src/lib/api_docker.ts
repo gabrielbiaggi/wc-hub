@@ -78,3 +78,5 @@ export const getDockerStats = async () =>
 
 export const runDockerContainerAction = async (id: string, action: 'start' | 'stop' | 'restart') =>
   (await api.post<{ status: string }>(`/v1/docker/containers/${encodeURIComponent(id)}/${action}`, {})).data
+export const execDockerContainer = async (id: string, command: string[]) =>
+  (await api.post<{ output: string }>(`/v1/docker/containers/${encodeURIComponent(id)}/exec`, { command }, { timeout: 45_000 })).data

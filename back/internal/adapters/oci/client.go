@@ -10,6 +10,7 @@ import (
 
 	"github.com/oracle/oci-go-sdk/v65/common"
 	"github.com/oracle/oci-go-sdk/v65/core"
+	"github.com/oracle/oci-go-sdk/v65/database"
 	"github.com/oracle/oci-go-sdk/v65/identity"
 )
 
@@ -27,6 +28,8 @@ type Snapshot struct {
 	Instances           []Instance           `json:"instances"`
 	VCNs                []VCN                `json:"vcns"`
 	Subnets             []Subnet             `json:"subnets"`
+	AutonomousDatabases []AutonomousDatabase `json:"autonomous_databases"`
+	DBSystems           []DBSystem           `json:"db_systems"`
 }
 
 type Region struct {
@@ -83,6 +86,60 @@ type Subnet struct {
 	ProhibitPublicIPOnVNIC bool   `json:"prohibit_public_ip_on_vnic"`
 }
 
+type AutonomousDatabase struct {
+	ID               string          `json:"id"`
+	DisplayName      string          `json:"display_name"`
+	DBName           string          `json:"db_name"`
+	LifecycleState   string          `json:"lifecycle_state"`
+	LifecycleDetails string          `json:"lifecycle_details,omitempty"`
+	CompartmentID    string          `json:"compartment_id"`
+	Workload         string          `json:"workload"`
+	ComputeModel     string          `json:"compute_model"`
+	ComputeCount     float32         `json:"compute_count"`
+	StorageTB        int             `json:"storage_tb"`
+	FreeTier         bool            `json:"free_tier"`
+	TimeCreated      *common.SDKTime `json:"time_created,omitempty"`
+}
+
+type DBSystem struct {
+	ID                 string          `json:"id"`
+	DisplayName        string          `json:"display_name"`
+	LifecycleState     string          `json:"lifecycle_state"`
+	AvailabilityDomain string          `json:"availability_domain"`
+	Shape              string          `json:"shape"`
+	CompartmentID      string          `json:"compartment_id"`
+	SubnetID           string          `json:"subnet_id"`
+	DatabaseEdition    string          `json:"database_edition"`
+	CPUCoreCount       int             `json:"cpu_core_count"`
+	MemoryGB           int             `json:"memory_gb"`
+	TimeCreated        *common.SDKTime `json:"time_created,omitempty"`
+}
+
+type LaunchInstanceInput struct {
+	CompartmentID      string  `json:"compartment_id"`
+	AvailabilityDomain string  `json:"availability_domain"`
+	DisplayName        string  `json:"display_name"`
+	Shape              string  `json:"shape"`
+	ImageID            string  `json:"image_id"`
+	SubnetID           string  `json:"subnet_id"`
+	OCPUs              float32 `json:"ocpus"`
+	MemoryGB           float32 `json:"memory_gb"`
+	AssignPublicIP     bool    `json:"assign_public_ip"`
+	SSHAuthorizedKey   string  `json:"ssh_authorized_key"`
+}
+
+type CreateAutonomousDatabaseInput struct {
+	CompartmentID string  `json:"compartment_id"`
+	DisplayName   string  `json:"display_name"`
+	DBName        string  `json:"db_name"`
+	AdminPassword string  `json:"admin_password"`
+	Workload      string  `json:"workload"`
+	ComputeCount  float32 `json:"compute_count"`
+	StorageTB     int     `json:"storage_tb"`
+	FreeTier      bool    `json:"free_tier"`
+	AutoScaling   bool    `json:"auto_scaling"`
+}
+
 func New(configPath, profile string) (*Client, error) {
 	if strings.TrimSpace(configPath) == "" {
 		return nil, fmt.Errorf("OCI config path is required")
@@ -113,6 +170,10 @@ func (c *Client) Snapshot(ctx context.Context) (Snapshot, error) {
 	networkClient, err := core.NewVirtualNetworkClientWithConfigurationProvider(c.provider)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("create OCI network client: %w", err)
+	}
+	databaseClient, err := database.NewDatabaseClientWithConfigurationProvider(c.provider)
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("create OCI database client: %w", err)
 	}
 
 	result := Snapshot{CapturedAt: time.Now().UTC()}
@@ -151,10 +212,12 @@ func (c *Client) Snapshot(ctx context.Context) (Snapshot, error) {
 	}
 
 	type resources struct {
-		instances []Instance
-		vcns      []VCN
-		subnets   []Subnet
-		err       error
+		instances           []Instance
+		vcns                []VCN
+		subnets             []Subnet
+		autonomousDatabases []AutonomousDatabase
+		dbSystems           []DBSystem
+		err                 error
 	}
 	resourceCh := make(chan resources, len(result.Compartments))
 	semaphore := make(chan struct{}, 5)
@@ -208,6 +271,24 @@ func (c *Client) Snapshot(ctx context.Context) (Snapshot, error) {
 				}
 				bundle.subnets = append(bundle.subnets, Subnet{ID: stringValue(item.Id), DisplayName: stringValue(item.DisplayName), CIDRBlock: stringValue(item.CidrBlock), AvailabilityDomain: stringValue(item.AvailabilityDomain), LifecycleState: string(item.LifecycleState), VCNID: stringValue(item.VcnId), CompartmentID: stringValue(item.CompartmentId), ProhibitPublicIPOnVNIC: boolValue(item.ProhibitPublicIpOnVnic)})
 			}
+			autonomous, requestErr := databaseClient.ListAutonomousDatabases(ctx, database.ListAutonomousDatabasesRequest{CompartmentId: common.String(compartmentID), Limit: common.Int(1000)})
+			if requestErr != nil {
+				bundle.err = fmt.Errorf("list autonomous databases in compartment %s: %w", compartmentID, requestErr)
+				resourceCh <- bundle
+				return
+			}
+			for _, item := range autonomous.Items {
+				bundle.autonomousDatabases = append(bundle.autonomousDatabases, AutonomousDatabase{ID: stringValue(item.Id), DisplayName: stringValue(item.DisplayName), DBName: stringValue(item.DbName), LifecycleState: string(item.LifecycleState), LifecycleDetails: stringValue(item.LifecycleDetails), CompartmentID: stringValue(item.CompartmentId), Workload: string(item.DbWorkload), ComputeModel: string(item.ComputeModel), ComputeCount: float32Value(item.ComputeCount), StorageTB: intValue(item.DataStorageSizeInTBs), FreeTier: boolValue(item.IsFreeTier), TimeCreated: item.TimeCreated})
+			}
+			dbSystems, requestErr := databaseClient.ListDbSystems(ctx, database.ListDbSystemsRequest{CompartmentId: common.String(compartmentID), Limit: common.Int(1000)})
+			if requestErr != nil {
+				bundle.err = fmt.Errorf("list DB systems in compartment %s: %w", compartmentID, requestErr)
+				resourceCh <- bundle
+				return
+			}
+			for _, item := range dbSystems.Items {
+				bundle.dbSystems = append(bundle.dbSystems, DBSystem{ID: stringValue(item.Id), DisplayName: stringValue(item.DisplayName), LifecycleState: string(item.LifecycleState), AvailabilityDomain: stringValue(item.AvailabilityDomain), Shape: stringValue(item.Shape), CompartmentID: stringValue(item.CompartmentId), SubnetID: stringValue(item.SubnetId), DatabaseEdition: string(item.DatabaseEdition), CPUCoreCount: intValue(item.CpuCoreCount), MemoryGB: intValue(item.MemorySizeInGBs), TimeCreated: item.TimeCreated})
+			}
 			resourceCh <- bundle
 		}()
 	}
@@ -220,10 +301,16 @@ func (c *Client) Snapshot(ctx context.Context) (Snapshot, error) {
 		result.Instances = append(result.Instances, bundle.instances...)
 		result.VCNs = append(result.VCNs, bundle.vcns...)
 		result.Subnets = append(result.Subnets, bundle.subnets...)
+		result.AutonomousDatabases = append(result.AutonomousDatabases, bundle.autonomousDatabases...)
+		result.DBSystems = append(result.DBSystems, bundle.dbSystems...)
 	}
 	sort.Slice(result.Instances, func(i, j int) bool { return result.Instances[i].DisplayName < result.Instances[j].DisplayName })
 	sort.Slice(result.VCNs, func(i, j int) bool { return result.VCNs[i].DisplayName < result.VCNs[j].DisplayName })
 	sort.Slice(result.Subnets, func(i, j int) bool { return result.Subnets[i].DisplayName < result.Subnets[j].DisplayName })
+	sort.Slice(result.AutonomousDatabases, func(i, j int) bool {
+		return result.AutonomousDatabases[i].DisplayName < result.AutonomousDatabases[j].DisplayName
+	})
+	sort.Slice(result.DBSystems, func(i, j int) bool { return result.DBSystems[i].DisplayName < result.DBSystems[j].DisplayName })
 	return result, nil
 }
 
@@ -243,6 +330,64 @@ func float32Value(value *float32) float32 {
 		return 0
 	}
 	return *value
+}
+
+func intValue(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func (c *Client) LaunchInstance(ctx context.Context, input LaunchInstanceInput) (string, error) {
+	if !strings.HasPrefix(input.CompartmentID, "ocid1.compartment.") && input.CompartmentID != c.tenancy || !strings.HasPrefix(input.ImageID, "ocid1.image.") || !strings.HasPrefix(input.SubnetID, "ocid1.subnet.") || strings.TrimSpace(input.AvailabilityDomain) == "" || strings.TrimSpace(input.DisplayName) == "" || strings.TrimSpace(input.Shape) == "" {
+		return "", fmt.Errorf("invalid OCI instance launch input")
+	}
+	client, err := core.NewComputeClientWithConfigurationProvider(c.provider)
+	if err != nil {
+		return "", fmt.Errorf("create OCI compute client: %w", err)
+	}
+	metadata := map[string]string{}
+	if strings.TrimSpace(input.SSHAuthorizedKey) != "" {
+		metadata["ssh_authorized_keys"] = strings.TrimSpace(input.SSHAuthorizedKey)
+	}
+	details := core.LaunchInstanceDetails{AvailabilityDomain: common.String(input.AvailabilityDomain), CompartmentId: common.String(input.CompartmentID), DisplayName: common.String(input.DisplayName), Shape: common.String(input.Shape), SourceDetails: core.InstanceSourceViaImageDetails{ImageId: common.String(input.ImageID)}, CreateVnicDetails: &core.CreateVnicDetails{SubnetId: common.String(input.SubnetID), AssignPublicIp: common.Bool(input.AssignPublicIP)}, Metadata: metadata}
+	if input.OCPUs > 0 || input.MemoryGB > 0 {
+		details.ShapeConfig = &core.LaunchInstanceShapeConfigDetails{Ocpus: common.Float32(input.OCPUs), MemoryInGBs: common.Float32(input.MemoryGB)}
+	}
+	response, err := client.LaunchInstance(ctx, core.LaunchInstanceRequest{LaunchInstanceDetails: details})
+	if err != nil {
+		return "", fmt.Errorf("launch OCI instance: %w", err)
+	}
+	return stringValue(response.Instance.Id), nil
+}
+
+func (c *Client) CreateAutonomousDatabase(ctx context.Context, input CreateAutonomousDatabaseInput) (string, error) {
+	if (!strings.HasPrefix(input.CompartmentID, "ocid1.compartment.") && input.CompartmentID != c.tenancy) || strings.TrimSpace(input.DisplayName) == "" || strings.TrimSpace(input.DBName) == "" || len(input.AdminPassword) < 12 {
+		return "", fmt.Errorf("invalid Autonomous Database input")
+	}
+	workloads := map[string]database.CreateAutonomousDatabaseBaseDbWorkloadEnum{"OLTP": database.CreateAutonomousDatabaseBaseDbWorkloadOltp, "DW": database.CreateAutonomousDatabaseBaseDbWorkloadDw, "AJD": database.CreateAutonomousDatabaseBaseDbWorkloadAjd, "APEX": database.CreateAutonomousDatabaseBaseDbWorkloadApex}
+	workload, ok := workloads[strings.ToUpper(input.Workload)]
+	if !ok {
+		return "", fmt.Errorf("unsupported Autonomous Database workload")
+	}
+	client, err := database.NewDatabaseClientWithConfigurationProvider(c.provider)
+	if err != nil {
+		return "", err
+	}
+	details := database.CreateAutonomousDatabaseDetails{CompartmentId: common.String(input.CompartmentID), DisplayName: common.String(input.DisplayName), DbName: common.String(input.DBName), AdminPassword: common.String(input.AdminPassword), DbWorkload: workload, IsFreeTier: common.Bool(input.FreeTier), IsAutoScalingEnabled: common.Bool(input.AutoScaling), LicenseModel: database.CreateAutonomousDatabaseBaseLicenseModelLicenseIncluded}
+	if input.ComputeCount > 0 {
+		details.ComputeCount = common.Float32(input.ComputeCount)
+		details.ComputeModel = database.CreateAutonomousDatabaseBaseComputeModelEcpu
+	}
+	if input.StorageTB > 0 {
+		details.DataStorageSizeInTBs = common.Int(input.StorageTB)
+	}
+	response, err := client.CreateAutonomousDatabase(ctx, database.CreateAutonomousDatabaseRequest{CreateAutonomousDatabaseDetails: details})
+	if err != nil {
+		return "", fmt.Errorf("create Autonomous Database: %w", err)
+	}
+	return stringValue(response.AutonomousDatabase.Id), nil
 }
 
 func (c *Client) InstanceAction(ctx context.Context, instanceID, action string) error {

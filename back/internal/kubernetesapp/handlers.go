@@ -21,6 +21,42 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, overview)
 }
 
+func (h *Handler) PodLogs(w http.ResponseWriter, r *http.Request) {
+	if h.client == nil {
+		writeError(w, 503, "kubernetes_unconfigured", "O Kubernetes não está configurado.")
+		return
+	}
+	logs, err := h.client.PodLogs(r.Context(), r.PathValue("namespace"), r.PathValue("pod"), r.URL.Query().Get("container"), 500)
+	if err != nil {
+		writeError(w, 502, "kubernetes_logs_failed", "Não foi possível carregar os logs do pod.")
+		return
+	}
+	writeJSON(w, 200, map[string]string{"output": logs})
+}
+
+func (h *Handler) PodExec(w http.ResponseWriter, r *http.Request) {
+	if h.client == nil {
+		writeError(w, 503, "kubernetes_unconfigured", "O Kubernetes não está configurado.")
+		return
+	}
+	var input struct {
+		Container string   `json:"container"`
+		Command   []string `json:"command"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeError(w, 400, "invalid_request", "O comando é inválido.")
+		return
+	}
+	output, err := h.client.Exec(r.Context(), r.PathValue("namespace"), r.PathValue("pod"), input.Container, input.Command)
+	if err != nil {
+		writeError(w, 502, "kubernetes_exec_failed", "O Kubernetes rejeitou a execução no pod.")
+		return
+	}
+	writeJSON(w, 200, map[string]string{"output": output})
+}
+
 func (h *Handler) DeploymentAction(w http.ResponseWriter, r *http.Request) {
 	if h.client == nil {
 		writeError(w, 503, "kubernetes_unconfigured", "Kubernetes access is not configured.")

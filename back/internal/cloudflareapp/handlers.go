@@ -27,6 +27,12 @@ type DNSWriter interface {
 	UpdateDNSRecord(context.Context, string, string, cloudflareadapter.DNSRecordInput) (cloudflareadapter.DNSRecord, error)
 	DeleteDNSRecord(context.Context, string, string) error
 }
+type ZoneAdministrator interface {
+	ListZoneSettings(context.Context, string) ([]cloudflareadapter.ZoneSetting, error)
+	UpdateZoneSetting(context.Context, string, string, any) (cloudflareadapter.ZoneSetting, error)
+	PurgeCache(context.Context, string) error
+	ListRulesets(context.Context, string) ([]cloudflareadapter.Ruleset, error)
+}
 
 // AuditEvent is intentionally provider-neutral so the global application can
 // translate it into its hash-chained audit repository without this plugin
@@ -303,6 +309,89 @@ func (h *Handler) DeleteDNSRecord(w http.ResponseWriter, request *http.Request) 
 	}
 	h.emit(ctx, AuditEvent{Action: "cloudflare.dns.delete", ResourceType: "cloudflare_dns_record", TargetName: recordID, Decision: "allowed", Reason: "allowlisted zone mutation", Payload: map[string]any{"zone_id": zoneID}})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) ZoneSettings(w http.ResponseWriter, request *http.Request) {
+	zoneID := request.PathValue("zone_id")
+	if _, allowed := h.allowedZones[zoneID]; !allowed {
+		writeError(w, 403, "zone_not_allowed", "A zona solicitada não está autorizada.")
+		return
+	}
+	admin, ok := h.reader.(ZoneAdministrator)
+	if !ok {
+		writeError(w, 503, "cloudflare_admin_unavailable", "A administração da zona não está configurada.")
+		return
+	}
+	items, err := admin.ListZoneSettings(request.Context(), zoneID)
+	if err != nil {
+		writeProviderError(w)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"items": items})
+}
+func (h *Handler) UpdateZoneSetting(w http.ResponseWriter, request *http.Request) {
+	zoneID := request.PathValue("zone_id")
+	if _, allowed := h.allowedZones[zoneID]; !allowed {
+		writeError(w, 403, "zone_not_allowed", "A zona solicitada não está autorizada.")
+		return
+	}
+	admin, ok := h.reader.(ZoneAdministrator)
+	if !ok {
+		writeError(w, 503, "cloudflare_admin_unavailable", "A administração da zona não está configurada.")
+		return
+	}
+	var input struct {
+		Value any `json:"value"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, request.Body, 16<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeError(w, 400, "invalid_request", "O valor da configuração é inválido.")
+		return
+	}
+	item, err := admin.UpdateZoneSetting(request.Context(), zoneID, request.PathValue("setting"), input.Value)
+	if err != nil {
+		writeError(w, 502, "cloudflare_setting_failed", "A Cloudflare rejeitou a configuração.")
+		return
+	}
+	h.emit(request.Context(), AuditEvent{Action: "cloudflare.zone.setting.update", ResourceType: "cloudflare_zone", TargetName: zoneID, Decision: "allowed", Payload: map[string]any{"setting": request.PathValue("setting")}})
+	writeJSON(w, 200, item)
+}
+func (h *Handler) PurgeCache(w http.ResponseWriter, request *http.Request) {
+	zoneID := request.PathValue("zone_id")
+	if _, allowed := h.allowedZones[zoneID]; !allowed {
+		writeError(w, 403, "zone_not_allowed", "A zona solicitada não está autorizada.")
+		return
+	}
+	admin, ok := h.reader.(ZoneAdministrator)
+	if !ok {
+		writeError(w, 503, "cloudflare_admin_unavailable", "A administração da zona não está configurada.")
+		return
+	}
+	if err := admin.PurgeCache(request.Context(), zoneID); err != nil {
+		writeError(w, 502, "cloudflare_purge_failed", "A Cloudflare rejeitou a limpeza de cache.")
+		return
+	}
+	h.emit(request.Context(), AuditEvent{Action: "cloudflare.zone.cache.purge", ResourceType: "cloudflare_zone", TargetName: zoneID, Decision: "allowed"})
+	writeJSON(w, 202, map[string]string{"status": "accepted"})
+}
+func (h *Handler) Rulesets(w http.ResponseWriter, request *http.Request) {
+	zoneID := request.PathValue("zone_id")
+	if _, allowed := h.allowedZones[zoneID]; !allowed {
+		writeError(w, 403, "zone_not_allowed", "A zona solicitada não está autorizada.")
+		return
+	}
+	admin, ok := h.reader.(ZoneAdministrator)
+	if !ok {
+		writeError(w, 503, "cloudflare_admin_unavailable", "A administração da zona não está configurada.")
+		return
+	}
+	items, err := admin.ListRulesets(request.Context(), zoneID)
+	if err != nil {
+		writeProviderError(w)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"items": items})
 }
 
 func (h *Handler) emit(ctx context.Context, event AuditEvent) {

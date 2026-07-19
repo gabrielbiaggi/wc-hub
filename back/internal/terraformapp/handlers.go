@@ -27,6 +27,8 @@ func (h *Handler) Runs(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Validate(w http.ResponseWriter, r *http.Request) { h.start(w, r, "validate") }
 func (h *Handler) Plan(w http.ResponseWriter, r *http.Request)     { h.start(w, r, "plan") }
 func (h *Handler) Apply(w http.ResponseWriter, r *http.Request)    { h.start(w, r, "apply") }
+func (h *Handler) Destroy(w http.ResponseWriter, r *http.Request)  { h.start(w, r, "destroy") }
+func (h *Handler) Output(w http.ResponseWriter, r *http.Request)   { h.start(w, r, "output") }
 func (h *Handler) start(w http.ResponseWriter, r *http.Request, operation string) {
 	if h.runner == nil {
 		writeError(w, 503, "terraform_unconfigured", "Terraform ephemeral worker is not configured.")

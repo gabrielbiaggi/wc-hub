@@ -12,6 +12,55 @@ import (
 type Client interface {
 	Snapshot(context.Context) (ociadapter.Snapshot, error)
 	InstanceAction(context.Context, string, string) error
+	LaunchInstance(context.Context, ociadapter.LaunchInstanceInput) (string, error)
+	CreateAutonomousDatabase(context.Context, ociadapter.CreateAutonomousDatabaseInput) (string, error)
+}
+
+func (h *Handler) launchInstance(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.client == nil {
+		writeError(w, http.StatusConflict, "oci_unconfigured", "As credenciais de assinatura da OCI não estão configuradas.")
+		return
+	}
+	var input ociadapter.LaunchInstanceInput
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Os dados da nova instância são inválidos.")
+		return
+	}
+	id, err := h.client.LaunchInstance(r.Context(), input)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "oci_launch_failed", "A Oracle Cloud rejeitou a criação da instância.")
+		return
+	}
+	if h.audit != nil {
+		h.audit(r.Context(), AuditEvent{Action: "oci.instance.create", ResourceID: id, TargetName: input.DisplayName, Payload: map[string]any{"shape": input.Shape, "compartment_id": input.CompartmentID, "public_ip": input.AssignPublicIP}})
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "instance_id": id})
+}
+
+func (h *Handler) createAutonomousDatabase(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.client == nil {
+		writeError(w, http.StatusConflict, "oci_unconfigured", "As credenciais de assinatura da OCI não estão configuradas.")
+		return
+	}
+	var input ociadapter.CreateAutonomousDatabaseInput
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Os dados do Autonomous Database são inválidos.")
+		return
+	}
+	id, err := h.client.CreateAutonomousDatabase(r.Context(), input)
+	input.AdminPassword = ""
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "oci_database_create_failed", "A Oracle Cloud rejeitou a criação do Autonomous Database.")
+		return
+	}
+	if h.audit != nil {
+		h.audit(r.Context(), AuditEvent{Action: "oci.autonomous_database.create", ResourceID: id, TargetName: input.DisplayName, Payload: map[string]any{"workload": input.Workload, "compartment_id": input.CompartmentID, "free_tier": input.FreeTier}})
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "database_id": id})
 }
 
 type AuditEvent struct {

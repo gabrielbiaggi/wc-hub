@@ -128,7 +128,7 @@ func (s *server) start(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
-	if input.Operation != "validate" && input.Operation != "plan" && input.Operation != "apply" {
+	if input.Operation != "validate" && input.Operation != "plan" && input.Operation != "apply" && input.Operation != "destroy" && input.Operation != "output" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "operation is not allowlisted"})
 		return
 	}
@@ -193,7 +193,15 @@ func (s *server) execute(ctx context.Context, operation, workspace string) (stri
 		return initOutput, summary{}, err
 	}
 	statePath := filepath.Join(s.stateRoot, workspace+".tfstate")
-	planOutput, planErr := command(ctx, temp, environment, s.terraformPath, "plan", "-input=false", "-no-color", "-state="+statePath, "-out=plan.bin")
+	if operation == "output" {
+		output, outputErr := command(ctx, temp, environment, s.terraformPath, "output", "-json", "-state="+statePath)
+		return initOutput + "\n" + output, summary{}, outputErr
+	}
+	planArguments := []string{"plan", "-input=false", "-no-color", "-state=" + statePath, "-out=plan.bin"}
+	if operation == "destroy" {
+		planArguments = append(planArguments, "-destroy")
+	}
+	planOutput, planErr := command(ctx, temp, environment, s.terraformPath, planArguments...)
 	if planErr != nil {
 		return initOutput + "\n" + planOutput, summary{}, planErr
 	}
@@ -202,7 +210,7 @@ func (s *server) execute(ctx context.Context, operation, workspace string) (stri
 		return initOutput + "\n" + planOutput, summary{}, showErr
 	}
 	changes := summarizePlan([]byte(jsonOutput))
-	if operation == "apply" {
+	if operation == "apply" || operation == "destroy" {
 		applyOutput, applyErr := command(ctx, temp, environment, s.terraformPath, "apply", "-input=false", "-auto-approve", "-no-color", "plan.bin")
 		return initOutput + "\n" + planOutput + "\n" + applyOutput, changes, applyErr
 	}

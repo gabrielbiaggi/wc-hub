@@ -325,6 +325,103 @@ func (c *Client) ContainerAction(ctx context.Context, id, action string) error {
 	return nil
 }
 
+func (c *Client) Exec(ctx context.Context, id string, command []string) (string, error) {
+	id = strings.ToLower(strings.TrimSpace(id))
+	if !containerIDPattern.MatchString(id) || len(command) == 0 || len(command) > 32 {
+		return "", errors.New("Docker exec input is invalid")
+	}
+	for _, item := range command {
+		if strings.TrimSpace(item) == "" || len(item) > 4096 {
+			return "", errors.New("Docker exec command is invalid")
+		}
+	}
+	var created struct {
+		ID string `json:"Id"`
+	}
+	if err := c.postJSON(ctx, "/containers/"+id+"/exec", map[string]any{"AttachStdout": true, "AttachStderr": true, "Tty": false, "Cmd": command}, &created); err != nil {
+		return "", err
+	}
+	if created.ID == "" {
+		return "", errors.New("Docker exec session was not created")
+	}
+	raw, err := c.postRaw(ctx, "/exec/"+url.PathEscape(created.ID)+"/start", map[string]any{"Detach": false, "Tty": false})
+	if err != nil {
+		return "", err
+	}
+	return decodeDockerStream(raw), nil
+}
+
+func (c *Client) postJSON(ctx context.Context, path string, payload, destination any) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, strings.NewReader(string(body)))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json")
+	response, err := c.http.Do(request)
+	if err != nil {
+		return fmt.Errorf("Docker request: %w", err)
+	}
+	defer response.Body.Close()
+	responseBody, err := io.ReadAll(io.LimitReader(response.Body, 2<<20))
+	if err != nil {
+		return err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return fmt.Errorf("Docker API returned %d: %s", response.StatusCode, sanitize(responseBody))
+	}
+	if destination != nil {
+		return json.Unmarshal(responseBody, destination)
+	}
+	return nil
+}
+
+func (c *Client) postRaw(ctx context.Context, path string, payload any) ([]byte, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, strings.NewReader(string(body)))
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := c.http.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	result, err := io.ReadAll(io.LimitReader(response.Body, 2<<20))
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, fmt.Errorf("Docker API returned %d: %s", response.StatusCode, sanitize(result))
+	}
+	return result, nil
+}
+
+func decodeDockerStream(raw []byte) string {
+	var output strings.Builder
+	for len(raw) >= 8 {
+		size := int(raw[4])<<24 | int(raw[5])<<16 | int(raw[6])<<8 | int(raw[7])
+		raw = raw[8:]
+		if size < 0 || size > len(raw) {
+			break
+		}
+		output.Write(raw[:size])
+		raw = raw[size:]
+	}
+	if output.Len() == 0 {
+		output.Write(raw)
+	}
+	return output.String()
+}
+
 func (c *Client) Stats(ctx context.Context, containers []Container) ([]ContainerStats, []string) {
 	running := make([]Container, 0, len(containers))
 	for _, container := range containers {

@@ -5,6 +5,8 @@ export interface KubeNode{metadata:KubeMetadata;status:{conditions:KubeCondition
 export interface KubeDeployment{metadata:KubeMetadata;spec:{replicas:number};status:{replicas:number;readyReplicas:number;availableReplicas:number;unavailableReplicas:number}}
 export interface KubePod{metadata:KubeMetadata;status:{phase:string;reason:string;message:string;podIP:string;hostIP:string;containerStatuses:Array<{name:string;ready:boolean;restartCount:number}>}}
 export interface KubeEvent{metadata:KubeMetadata;type:string;reason:string;message:string;count:number;lastTimestamp:string;regarding?:{kind:string;namespace:string;name:string};involvedObject?:{kind:string;namespace:string;name:string}}
-export interface KubernetesOverview{generated_at:string;nodes:KubeNode[];deployments:KubeDeployment[];problem_pods:KubePod[];events:KubeEvent[]}
+export interface KubernetesOverview{generated_at:string;nodes:KubeNode[];deployments:KubeDeployment[];pods:KubePod[];problem_pods:KubePod[];events:KubeEvent[]}
 export const getKubernetesOverview=async()=>(await api.get<KubernetesOverview>('/v1/kubernetes/overview')).data
 export const runKubernetesDeploymentAction=async(namespace:string,name:string,action:'scale'|'restart',replicas?:number)=>(await api.post<{status:string}>(`/v1/kubernetes/namespaces/${encodeURIComponent(namespace)}/deployments/${encodeURIComponent(name)}/${action}`,action==='scale'?{replicas}:{})).data
+export const getKubernetesPodLogs=async(namespace:string,pod:string,container='')=>(await api.get<{output:string}>(`/v1/kubernetes/namespaces/${encodeURIComponent(namespace)}/pods/${encodeURIComponent(pod)}/logs`,{params:{container}})).data
+export const execKubernetesPod=async(namespace:string,pod:string,container:string,command:string[])=>(await api.post<{output:string}>(`/v1/kubernetes/namespaces/${encodeURIComponent(namespace)}/pods/${encodeURIComponent(pod)}/exec`,{container,command},{timeout:45_000})).data

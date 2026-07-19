@@ -15,12 +15,15 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 type Config struct{ Endpoint, TokenPath, CAPath string }
 type Client struct {
 	baseURL, tokenPath string
 	http               *http.Client
+	tlsConfig          *tls.Config
 }
 type Metadata struct {
 	Name, Namespace, UID string
@@ -72,6 +75,7 @@ type Overview struct {
 	Nodes       []Node       `json:"nodes"`
 	Deployments []Deployment `json:"deployments"`
 	ProblemPods []Pod        `json:"problem_pods"`
+	Pods        []Pod        `json:"pods"`
 	Events      []Event      `json:"events"`
 }
 type list[T any] struct {
@@ -101,7 +105,7 @@ func New(config Config) (*Client, error) {
 		tlsConfig.RootCAs = pool
 	}
 	transport := &http.Transport{TLSClientConfig: tlsConfig, MaxIdleConns: 20, IdleConnTimeout: 60 * time.Second}
-	return &Client{baseURL: parsed.String(), tokenPath: config.TokenPath, http: &http.Client{Timeout: 20 * time.Second, Transport: transport}}, nil
+	return &Client{baseURL: parsed.String(), tokenPath: config.TokenPath, http: &http.Client{Timeout: 20 * time.Second, Transport: transport}, tlsConfig: tlsConfig}, nil
 }
 func (c *Client) Overview(ctx context.Context) (Overview, error) {
 	result := Overview{GeneratedAt: time.Now().UTC(), Nodes: []Node{}, Deployments: []Deployment{}, ProblemPods: []Pod{}, Events: []Event{}}
@@ -119,6 +123,7 @@ func (c *Client) Overview(ctx context.Context) (Overview, error) {
 	if err := c.get(ctx, "/api/v1/pods?limit=1000", &pods); err != nil {
 		return result, err
 	}
+	result.Pods = pods.Items
 	for _, pod := range pods.Items {
 		if pod.Status.Phase != "Running" && pod.Status.Phase != "Succeeded" || hasContainerProblem(pod) {
 			result.ProblemPods = append(result.ProblemPods, pod)
@@ -137,6 +142,98 @@ func (c *Client) Overview(ctx context.Context) (Overview, error) {
 		result.Events = result.Events[len(result.Events)-50:]
 	}
 	return result, nil
+}
+
+func (c *Client) PodLogs(ctx context.Context, namespace, pod, container string, tailLines int) (string, error) {
+	if !resourceNamePattern.MatchString(namespace) || !resourceNamePattern.MatchString(pod) || (container != "" && !resourceNamePattern.MatchString(container)) {
+		return "", errors.New("Kubernetes pod target is invalid")
+	}
+	if tailLines <= 0 || tailLines > 5000 {
+		tailLines = 500
+	}
+	query := url.Values{"tailLines": {fmt.Sprint(tailLines)}, "timestamps": {"true"}}
+	if container != "" {
+		query.Set("container", container)
+	}
+	return c.requestText(ctx, "/api/v1/namespaces/"+url.PathEscape(namespace)+"/pods/"+url.PathEscape(pod)+"/log?"+query.Encode())
+}
+
+func (c *Client) Exec(ctx context.Context, namespace, pod, container string, command []string) (string, error) {
+	if !resourceNamePattern.MatchString(namespace) || !resourceNamePattern.MatchString(pod) || (container != "" && !resourceNamePattern.MatchString(container)) || len(command) == 0 || len(command) > 32 {
+		return "", errors.New("Kubernetes exec input is invalid")
+	}
+	token, err := os.ReadFile(c.tokenPath)
+	if err != nil {
+		return "", err
+	}
+	defer zero(token)
+	token = bytes.TrimSpace(token)
+	query := url.Values{"stdout": {"true"}, "stderr": {"true"}, "stdin": {"false"}, "tty": {"false"}}
+	for _, part := range command {
+		if strings.TrimSpace(part) == "" || len(part) > 4096 {
+			return "", errors.New("Kubernetes command is invalid")
+		}
+		query.Add("command", part)
+	}
+	if container != "" {
+		query.Set("container", container)
+	}
+	endpoint := strings.Replace(c.baseURL, "https://", "wss://", 1) + "/api/v1/namespaces/" + url.PathEscape(namespace) + "/pods/" + url.PathEscape(pod) + "/exec?" + query.Encode()
+	dialer := websocket.Dialer{TLSClientConfig: c.tlsConfig, HandshakeTimeout: 20 * time.Second, Subprotocols: []string{"v4.channel.k8s.io"}}
+	headers := http.Header{"Authorization": []string{"Bearer " + string(token)}}
+	connection, response, err := dialer.DialContext(ctx, endpoint, headers)
+	if err != nil {
+		if response != nil {
+			return "", fmt.Errorf("Kubernetes exec returned %d", response.StatusCode)
+		}
+		return "", err
+	}
+	defer connection.Close()
+	_ = connection.SetReadDeadline(time.Now().Add(30 * time.Second))
+	var output strings.Builder
+	for output.Len() < 2<<20 {
+		_, message, readErr := connection.ReadMessage()
+		if readErr != nil {
+			if websocket.IsCloseError(readErr, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+				break
+			}
+			if strings.Contains(readErr.Error(), "close 1000") {
+				break
+			}
+			return "", readErr
+		}
+		if len(message) > 1 && (message[0] == 1 || message[0] == 2 || message[0] == 3) {
+			output.Write(message[1:])
+		}
+	}
+	return output.String(), nil
+}
+
+func (c *Client) requestText(ctx context.Context, path string) (string, error) {
+	token, err := os.ReadFile(c.tokenPath)
+	if err != nil {
+		return "", err
+	}
+	defer zero(token)
+	token = bytes.TrimSpace(token)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+string(token))
+	response, err := c.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, 2<<20))
+	if err != nil {
+		return "", err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return "", fmt.Errorf("Kubernetes API returned %d", response.StatusCode)
+	}
+	return string(body), nil
 }
 func hasContainerProblem(pod Pod) bool {
 	for _, status := range pod.Status.ContainerStatuses {

@@ -13,4 +13,6 @@ func MountRoutes(mux *http.ServeMux, auth AuthMiddleware, runner *terraformadapt
 	mux.HandleFunc("POST /api/v1/terraform/validate", auth("terraform.plan", h.Validate))
 	mux.HandleFunc("POST /api/v1/terraform/plan", auth("terraform.plan", h.Plan))
 	mux.HandleFunc("POST /api/v1/terraform/apply", auth("terraform.apply", h.Apply))
+	mux.HandleFunc("POST /api/v1/terraform/destroy", auth("terraform.apply", h.Destroy))
+	mux.HandleFunc("POST /api/v1/terraform/output", auth("terraform.read", h.Output))
 }

@@ -18,6 +18,33 @@ type Reader interface {
 
 type Controller interface {
 	ContainerAction(context.Context, string, string) error
+	Exec(context.Context, string, []string) (string, error)
+}
+
+func (h *Handler) Exec(w http.ResponseWriter, r *http.Request) {
+	if !h.available(w) {
+		return
+	}
+	controller, ok := h.reader.(Controller)
+	if !ok {
+		writeError(w, 503, "docker_exec_unavailable", "O terminal Docker não está configurado.")
+		return
+	}
+	var input struct {
+		Command []string `json:"command"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeError(w, 400, "invalid_request", "O comando Docker é inválido.")
+		return
+	}
+	output, err := controller.Exec(r.Context(), r.PathValue("id"), input.Command)
+	if err != nil {
+		writeError(w, 502, "docker_exec_failed", "O Docker rejeitou a execução.")
+		return
+	}
+	writeJSON(w, 200, map[string]string{"output": output})
 }
 
 type Handler struct{ reader Reader }

@@ -18,10 +18,10 @@ export interface Role { id:string; slug:string; name:string; description:string;
 export interface Permission { id:string; slug:string; description:string; risk:'safe'|'dangerous'|'critical' }
 export interface Alert { id:string; resource_type:string; resource_id?:string; severity:string; title:string; description:string; status:'open'|'acknowledged'|'resolved'; acknowledged_at?:string; resolved_at?:string; created_at:string }
 export interface ProxmoxSummary { configured:boolean; status:string; last_checked_at?:string; nodes:number; virtual_machines:number; containers:number; storage_pools:number }
-export interface ProxmoxNode { node:string;status:string;cpu:number;maxcpu:number;mem:number;maxmem:number;uptime:number;level:string }
-export interface ProxmoxGuest { vmid:number;name:string;status:string;cpu:number;cpus:number;mem:number;maxmem:number;maxdisk:number;uptime:number;node:string;type:'qemu'|'lxc';template?:number }
-export interface ProxmoxStorage { storage:string;type:string;status:string;active:number;total:number;used:number;avail:number;shared:number;node:string }
-export interface ProxmoxInventory { captured_at:string;nodes:ProxmoxNode[];virtual_machines:ProxmoxGuest[];containers:ProxmoxGuest[];storage:ProxmoxStorage[] }
+export interface ProxmoxNode { cluster:string;node:string;status:string;cpu:number;maxcpu:number;mem:number;maxmem:number;uptime:number;level:string }
+export interface ProxmoxGuest { cluster:string;vmid:number;name:string;status:string;cpu:number;cpus:number;mem:number;maxmem:number;maxdisk:number;uptime:number;node:string;type:'qemu'|'lxc';template?:number }
+export interface ProxmoxStorage { cluster:string;storage:string;type:string;status:string;active:number;total:number;used:number;avail:number;shared:number;node:string }
+export interface ProxmoxInventory { captured_at:string;nodes:ProxmoxNode[];virtual_machines:ProxmoxGuest[];containers:ProxmoxGuest[];storage:ProxmoxStorage[];warnings?:string[] }
 export interface Job { id:string; kind:string; payload:Record<string,unknown>; status:string; priority:number; attempts:number; max_attempts:number; run_after:string; locked_by?:string; last_error?:string; created_at:string; started_at?:string; finished_at?:string }
 export interface HostMetric { host_id:string; host_name:string; metric:string; value:number; unit:string; captured_at:string }
 
@@ -47,7 +47,14 @@ export const confirmTOTP = async (code:string) => (await api.post<{totp_enabled:
 export const getProxmoxSummary = async () => (await api.get<ProxmoxSummary>('/v1/proxmox/summary')).data
 export const syncProxmox = async () => (await api.post<Job>('/v1/proxmox/sync', {})).data
 export const getProxmoxInventory = async () => (await api.get<ProxmoxInventory>('/v1/proxmox/inventory')).data
-export const runProxmoxPowerAction = async(node:string,kind:'qemu'|'lxc',vmid:number,action:'start'|'stop'|'shutdown'|'reboot'|'reset')=>(await api.post<{status:string}>(`/v1/proxmox/nodes/${encodeURIComponent(node)}/${kind}/${vmid}/${action}`,{})).data
+export const runProxmoxPowerAction = async(cluster:string,node:string,kind:'qemu'|'lxc',vmid:number,action:'start'|'stop'|'shutdown'|'reboot'|'reset')=>(await api.post<{status:string}>(`/v1/proxmox/nodes/${encodeURIComponent(node)}/${kind}/${vmid}/${action}`,{},{params:{cluster}})).data
+export interface ProxmoxQEMUInput {cluster:string;node:string;vmid:number;name:string;cores:number;memory_mb:number;storage:string;disk_gb:number;iso:string;bridge:string;start:boolean}
+export interface ProxmoxLXCInput {cluster:string;node:string;vmid:number;hostname:string;cores:number;memory_mb:number;storage:string;rootfs_gb:number;template:string;bridge:string;password:string;ssh_public_keys:string;unprivileged:boolean;start:boolean}
+export interface ProxmoxCloneInput {cluster:string;node:string;kind:'qemu'|'lxc';source_vmid:number;new_vmid:number;name:string;target_node:string;storage:string;full:boolean}
+export const createProxmoxQEMU=async(input:ProxmoxQEMUInput)=>(await api.post('/v1/proxmox/qemu',input)).data
+export const createProxmoxLXC=async(input:ProxmoxLXCInput)=>(await api.post('/v1/proxmox/lxc',input)).data
+export const cloneProxmoxGuest=async(input:ProxmoxCloneInput)=>(await api.post('/v1/proxmox/clone',input)).data
+export const deleteProxmoxGuest=async(guest:ProxmoxGuest,purge=true)=>api.delete(`/v1/proxmox/nodes/${encodeURIComponent(guest.node)}/${guest.type}/${guest.vmid}`,{params:{cluster:guest.cluster,purge}})
 export const getJobs = async () => (await api.get<{items:Job[]}>('/v1/jobs')).data.items
 export const enqueueJob = async (kind:string) => (await api.post<Job>('/v1/jobs', {kind,payload:{},priority:100,max_attempts:5})).data
 export const getHostTelemetry = async () => (await api.get<{items:HostMetric[]}>('/v1/telemetry/hosts')).data.items
