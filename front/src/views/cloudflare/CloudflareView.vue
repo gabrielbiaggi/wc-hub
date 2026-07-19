@@ -86,16 +86,16 @@ const shortID = (value: string) => value.length > 18 ? `${value.slice(0, 8)}…$
           />
           <span class="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-signal">
             <ShieldCheck class="h-3.5 w-3.5" aria-hidden="true" />
-            full API token · zone allowlist
+            token completo da API · lista de zonas permitidas
           </span>
         </div>
-        <h1 class="mt-4 text-3xl font-semibold tracking-tight text-slate-50">Cloudflare edge fabric</h1>
+        <h1 class="mt-4 text-3xl font-semibold tracking-tight text-slate-50">Malha de borda Cloudflare</h1>
         <p class="mt-2 max-w-3xl text-sm leading-6 text-muted">
-          Saúde operacional dos túneis Zero Trust e inventário DNS limitado às accounts e zones autorizadas.
+          Saúde operacional dos túneis Zero Trust e inventário DNS limitado às contas e zonas autorizadas.
         </p>
       </div>
       <div class="flex flex-col items-start gap-2 sm:flex-row sm:items-center">
-        <p class="font-mono text-[9px] uppercase tracking-wider text-muted">Snapshot: {{ generatedAt }}</p>
+        <p class="font-mono text-[9px] uppercase tracking-wider text-muted">Captura: {{ generatedAt }}</p>
         <Button
           variant="outline"
           :disabled="query.isFetching.value"
@@ -116,7 +116,7 @@ const shortID = (value: string) => value.length > 18 ? `${value.slice(0, 8)}…$
     >
       <div class="text-center">
         <div class="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-line border-t-signal" />
-        <p class="mt-4 text-sm text-muted">Consultando o edge fabric autorizado…</p>
+        <p class="mt-4 text-sm text-muted">Consultando o ambiente de borda autorizado…</p>
       </div>
     </div>
 
@@ -146,26 +146,26 @@ const shortID = (value: string) => value.length > 18 ? `${value.slice(0, 8)}…$
           <Waypoints class="h-4 w-4 text-muted" aria-hidden="true" />
           <div class="mt-5 flex items-end justify-between gap-3">
             <p class="font-mono text-2xl text-white">{{ overview.summary.tunnels }}</p>
-            <span class="font-mono text-[10px] text-signal">{{ healthRatio }}% healthy</span>
+            <span class="font-mono text-[10px] text-signal">{{ healthRatio }}% saudáveis</span>
           </div>
-          <p class="mt-1 text-xs text-muted">Zero Trust tunnels</p>
+          <p class="mt-1 text-xs text-muted">Túneis Zero Trust</p>
         </article>
         <article class="rounded-xl border border-line bg-panel/65 p-5 shadow-panel">
           <Globe2 class="h-4 w-4 text-muted" aria-hidden="true" />
           <p class="mt-5 font-mono text-2xl text-white">{{ overview.summary.dns_records }}</p>
-          <p class="mt-1 text-xs text-muted">DNS records</p>
+          <p class="mt-1 text-xs text-muted">Registros DNS</p>
         </article>
         <article class="rounded-xl border border-line bg-panel/65 p-5 shadow-panel">
           <Cloud class="h-4 w-4 text-muted" aria-hidden="true" />
           <p class="mt-5 font-mono text-2xl text-white">{{ overview.summary.proxied_records }}</p>
-          <p class="mt-1 text-xs text-muted">Cloudflare proxied</p>
+          <p class="mt-1 text-xs text-muted">Com proxy Cloudflare</p>
         </article>
         <article class="rounded-xl border border-line bg-panel/65 p-5 shadow-panel">
           <Network class="h-4 w-4 text-muted" aria-hidden="true" />
           <p class="mt-5 font-mono text-2xl text-white">
             {{ overview.summary.accounts }}<span class="px-1 text-sm text-muted">/</span>{{ overview.summary.zones }}
           </p>
-          <p class="mt-1 text-xs text-muted">Allowlisted accounts / zones</p>
+          <p class="mt-1 text-xs text-muted">Contas / zonas permitidas</p>
         </article>
       </section>
 
@@ -173,12 +173,12 @@ const shortID = (value: string) => value.length > 18 ? `${value.slice(0, 8)}…$
         <article class="min-w-0 overflow-hidden rounded-xl border border-line bg-panel/65">
           <header class="flex flex-col gap-4 border-b border-line px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 class="text-sm font-medium text-slate-100">Edge inventory</h2>
+              <h2 class="text-sm font-medium text-slate-100">Inventário de borda</h2>
               <p class="mt-1 text-xs text-muted">Estado retornado diretamente pela API Cloudflare</p>
             </div>
             <div class="flex rounded-lg border border-line bg-slate-950/50 p-1" role="tablist" aria-label="Tipo de inventário">
               <button
-                v-for="item in [{ id: 'tunnels', label: 'Tunnels' }, { id: 'dns', label: 'DNS' }]"
+                v-for="item in [{ id: 'tunnels', label: 'Túneis' }, { id: 'dns', label: 'DNS' }]"
                 :key="item.id"
                 type="button"
                 role="tab"
@@ -219,14 +219,14 @@ const shortID = (value: string) => value.length > 18 ? `${value.slice(0, 8)}…$
             <div v-if="!overview.tunnels.length" class="grid min-h-56 place-items-center px-5 text-center">
               <div>
                 <Waypoints class="mx-auto h-7 w-7 text-muted" aria-hidden="true" />
-                <p class="mt-3 text-sm text-muted">Nenhum túnel encontrado nas accounts autorizadas.</p>
+                <p class="mt-3 text-sm text-muted">Nenhum túnel encontrado nas contas autorizadas.</p>
               </div>
             </div>
           </div>
 
           <div v-else role="tabpanel">
             <form class="grid gap-3 border-b border-line bg-slate-950/25 p-4 md:grid-cols-[180px_90px_1fr_1fr_110px]" @submit.prevent="createRecord">
-              <select v-model="selectedZone" class="rounded-lg border border-line bg-slate-950 px-3 text-xs text-slate-200"><option value="">Zone padrão</option><option v-for="zone in zoneIDs" :key="zone" :value="zone">{{shortID(zone)}}</option></select>
+              <select v-model="selectedZone" class="rounded-lg border border-line bg-slate-950 px-3 text-xs text-slate-200"><option value="">Zona padrão</option><option v-for="zone in zoneIDs" :key="zone" :value="zone">{{shortID(zone)}}</option></select>
               <select v-model="dnsType" class="rounded-lg border border-line bg-slate-950 px-3 text-xs text-slate-200"><option v-for="type in ['A','AAAA','CNAME','TXT','MX','CAA']" :key="type">{{type}}</option></select>
               <input v-model.trim="dnsName" required maxlength="255" placeholder="Nome completo" class="rounded-lg border border-line bg-slate-950 px-3 py-2 text-xs text-slate-200"/>
               <input v-model.trim="dnsContent" required maxlength="4096" placeholder="Conteúdo / destino" class="rounded-lg border border-line bg-slate-950 px-3 py-2 text-xs text-slate-200"/>
@@ -236,11 +236,11 @@ const shortID = (value: string) => value.length > 18 ? `${value.slice(0, 8)}…$
             <table class="w-full min-w-[760px] text-left">
               <thead class="border-b border-line bg-slate-950/30 font-mono text-[9px] uppercase tracking-widest text-muted">
                 <tr>
-                  <th class="px-5 py-3 font-medium">Record</th>
-                  <th class="px-4 py-3 font-medium">Target</th>
+                  <th class="px-5 py-3 font-medium">Registro</th>
+                  <th class="px-4 py-3 font-medium">Destino</th>
                   <th class="px-4 py-3 font-medium">Proxy</th>
                   <th class="px-5 py-3 text-right font-medium">TTL</th>
-                  <th class="px-5 py-3 text-right font-medium">Actions</th>
+                  <th class="px-5 py-3 text-right font-medium">Ações</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-line/60">
@@ -274,7 +274,7 @@ const shortID = (value: string) => value.length > 18 ? `${value.slice(0, 8)}…$
           <article class="rounded-xl border border-line bg-panel/55 p-5">
             <div class="flex items-center gap-3">
               <Activity class="h-4 w-4 text-signal" aria-hidden="true" />
-              <h2 class="text-sm font-medium text-slate-100">Provider health</h2>
+              <h2 class="text-sm font-medium text-slate-100">Saúde do provedor</h2>
             </div>
             <div class="mt-4 space-y-3">
               <div
@@ -295,10 +295,10 @@ const shortID = (value: string) => value.length > 18 ? `${value.slice(0, 8)}…$
           <article class="rounded-xl border border-pulse/20 bg-pulse/[.035] p-5">
             <div class="flex items-center gap-3">
               <ExternalLink class="h-4 w-4 text-pulse" aria-hidden="true" />
-              <h2 class="text-sm font-medium text-slate-100">Security boundary</h2>
+              <h2 class="text-sm font-medium text-slate-100">Limite de segurança</h2>
             </div>
             <p class="mt-3 text-xs leading-5 text-muted">
-              O token administrativo é decriptado somente durante cada chamada. Toda account ou zone fora da allowlist continua recusada antes da API externa, inclusive nas mutações.
+              O token administrativo é decriptado somente durante cada chamada. Toda conta ou zona fora da lista de permissões continua recusada antes da API externa, inclusive nas alterações.
             </p>
           </article>
         </aside>

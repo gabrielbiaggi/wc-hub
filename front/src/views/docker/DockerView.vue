@@ -22,10 +22,10 @@ const formatBytes = (value = 0) => {
   return `${(value / 1024 ** index).toFixed(index > 1 ? 1 : 0)} ${units[index]}`
 }
 const shortID = (value: string) => value.replace(/^sha256:/, '').slice(0, 12)
-const nameOf = (names: string[]) => names[0]?.replace(/^\//, '') || 'unnamed'
+const nameOf = (names: string[]) => names[0]?.replace(/^\//, '') || 'sem nome'
 const statsOf = (id: string): DockerContainerStats | undefined => statsByContainer.value.get(id)
 const execute = (id: string, operation: 'start' | 'stop' | 'restart') => {
-  if (window.confirm(`Confirma ${operation} no container ${shortID(id)}?`)) action.mutate({ id, action: operation })
+  if (window.confirm(`Confirma a operação no container ${shortID(id)}?`)) action.mutate({ id, action: operation })
 }
 </script>
 
@@ -34,25 +34,25 @@ const execute = (id: string, operation: 'start' | 'stop' | 'restart') => {
     <header class="flex flex-col justify-between gap-4 md:flex-row md:items-end">
       <div>
         <div class="flex flex-wrap gap-2">
-          <StatusBadge :status="query.data.value?.health.reachable ? 'healthy' : 'warning'" :label="query.data.value?.health.reachable ? 'daemon reachable' : 'proxy unavailable'" />
-          <span class="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-signal"><ShieldCheck class="h-3.5 w-3.5" />authenticated operations proxy</span>
+          <StatusBadge :status="query.data.value?.health.reachable ? 'healthy' : 'warning'" :label="query.data.value?.health.reachable ? 'daemon acessível' : 'proxy indisponível'" />
+          <span class="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-signal"><ShieldCheck class="h-3.5 w-3.5" />proxy de operações autenticado</span>
         </div>
-        <h1 class="mt-4 text-3xl font-semibold tracking-tight">Docker runtime</h1>
-        <p class="mt-2 text-sm text-muted">Containers, imagens e sinais vitais coletados pela API restrita, sem montar o socket no Control Plane.</p>
+        <h1 class="mt-4 text-3xl font-semibold tracking-tight">Ambiente Docker</h1>
+        <p class="mt-2 text-sm text-muted">Containers, imagens e sinais vitais coletados pela API restrita, sem montar o socket no plano de controle.</p>
       </div>
       <Button variant="outline" :disabled="query.isFetching.value" @click="query.refetch()"><RefreshCw :class="['h-4 w-4', query.isFetching.value && 'animate-spin']" />Atualizar</Button>
     </header>
 
-    <div v-if="query.isError.value" class="rounded-xl border border-danger/20 bg-danger/5 p-4 text-sm text-danger">O proxy Docker não respondeu. Verifique o endpoint restrito, a identidade mTLS e a allowlist de leitura.</div>
+    <div v-if="query.isError.value" class="rounded-xl border border-danger/20 bg-danger/5 p-4 text-sm text-danger">O proxy Docker não respondeu. Verifique o endpoint restrito, a identidade mTLS e a lista de permissões.</div>
     <div v-if="action.isError.value" class="rounded-xl border border-danger/20 bg-danger/5 p-4 text-sm text-danger">O daemon rejeitou a operação solicitada.</div>
     <div v-if="query.data.value?.warnings.length" class="rounded-xl border border-warning/20 bg-warning/5 p-4 text-xs text-warning">{{ query.data.value.warnings.join(' · ') }}</div>
 
     <section class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       <article v-for="item in [
-        { label: 'Containers', value: containers.length, detail: `${running} running`, icon: Container },
-        { label: 'Images', value: images.length, detail: formatBytes(totalImageBytes), icon: Boxes },
-        { label: 'Engine', value: query.data.value?.health.version ?? '—', detail: `API ${query.data.value?.health.api_version ?? 'unknown'}`, icon: Database },
-        { label: 'Platform', value: query.data.value?.health.os_type ?? '—', detail: query.data.value?.health.arch ?? 'unknown', icon: Cpu },
+        { label: 'Containers', value: containers.length, detail: `${running} em execução`, icon: Container },
+        { label: 'Imagens', value: images.length, detail: formatBytes(totalImageBytes), icon: Boxes },
+        { label: 'Engine', value: query.data.value?.health.version ?? '—', detail: `API ${query.data.value?.health.api_version ?? 'desconhecida'}`, icon: Database },
+        { label: 'Plataforma', value: query.data.value?.health.os_type ?? '—', detail: query.data.value?.health.arch ?? 'desconhecida', icon: Cpu },
       ]" :key="item.label" class="rounded-xl border border-line bg-panel/65 p-5">
         <component :is="item.icon" class="h-4 w-4 text-muted" />
         <p class="mt-5 font-mono text-2xl text-white">{{ item.value }}</p>
@@ -62,9 +62,9 @@ const execute = (id: string, operation: 'start' | 'stop' | 'restart') => {
 
     <section class="overflow-hidden rounded-xl border border-line bg-panel/65">
       <header class="flex flex-col gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:justify-between">
-        <div><h2 class="text-sm font-medium">Runtime inventory</h2><p class="mt-1 text-[11px] text-muted">Snapshot {{ query.data.value ? new Date(query.data.value.captured_at).toLocaleString('pt-BR') : 'aguardando conexão' }}</p></div>
+        <div><h2 class="text-sm font-medium">Inventário do ambiente</h2><p class="mt-1 text-[11px] text-muted">Captura {{ query.data.value ? new Date(query.data.value.captured_at).toLocaleString('pt-BR') : 'aguardando conexão' }}</p></div>
         <nav class="flex rounded-lg border border-line bg-slate-950/40 p-1" aria-label="Inventário Docker">
-          <button v-for="item in [{ id: 'containers', label: 'Containers' }, { id: 'images', label: 'Images' }]" :key="item.id" :class="['cursor-pointer rounded-md px-3 py-1.5 text-xs transition-colors', tab === item.id ? 'bg-signal/10 text-signal' : 'text-muted hover:text-white']" @click="tab = item.id as typeof tab">{{ item.label }}</button>
+          <button v-for="item in [{ id: 'containers', label: 'Containers' }, { id: 'images', label: 'Imagens' }]" :key="item.id" :class="['cursor-pointer rounded-md px-3 py-1.5 text-xs transition-colors', tab === item.id ? 'bg-signal/10 text-signal' : 'text-muted hover:text-white']" @click="tab = item.id as typeof tab">{{ item.label }}</button>
         </nav>
       </header>
 
@@ -73,8 +73,8 @@ const execute = (id: string, operation: 'start' | 'stop' | 'restart') => {
         <article v-for="container in containers" :key="container.id" class="grid gap-4 px-5 py-4 transition-colors hover:bg-white/[.02] xl:grid-cols-[1.2fr_.7fr_1fr_220px] xl:items-center">
           <div class="flex min-w-0 items-center gap-3"><div class="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-line bg-slate-950/50"><Container class="h-4 w-4 text-slate-300" /></div><div class="min-w-0"><p class="truncate text-sm text-slate-200">{{ nameOf(container.names) }}</p><p class="mt-1 truncate font-mono text-[10px] text-muted">{{ shortID(container.id) }} · {{ container.image }}</p></div></div>
           <div><StatusBadge :status="container.state === 'running' ? 'healthy' : container.state === 'exited' ? 'critical' : 'warning'" :label="container.state" /><p class="mt-2 truncate text-[10px] text-muted">{{ container.status }}</p></div>
-          <div v-if="statsOf(container.id)" class="grid grid-cols-2 gap-x-4 gap-y-2 font-mono text-[10px]"><span class="flex items-center gap-1.5 text-muted"><Cpu class="h-3 w-3" />CPU</span><span class="text-right text-slate-300">{{ statsOf(container.id)?.cpu_percent.toFixed(1) }}%</span><span class="flex items-center gap-1.5 text-muted"><HardDrive class="h-3 w-3" />MEM</span><span class="text-right text-slate-300">{{ formatBytes(statsOf(container.id)?.memory_usage) }}</span><span class="flex items-center gap-1.5 text-muted"><Network class="h-3 w-3" />NET</span><span class="text-right text-slate-300">{{ formatBytes((statsOf(container.id)?.network_rx ?? 0) + (statsOf(container.id)?.network_tx ?? 0)) }}</span></div><p v-else class="text-xs text-muted">Stats disponíveis quando running.</p>
-          <div class="flex flex-wrap justify-end gap-2"><Button v-if="container.state !== 'running'" variant="outline" :disabled="action.isPending.value" @click="execute(container.id,'start')"><Play class="h-3.5 w-3.5"/>Start</Button><Button v-if="container.state === 'running'" variant="outline" :disabled="action.isPending.value" @click="execute(container.id,'restart')"><RotateCcw class="h-3.5 w-3.5"/>Restart</Button><Button v-if="container.state === 'running'" variant="danger" :disabled="action.isPending.value" @click="execute(container.id,'stop')"><Square class="h-3.5 w-3.5"/>Stop</Button></div>
+          <div v-if="statsOf(container.id)" class="grid grid-cols-2 gap-x-4 gap-y-2 font-mono text-[10px]"><span class="flex items-center gap-1.5 text-muted"><Cpu class="h-3 w-3" />CPU</span><span class="text-right text-slate-300">{{ statsOf(container.id)?.cpu_percent.toFixed(1) }}%</span><span class="flex items-center gap-1.5 text-muted"><HardDrive class="h-3 w-3" />MEM</span><span class="text-right text-slate-300">{{ formatBytes(statsOf(container.id)?.memory_usage) }}</span><span class="flex items-center gap-1.5 text-muted"><Network class="h-3 w-3" />REDE</span><span class="text-right text-slate-300">{{ formatBytes((statsOf(container.id)?.network_rx ?? 0) + (statsOf(container.id)?.network_tx ?? 0)) }}</span></div><p v-else class="text-xs text-muted">Estatísticas disponíveis quando estiver em execução.</p>
+          <div class="flex flex-wrap justify-end gap-2"><Button v-if="container.state !== 'running'" variant="outline" :disabled="action.isPending.value" @click="execute(container.id,'start')"><Play class="h-3.5 w-3.5"/>Iniciar</Button><Button v-if="container.state === 'running'" variant="outline" :disabled="action.isPending.value" @click="execute(container.id,'restart')"><RotateCcw class="h-3.5 w-3.5"/>Reiniciar</Button><Button v-if="container.state === 'running'" variant="danger" :disabled="action.isPending.value" @click="execute(container.id,'stop')"><Square class="h-3.5 w-3.5"/>Parar</Button></div>
         </article>
         <div v-if="!containers.length" class="grid min-h-64 place-items-center text-center"><div><Container class="mx-auto h-7 w-7 text-muted" /><p class="mt-3 text-sm text-muted">Nenhum container encontrado.</p></div></div>
       </div>

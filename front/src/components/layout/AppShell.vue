@@ -5,6 +5,7 @@ import { Menu, Search, ShieldCheck, Bell, Command, X } from 'lucide-vue-next'
 import AppSidebar from './AppSidebar.vue'
 import Button from '@/components/ui/Button.vue'
 import { useUiStore } from '@/stores/ui'
+import { traduzirTexto } from '@/lib/ptbr'
 import { useAuthStore } from '@/stores/auth'
 
 const ui = useUiStore()
@@ -28,11 +29,11 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('keydown', 
       <header class="sticky top-0 z-30 flex h-[70px] items-center gap-3 border-b border-line/80 bg-void/85 px-4 backdrop-blur-xl md:px-7">
         <button class="cursor-pointer rounded-lg p-2 text-muted transition-colors hover:bg-white/5 hover:text-white lg:hidden" aria-label="Abrir navegação" @click="ui.toggleSidebar"><Menu class="h-5 w-5" /></button>
         <div class="min-w-0 flex-1">
-          <p class="font-mono text-[10px] uppercase tracking-[.2em] text-muted">Control plane / {{ route.name }}</p>
+          <p class="font-mono text-[10px] uppercase tracking-[.2em] text-muted">Plano de controle / {{ traduzirTexto(String(route.name ?? '')) }}</p>
           <p class="mt-0.5 truncate text-sm font-medium text-slate-200">Infraestrutura unificada</p>
         </div>
         <button class="hidden h-9 min-w-56 cursor-pointer items-center gap-2 rounded-lg border border-line bg-panel/70 px-3 text-left text-xs text-muted transition-colors hover:border-slate-600 hover:text-slate-300 md:flex" @click="ui.commandOpen = true"><Search class="h-3.5 w-3.5" /><span class="flex-1">Comandos e recursos</span><kbd class="rounded border border-line px-1.5 py-0.5 font-mono text-[9px]">⌘ K</kbd></button>
-        <div class="hidden border-l border-line pl-4 text-right xl:block"><p class="font-mono text-xs text-slate-300">{{ now.toLocaleTimeString('pt-BR') }}</p><p class="text-[10px] text-muted">America/Belem</p></div>
+        <div class="hidden border-l border-line pl-4 text-right xl:block"><p class="font-mono text-xs text-slate-300">{{ now.toLocaleTimeString('pt-BR') }}</p><p class="text-[10px] text-muted">América/São Paulo</p></div>
         <RouterLink to="/notifications"><Button variant="ghost" class="relative px-2.5" aria-label="Notificações"><Bell class="h-4 w-4" /><span class="absolute right-2 top-1.5 h-1.5 w-1.5 rounded-full bg-warning" /></Button></RouterLink>
         <button class="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-signal/20 bg-signal/10 font-mono text-xs font-bold text-signal transition-colors hover:bg-signal/20" :title="`${auth.user?.display_name} · sair`" aria-label="Encerrar sessão" @click="auth.logout()">{{ auth.user?.display_name?.slice(0,2).toUpperCase() ?? 'WC' }}</button>
       </header>
