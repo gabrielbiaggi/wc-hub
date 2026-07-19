@@ -93,7 +93,9 @@ services:
       - ./ops/secrets:/run/secrets:ro
       - ${MERGERFS_HOST_ROOT:-./ops/storage}:/mnt/drive:rw
     extra_hosts:
-      - "prox-genesys:100.127.253.121"
+      # Docker Desktop cannot route directly through the Windows Tailscale
+      # interface. The local-only relay maps this name back to the host gateway.
+      - "prox-genesys:host-gateway"
       - "prox-ai:100.96.36.16"
       - "genesys-ubuntu:100.98.249.29"
     healthcheck:
@@ -172,7 +174,8 @@ services:
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
-      - /:/rootfs:ro,rslave
+      # Docker Desktop/WSL does not support propagation mode rslave for this mount.
+      - /:/rootfs:ro
     networks: [control-plane]
     restart: unless-stopped
     read_only: true

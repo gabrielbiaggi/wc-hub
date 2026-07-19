@@ -372,7 +372,7 @@ func (a *App) Handler() http.Handler {
 	terraformapp.MountRoutes(mux, a.protect, a.terraformRunner)
 	storageapp.MountRoutes(mux, a.protect, a.storageClient)
 	ociapp.MountRoutes(mux, a.protect, a.ociHandler, a.adapterError("oci"))
-	vncapp.MountRoutes(mux, a.protect, a.vncGateway, func(r *http.Request, action, target string) {
+	vncapp.MountRoutes(mux, a.protect, a.vncGateway, a.proxmoxClients, func(r *http.Request, action, target string) {
 		session := currentSession(r)
 		_ = a.audit.Append(r.Context(), auditrepo.Record{ActorID: session.User.ID, Action: action, Scope: security.ScopeRemote, ResourceType: "vnc_session", TargetName: target, Risk: security.RiskCritical, Decision: "allowed", RequestID: requestID(r.Context()), SourceIP: remoteIP(r)})
 	})
@@ -461,10 +461,15 @@ func (a *App) middleware(next http.Handler) http.Handler {
 }
 
 func (a *App) setCookie(w http.ResponseWriter, token string, expires time.Time) {
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: token, Path: "/api", Expires: expires, HttpOnly: true, Secure: a.cfg.SecureCookies, SameSite: http.SameSiteStrictMode})
+	// WebSocket routes live under /ws, so limiting the session to /api makes an
+	// authenticated REST UI fail when opening Terminal or noVNC. Retire the
+	// legacy path-scoped cookie and issue one strict, host-only application cookie.
+	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Path: "/api", MaxAge: -1, HttpOnly: true, Secure: a.cfg.SecureCookies, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: token, Path: "/", Expires: expires, HttpOnly: true, Secure: a.cfg.SecureCookies, SameSite: http.SameSiteStrictMode})
 }
 func (a *App) clearCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Path: "/api", MaxAge: -1, HttpOnly: true, Secure: a.cfg.SecureCookies, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Path: "/", MaxAge: -1, HttpOnly: true, Secure: a.cfg.SecureCookies, SameSite: http.SameSiteStrictMode})
 }
 func decodeJSON(w http.ResponseWriter, r *http.Request, destination any) bool {
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))

@@ -14,13 +14,17 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 type Client struct {
 	baseURL, tokenID string
 	secret           []byte
 	http             *http.Client
+	tlsConfig        *tls.Config
 }
 type Config struct {
 	URL                string
@@ -152,7 +156,7 @@ func NewWithConfig(config Config) (*Client, error) {
 		tlsConfig.RootCAs = pool
 	}
 	transport := &http.Transport{TLSClientConfig: tlsConfig, MaxIdleConns: 20, IdleConnTimeout: 60 * time.Second}
-	return &Client{baseURL: strings.TrimRight(config.URL, "/"), tokenID: config.TokenID, secret: append([]byte(nil), config.Secret...), http: &http.Client{Timeout: 20 * time.Second, Transport: transport}}, nil
+	return &Client{baseURL: strings.TrimRight(config.URL, "/"), tokenID: config.TokenID, secret: append([]byte(nil), config.Secret...), http: &http.Client{Timeout: 20 * time.Second, Transport: transport}, tlsConfig: tlsConfig}, nil
 }
 
 // NewFromEnvFile loads an additional cluster from a root-readable secret file.
@@ -342,6 +346,132 @@ func (c *Client) PowerAction(ctx context.Context, node, kind string, vmid int, a
 		return fmt.Errorf("unsupported Proxmox power action")
 	}
 	return c.request(ctx, http.MethodPost, fmt.Sprintf("/api2/json/nodes/%s/%s/%d/status/%s", url.PathEscape(node), kind, vmid, action), nil)
+}
+
+// ServeVNC bridges a browser noVNC connection to Proxmox's short-lived native
+// console websocket. The PVE API token and VNC ticket never leave this process.
+func (c *Client) ServeVNC(w http.ResponseWriter, r *http.Request, node, kind string, vmid int) (bool, error) {
+	if !nodeNamePattern.MatchString(node) || (kind != "qemu" && kind != "lxc") || vmid < 1 {
+		return false, fmt.Errorf("invalid Proxmox console target")
+	}
+	accessTicket, err := c.accessTicket(r.Context())
+	if err != nil {
+		return false, fmt.Errorf("create Proxmox access ticket: %w", err)
+	}
+	var ticket struct {
+		Port   json.RawMessage `json:"port"`
+		Ticket string          `json:"ticket"`
+	}
+	path := fmt.Sprintf("/api2/json/nodes/%s/%s/%d/vncproxy", url.PathEscape(node), kind, vmid)
+	if err := c.requestForm(r.Context(), http.MethodPost, path, url.Values{"websocket": {"1"}}, &ticket); err != nil {
+		return false, fmt.Errorf("create Proxmox console ticket: %w", err)
+	}
+	port, err := parseConsolePort(ticket.Port)
+	if err != nil || ticket.Ticket == "" {
+		return false, fmt.Errorf("Proxmox returned an incomplete console ticket")
+	}
+	endpoint, err := url.Parse(c.baseURL)
+	if err != nil {
+		return false, fmt.Errorf("parse Proxmox console endpoint: %w", err)
+	}
+	endpoint.Scheme = "wss"
+	endpoint.Path = fmt.Sprintf("/api2/json/nodes/%s/%s/%d/vncwebsocket", url.PathEscape(node), kind, vmid)
+	query := endpoint.Query()
+	query.Set("port", strconv.Itoa(port))
+	query.Set("vncticket", ticket.Ticket)
+	endpoint.RawQuery = query.Encode()
+
+	dialer := websocket.Dialer{HandshakeTimeout: 20 * time.Second, TLSClientConfig: c.tlsConfig.Clone(), Subprotocols: []string{"binary"}}
+	header := http.Header{
+		"Authorization": {"PVEAPIToken=" + c.tokenID + "=" + string(c.secret)},
+		"Cookie":        {"PVEAuthCookie=" + accessTicket},
+	}
+	upstream, response, err := dialer.DialContext(r.Context(), endpoint.String(), header)
+	if err != nil {
+		if response != nil {
+			return false, fmt.Errorf("connect Proxmox console returned %d", response.StatusCode)
+		}
+		return false, fmt.Errorf("connect Proxmox console: %w", err)
+	}
+	defer upstream.Close()
+	browser, err := (&websocket.Upgrader{ReadBufferSize: 32 << 10, WriteBufferSize: 32 << 10, CheckOrigin: consoleSameOrigin}).Upgrade(w, r, nil)
+	if err != nil {
+		return false, err
+	}
+	defer browser.Close()
+	browser.SetReadLimit(2 << 20)
+	return true, relayConsole(browser, upstream)
+}
+
+func (c *Client) accessTicket(ctx context.Context) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api2/json/access/ticket", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "PVEAPIToken="+c.tokenID+"="+string(c.secret))
+	response, err := c.http.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("Proxmox request: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		body, readErr := io.ReadAll(io.LimitReader(response.Body, 8<<20))
+		if readErr != nil {
+			return "", readErr
+		}
+		return "", fmt.Errorf("Proxmox access ticket returned %d: %s", response.StatusCode, sanitize(body))
+	}
+	for _, cookie := range response.Cookies() {
+		if cookie.Name == "PVEAuthCookie" && cookie.Value != "" {
+			return cookie.Value, nil
+		}
+	}
+	return "", fmt.Errorf("Proxmox did not return a PVEAuthCookie")
+}
+
+func parseConsolePort(raw json.RawMessage) (int, error) {
+	value := strings.Trim(strings.TrimSpace(string(raw)), `"`)
+	port, err := strconv.Atoi(value)
+	if err != nil || port < 1 || port > 65535 {
+		return 0, fmt.Errorf("invalid Proxmox console port")
+	}
+	return port, nil
+}
+
+func relayConsole(browser, upstream *websocket.Conn) error {
+	errors := make(chan error, 2)
+	var once sync.Once
+	closeBoth := func() { once.Do(func() { _ = browser.Close(); _ = upstream.Close() }) }
+	copyFrames := func(from, to *websocket.Conn) {
+		defer closeBoth()
+		for {
+			kind, payload, err := from.ReadMessage()
+			if err != nil {
+				errors <- err
+				return
+			}
+			if kind != websocket.BinaryMessage {
+				errors <- fmt.Errorf("Proxmox console bridge accepts binary websocket frames only")
+				return
+			}
+			if err = to.WriteMessage(websocket.BinaryMessage, payload); err != nil {
+				errors <- err
+				return
+			}
+		}
+	}
+	go copyFrames(browser, upstream)
+	go copyFrames(upstream, browser)
+	return <-errors
+}
+
+func consoleSameOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	parsed, err := url.Parse(origin)
+	return err == nil && strings.EqualFold(parsed.Host, r.Host)
 }
 func (c *Client) get(ctx context.Context, path string, destination any) error {
 	return c.request(ctx, http.MethodGet, path, destination)

@@ -10,7 +10,6 @@ import { getVncTargets } from "@/lib/api_vnc";
 
 const targets = useQuery({ queryKey: ["vnc-targets"], queryFn: getVncTargets });
 const target = ref("");
-const password = ref("");
 const canvas = ref<HTMLElement>();
 const state = ref<"disconnected" | "connecting" | "connected" | "failed">("disconnected");
 let rfb: RFB | undefined;
@@ -28,7 +27,8 @@ const targetsError = computed(() =>
 );
 const wsURL = () => {
   const protocol = location.protocol === "https:" ? "wss" : "ws";
-  return `${protocol}://${location.host}/ws/vnc/${encodeURIComponent(target.value)}`;
+  if (!selected.value) return "";
+  return `${protocol}://${location.host}${selected.value.ws_path}`;
 };
 const disconnect = () => {
   rfb?.disconnect();
@@ -41,14 +41,12 @@ const connect = async () => {
   state.value = "connecting";
   await nextTick();
   rfb = new RFB(canvas.value, wsURL(), {
-    credentials: { password: password.value },
     shared: false,
   });
   rfb.scaleViewport = true;
   rfb.resizeSession = false;
   rfb.addEventListener("connect", () => {
     state.value = "connected";
-    password.value = "";
   });
   rfb.addEventListener("disconnect", (event: Event) => {
     const clean = (event as CustomEvent<{ clean?: boolean }>).detail?.clean;
@@ -68,12 +66,12 @@ onBeforeUnmount(disconnect);
             :label="targetsError ? 'gateway indisponível' : state"
           />
           <span class="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase text-signal">
-            <ShieldCheck class="h-3.5 w-3.5" />gateway VNC com alvos permitidos
+            <ShieldCheck class="h-3.5 w-3.5" />ponte noVNC segura
           </span>
         </div>
         <h1 class="mt-4 text-3xl font-semibold">Desktop remoto</h1>
         <p class="mt-2 text-sm text-muted">
-          Console gráfico via noVNC. A senha é usada somente no handshake VNC e nunca é salva no Hub.
+          Console gráfico via noVNC. Para VMs Proxmox, o Hub cria o ticket efêmero no servidor: token e ticket nunca chegam ao navegador.
         </p>
       </div>
       <Button variant="outline" @click="targets.refetch"><RefreshCw class="h-4 w-4" />Atualizar alvos</Button>
@@ -88,17 +86,13 @@ onBeforeUnmount(disconnect);
     </div>
 
     <section class="rounded-xl border border-line bg-panel/65 p-5">
-      <div class="grid gap-3 md:grid-cols-[1fr_1fr_auto_auto]">
+      <div class="grid gap-3 md:grid-cols-[1fr_auto_auto]">
         <label class="text-xs text-muted">
           VM / alvo VNC
           <select v-model="target" :disabled="Boolean(targetsError)" class="mt-2 w-full rounded-lg border border-line bg-slate-950 p-2 disabled:cursor-not-allowed disabled:opacity-50">
             <option value="" disabled>Selecione um alvo</option>
-            <option v-for="item in targets.data.value" :key="item.id" :value="item.id">{{ item.id }} · {{ item.address }}</option>
+            <option v-for="item in targets.data.value" :key="item.id" :value="item.id">{{ item.name || item.id }} · {{ item.address }}</option>
           </select>
-        </label>
-        <label class="text-xs text-muted">
-          Senha VNC
-          <input v-model="password" :disabled="Boolean(targetsError)" type="password" autocomplete="current-password" class="mt-2 w-full rounded-lg border border-line bg-slate-950 p-2 disabled:cursor-not-allowed disabled:opacity-50" />
         </label>
         <Button class="self-end" :disabled="!selected || state === 'connecting' || Boolean(targetsError)" @click="connect"><PlugZap class="h-4 w-4" />Conectar</Button>
         <Button class="self-end" variant="outline" :disabled="state === 'disconnected'" @click="disconnect">Desconectar</Button>
