@@ -1,21 +1,27 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useQuery } from '@tanstack/vue-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import {
   Activity,
   Cloud,
   ExternalLink,
   Globe2,
   Network,
+  Pencil,
+  Plus,
   RefreshCw,
   Route,
   ShieldCheck,
+  Trash2,
   Waypoints,
 } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import {
   getCloudflareOverview,
+  createCloudflareDNSRecord,
+  deleteCloudflareDNSRecord,
+  updateCloudflareDNSRecord,
   type CloudflareDNSRecord,
   type CloudflareProviderStatus,
   type CloudflareTunnelStatus,
@@ -24,6 +30,7 @@ import {
 type InventoryMode = 'tunnels' | 'dns'
 
 const mode = ref<InventoryMode>('tunnels')
+const queryClient = useQueryClient()
 const query = useQuery({
   queryKey: ['cloudflare', 'overview'],
   queryFn: getCloudflareOverview,
@@ -40,12 +47,25 @@ const healthRatio = computed(() => {
   const total = overview.value?.summary.tunnels ?? 0
   return total ? Math.round(((overview.value?.summary.healthy_tunnels ?? 0) / total) * 100) : 0
 })
-const principalRecords = computed(() => {
-  const preferredTypes = new Set(['A', 'AAAA', 'CNAME', 'MX', 'TXT'])
-  return (overview.value?.dns_records ?? [])
-    .filter((record) => preferredTypes.has(record.type))
-    .slice(0, 50)
+const principalRecords = computed(() => overview.value?.dns_records ?? [])
+const zoneIDs = computed(() => overview.value?.targets.filter((target) => target.kind === 'zone').map((target) => target.id) ?? [])
+const selectedZone = ref('')
+const dnsType = ref('A')
+const dnsName = ref('')
+const dnsContent = ref('')
+const dnsProxied = ref(true)
+const dnsMutation = useMutation({
+  mutationFn: async(input:{operation:'create'|'update'|'delete';zoneID:string;record?:CloudflareDNSRecord;content?:string})=>{
+    if(input.operation==='delete'&&input.record)return deleteCloudflareDNSRecord(input.zoneID,input.record.id)
+    if(input.operation==='update'&&input.record)return updateCloudflareDNSRecord(input.zoneID,input.record.id,{type:input.record.type,name:input.record.name,content:input.content??input.record.content,proxied:input.record.proxied,ttl:input.record.ttl,comment:input.record.comment})
+    return createCloudflareDNSRecord(input.zoneID,{type:dnsType.value,name:dnsName.value,content:dnsContent.value,proxied:dnsProxied.value,ttl:1})
+  },
+  onSuccess:()=>{dnsName.value='';dnsContent.value='';queryClient.invalidateQueries({queryKey:['cloudflare','overview']})},
 })
+const zoneFor = (record?:CloudflareDNSRecord) => record?.zone_id || selectedZone.value || zoneIDs.value[0] || ''
+const createRecord = () => { const zoneID=zoneFor(); if(zoneID&&dnsName.value&&dnsContent.value) dnsMutation.mutate({operation:'create',zoneID}) }
+const editRecord = (record:CloudflareDNSRecord) => { const content=window.prompt(`Novo conteúdo para ${record.name}`,record.content); if(content!==null&&content!==record.content)dnsMutation.mutate({operation:'update',zoneID:zoneFor(record),record,content}) }
+const removeRecord = (record:CloudflareDNSRecord) => { if(window.confirm(`Excluir definitivamente ${record.type} ${record.name}?`))dnsMutation.mutate({operation:'delete',zoneID:zoneFor(record),record}) }
 
 const providerTone = (status?: CloudflareProviderStatus) =>
   status === 'healthy' ? 'healthy' : status === 'degraded' ? 'warning' : 'critical'
@@ -66,7 +86,7 @@ const shortID = (value: string) => value.length > 18 ? `${value.slice(0, 8)}…$
           />
           <span class="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-signal">
             <ShieldCheck class="h-3.5 w-3.5" aria-hidden="true" />
-            scoped token · read only
+            full API token · zone allowlist
           </span>
         </div>
         <h1 class="mt-4 text-3xl font-semibold tracking-tight text-slate-50">Cloudflare edge fabric</h1>
@@ -120,6 +140,7 @@ const shortID = (value: string) => value.length > 18 ? `${value.slice(0, 8)}…$
     </section>
 
     <template v-else-if="overview">
+      <div v-if="dnsMutation.isError.value" class="rounded-xl border border-danger/20 bg-danger/5 p-4 text-sm text-danger">A Cloudflare rejeitou a alteração DNS. Verifique tipo, conteúdo e permissões do token.</div>
       <section class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Resumo Cloudflare">
         <article class="rounded-xl border border-line bg-panel/65 p-5 shadow-panel">
           <Waypoints class="h-4 w-4 text-muted" aria-hidden="true" />
@@ -203,7 +224,15 @@ const shortID = (value: string) => value.length > 18 ? `${value.slice(0, 8)}…$
             </div>
           </div>
 
-          <div v-else class="overflow-x-auto" role="tabpanel">
+          <div v-else role="tabpanel">
+            <form class="grid gap-3 border-b border-line bg-slate-950/25 p-4 md:grid-cols-[180px_90px_1fr_1fr_110px]" @submit.prevent="createRecord">
+              <select v-model="selectedZone" class="rounded-lg border border-line bg-slate-950 px-3 text-xs text-slate-200"><option value="">Zone padrão</option><option v-for="zone in zoneIDs" :key="zone" :value="zone">{{shortID(zone)}}</option></select>
+              <select v-model="dnsType" class="rounded-lg border border-line bg-slate-950 px-3 text-xs text-slate-200"><option v-for="type in ['A','AAAA','CNAME','TXT','MX','CAA']" :key="type">{{type}}</option></select>
+              <input v-model.trim="dnsName" required maxlength="255" placeholder="Nome completo" class="rounded-lg border border-line bg-slate-950 px-3 py-2 text-xs text-slate-200"/>
+              <input v-model.trim="dnsContent" required maxlength="4096" placeholder="Conteúdo / destino" class="rounded-lg border border-line bg-slate-950 px-3 py-2 text-xs text-slate-200"/>
+              <Button type="submit" :disabled="dnsMutation.isPending.value || !zoneFor()"><Plus class="h-3.5 w-3.5"/>Criar</Button>
+            </form>
+            <div class="overflow-x-auto">
             <table class="w-full min-w-[760px] text-left">
               <thead class="border-b border-line bg-slate-950/30 font-mono text-[9px] uppercase tracking-widest text-muted">
                 <tr>
@@ -211,6 +240,7 @@ const shortID = (value: string) => value.length > 18 ? `${value.slice(0, 8)}…$
                   <th class="px-4 py-3 font-medium">Target</th>
                   <th class="px-4 py-3 font-medium">Proxy</th>
                   <th class="px-5 py-3 text-right font-medium">TTL</th>
+                  <th class="px-5 py-3 text-right font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-line/60">
@@ -226,9 +256,11 @@ const shortID = (value: string) => value.length > 18 ? `${value.slice(0, 8)}…$
                   <td class="max-w-sm truncate px-4 py-4 font-mono text-[10px] text-muted" :title="record.content">{{ record.content }}</td>
                   <td class="px-4 py-4"><StatusBadge :status="recordTone(record)" :label="record.proxied ? 'proxied' : 'DNS only'" /></td>
                   <td class="px-5 py-4 text-right font-mono text-[10px] text-muted">{{ record.ttl === 1 ? 'AUTO' : `${record.ttl}s` }}</td>
+                  <td class="px-5 py-4"><div class="flex justify-end gap-1"><button class="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-white/5 hover:text-white" title="Editar conteúdo" @click="editRecord(record)"><Pencil class="h-3.5 w-3.5"/></button><button class="grid h-8 w-8 place-items-center rounded-lg text-danger hover:bg-danger/10" title="Excluir registro" @click="removeRecord(record)"><Trash2 class="h-3.5 w-3.5"/></button></div></td>
                 </tr>
               </tbody>
             </table>
+            </div>
             <div v-if="!principalRecords.length" class="grid min-h-56 place-items-center px-5 text-center">
               <div>
                 <Globe2 class="mx-auto h-7 w-7 text-muted" aria-hidden="true" />
@@ -266,7 +298,7 @@ const shortID = (value: string) => value.length > 18 ? `${value.slice(0, 8)}…$
               <h2 class="text-sm font-medium text-slate-100">Security boundary</h2>
             </div>
             <p class="mt-3 text-xs leading-5 text-muted">
-              Este módulo não expõe mutações. O token é decriptado somente durante cada chamada do adapter e toda account ou zone fora da allowlist é recusada antes da API externa.
+              O token administrativo é decriptado somente durante cada chamada. Toda account ou zone fora da allowlist continua recusada antes da API externa, inclusive nas mutações.
             </p>
           </article>
         </aside>

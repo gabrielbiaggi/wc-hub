@@ -75,3 +75,6 @@ export const getDockerImages = async () =>
 
 export const getDockerStats = async () =>
   (await api.get<{ items: DockerContainerStats[]; warnings: string[] }>('/v1/docker/stats')).data
+
+export const runDockerContainerAction = async (id: string, action: 'start' | 'stop' | 'restart') =>
+  (await api.post<{ status: string }>(`/v1/docker/containers/${encodeURIComponent(id)}/${action}`, {})).data

@@ -1,6 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-const modules = ['cloud']
 export default createRouter({
   history: createWebHistory(),
   routes: [
@@ -22,6 +21,6 @@ export default createRouter({
     { path: '/github', name: 'github', component: () => import('@/views/github/GitHubView.vue') },
     { path: '/terraform', name: 'terraform', component: () => import('@/views/terraform/TerraformView.vue') },
     { path: '/storage', name: 'storage', component: () => import('@/views/storage/MergerFSView.vue') },
-    ...modules.map((name) => ({ path: `/${name}`, name, component: () => import('@/views/ModuleView.vue'), props: { module: name } })),
+    { path: '/cloud', name: 'cloud', component: () => import('@/views/oci/OracleCloudView.vue') },
   ],
 })

@@ -44,13 +44,16 @@ func TestMountRoutesAppliesExistingReadPermission(t *testing.T) {
 			t.Fatalf("route %s returned %d", path, response.Code)
 		}
 	}
-	if len(permissions) != 5 {
-		t.Fatalf("expected five protected routes, got %d", len(permissions))
+	if len(permissions) != 6 {
+		t.Fatalf("expected six protected routes, got %d", len(permissions))
 	}
-	for _, permission := range permissions {
+	for _, permission := range permissions[:5] {
 		if permission != ReadPermission {
 			t.Fatalf("unexpected permission %q", permission)
 		}
+	}
+	if permissions[5] != "docker.manage" {
+		t.Fatalf("unexpected management permission %q", permissions[5])
 	}
 }
 

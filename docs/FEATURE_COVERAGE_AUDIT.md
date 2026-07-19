@@ -8,50 +8,49 @@ This matrix distinguishes compiled UI from a complete runtime feature. A feature
 
 | Area | Coverage | Evidence |
 |---|---|---|
-| Password auth, TOTP, sessions and CSRF | Implemented | PostgreSQL identities and sessions, encrypted TOTP secret, HttpOnly/SameSite cookie and CSRF middleware |
+| Password auth, TOTP, sessions and CSRF | Implemented | PostgreSQL identities and sessions, encrypted TOTP, HttpOnly/SameSite cookie, CSRF and progressive IP/account login throttling |
 | RBAC and administration | Implemented | users, roles, permissions, alerts and audited admin handlers |
 | Durable audit and jobs | Implemented | hash-chained audit records, PostgreSQL queue, workers and scheduler |
-| Proxmox | Read-only plus queued sync | nodes, VMs, storage and inventory synchronization |
-| Docker | Read-only | restricted HTTPS/mTLS client, containers, images, health and stats |
-| Kubernetes | Read-only | ServiceAccount token, CA validation, nodes, deployments, problem pods and warning events |
-| Cloudflare | Read-only | encrypted token envelope, account/zone allowlists, tunnels and DNS |
-| GitHub | Read-only | repository allowlist, metadata, Actions runs and releases |
-| MergerFS | Read-only | browse, index and stream with traversal/symlink confinement |
+| Overview | Live data | PostgreSQL inventory, telemetry, alerts and audit activity; demonstration counters were removed |
+| Proxmox | Inventory plus control | multiple configured clusters, nodes, QEMU/LXC, storage, sync and audited start/stop/shutdown/reboot/reset |
+| Docker | Inventory plus control | proxy inventory/stats and audited container start/stop/restart |
+| Kubernetes | Inventory plus control | nodes, deployments, problem pods/events and audited scale/restart |
+| Cloudflare | Inventory plus DNS control | encrypted token envelope, allowlists, tunnels, health and DNS create/update/delete |
+| GitHub | Delivery control | explicit repository allowlist, repository permissions/details, Actions, releases and run rerun/cancel |
+| MergerFS | File management | confined browse/index/stream plus upload, mkdir, rename and delete |
+| Oracle Cloud | Inventory plus compute control | signed OCI SDK client, regions, ADs, compartments, instances, VCNs/subnets and audited power actions |
+| Terraform | Validate, plan and apply | in-repository isolated worker, workspace allowlist, persistent non-root state volume and confirmation-gated apply |
 | SSH terminal | Implemented | short-lived ticket, TOTP gate, known_hosts verification, WebSocket PTY and audit |
-| Terraform control-plane client | Partial | validate/plan requests, workspace allowlist and run history are implemented; the external worker is not in this repository |
 | Development master login | Local-only | `allmight`, hourly in-memory password, no stored password hash, god-admin role, hourly session expiry and production startup guard |
 
-## Gaps found
+## Remaining gaps
 
-### P0 - required before claiming production completeness
+### P0 - required before production exposure
 
-1. **Overview uses demonstration values.** `internal/overview/application.Service.Snapshot` returns fixed metrics and activity instead of aggregating PostgreSQL telemetry, alerts and integration health.
-2. **WebAuthn is absent.** The roadmap lists WebAuthn/TOTP, but only password plus TOTP is implemented.
-3. **No end-to-end CI suite.** Adapter unit tests and builds exist, but there is no automated browser/API/PostgreSQL Compose test in CI.
-4. **Development master is not a production identity.** Its formula is predictable by design. The application therefore refuses to start with it outside `development`, `local` or `test`.
-5. **Login throttling is absent.** Authentication failures are audited, but the API does not yet enforce per-IP/account rate limits or progressive backoff.
+1. **WebAuthn is absent.** TOTP exists, but hardware/passkey authentication is not implemented.
+2. **The hourly master formula is development-only.** It is intentionally refused outside `development`, `local` or `test`; production needs a non-predictable identity flow.
+3. **TLS/reverse proxy is required before exposure beyond trusted LAN/Tailscale.** The current LAN endpoint is plain HTTP by operator request.
 
-### P1 - incomplete roadmap capabilities
+### P1 - roadmap extensions
 
-1. **Oracle Cloud is a placeholder.** `/cloud` renders `ModuleView.vue`; there is no OCI adapter, API client, RBAC permission or provider test.
-2. **Terraform worker is external and absent.** WC Hub implements the HTTP contract but does not provide the sandboxed ephemeral executor or apply approval flow.
-3. **Integration credential lifecycle is environment-only.** The UI stores integration metadata; it does not create, rotate or revoke encrypted credentials through the control plane.
-4. **Notification routing is absent.** The operational inbox supports persistent alert acknowledgement/resolution, but email, webhook, Slack or escalation policies are not implemented.
-5. **Command palette is partial.** `Ctrl/Cmd+K` opens a shell with one telemetry shortcut; search, commands and resource navigation are not wired.
-6. **Provider health is not unified.** Individual adapters expose status/error behavior, but there is no durable cross-provider health history and alert generation for every integration.
+1. **Credential rotation UI remains metadata-only.** Runtime credentials are injected as ignored Docker secrets; values are never returned to the browser.
+2. **External notification routing is absent.** Alert acknowledgement/resolution exists, but email/webhook/Slack escalation does not.
+3. **Command palette is partial.** Resource-wide search and the complete command catalog are not wired.
+4. **Provider health history is not durable/unified.** Live provider errors are displayed, but long-term SLA/history and universal alert generation remain.
+5. **Provider write surfaces are intentionally curated.** Tokens/ACLs have administrative capability, while the UI currently exposes the common audited operations listed above rather than every vendor API endpoint.
 
 ### P2 - quality and operations
 
 1. The production build reports an `OverviewView` chunk slightly above 500 kB; route/vendor chunking should be tuned.
-2. Handler-level tests are strongest for Docker; Kubernetes, GitHub, Cloudflare, Terraform and storage would benefit from explicit RBAC/unconfigured/error response contract tests.
-3. Real-provider smoke tests remain required for each configured endpoint because CI cannot safely contain production credentials.
+2. Handler-level contract tests should be expanded beyond the current adapter and browser coverage.
+3. CI should run the Compose/Playwright suite with disposable credentials; real provider credentials must stay outside CI.
 
 ## Runtime verification on 2026-07-19
 
-- `go test ./...`: passed.
-- `go vet ./...`: passed.
-- `npm run build`: passed, with the known chunk-size warning.
-- `docker compose config --quiet`: passed.
-- Docker Desktop container execution: blocked by the Windows WSL backend returning `HCS_E_CONNECTION_TIMEOUT`; Docker Desktop remained in `starting` after a forced restart and `wsl --shutdown`.
-
-Once WSL is healthy, the pending local acceptance test is: build the isolated Compose project, wait for migrations and health checks, authenticate as `allmight`, verify the session expires at the hour boundary, navigate every real route, check browser console errors and confirm unconfigured adapters fail gracefully.
+- `go test ./...` and `go vet ./...`: passed.
+- `npm run typecheck` and `npm run build`: passed; only the known Overview chunk warning remains.
+- Docker Compose migrations through `000007_oci_permissions`: passed.
+- Playwright master-login navigation across Docker, Kubernetes, Cloudflare, GitHub, Terraform, Proxmox, MergerFS and OCI: passed with no API 5xx or browser console errors.
+- Live reads: Docker 4 containers/6 images; Cloudflare 7 tunnels/41 DNS; GitHub 12 allowlisted repositories; OCI 3 instances/2 VCNs/2 subnets/3 subscribed regions; Proxmox and Kubernetes responded successfully.
+- Live writes: Terraform validate/plan/apply succeeded with zero changes in the acceptance workspace; MergerFS mkdir/rename/delete succeeded and cleaned up.
+- Frontend is published only on `10.10.50.16:8088`; the duplicate localhost stack was stopped without deleting its volumes.

@@ -52,6 +52,7 @@ services:
       PROXMOX_API_TOKEN_ID: ${PROXMOX_API_TOKEN_ID:-}
       PROXMOX_API_TOKEN_SECRET: ${PROXMOX_API_TOKEN_SECRET:-}
       PROXMOX_TLS_CA_PATH: ${PROXMOX_TLS_CA_PATH:-/run/secrets/proxmox_ca.pem}
+      PROXMOX_ADDITIONAL_CONFIG_PATHS: ${PROXMOX_ADDITIONAL_CONFIG_PATHS:-/run/secrets/proxmox_ai.env}
       DOCKER_PROXY_URL: ${DOCKER_PROXY_URL:-}
       DOCKER_TLS_CA_PATH: ${DOCKER_TLS_CA_PATH:-/run/secrets/docker_ca.pem}
       DOCKER_CLIENT_CERT_PATH: ${DOCKER_CLIENT_CERT_PATH:-/run/secrets/docker_client.pem}
@@ -68,6 +69,8 @@ services:
       TERRAFORM_WORKER_TOKEN: ${TERRAFORM_WORKER_TOKEN:-}
       TERRAFORM_WORKSPACE_ALLOWLIST: ${TERRAFORM_WORKSPACE_ALLOWLIST:-}
       MERGERFS_ROOT: ${MERGERFS_ROOT:-/mnt/drive}
+      OCI_CONFIG_PATH: ${OCI_CONFIG_PATH:-/run/secrets/oci_config}
+      OCI_CONFIG_PROFILE: ${OCI_CONFIG_PROFILE:-DEFAULT}
       WC_HUB_SSH_PRIVATE_KEY_PATH: ${WC_HUB_SSH_PRIVATE_KEY_PATH:-/run/secrets/ssh_private_key}
       WC_HUB_SSH_KNOWN_HOSTS_PATH: ${WC_HUB_SSH_KNOWN_HOSTS_PATH:-/run/secrets/ssh_known_hosts}
     depends_on:
@@ -75,7 +78,7 @@ services:
         condition: service_completed_successfully
     volumes:
       - ./ops/secrets:/run/secrets:ro
-      - ${MERGERFS_HOST_ROOT:-./ops/storage}:/mnt/drive:ro
+      - ${MERGERFS_HOST_ROOT:-./ops/storage}:/mnt/drive:rw
     healthcheck:
       test: ["CMD", "/app/wc-hub", "healthcheck"]
       interval: 10s
@@ -85,6 +88,43 @@ services:
     restart: unless-stopped
     read_only: true
     tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+
+  terraform-worker:
+    build:
+      context: ./back
+      target: terraform-worker
+    network_mode: "service:back"
+    environment:
+      TERRAFORM_WORKER_ADDR: 127.0.0.1:8090
+      TERRAFORM_WORKER_TOKEN: ${TERRAFORM_WORKER_TOKEN:-}
+      TERRAFORM_WORKSPACE_ALLOWLIST: ${TERRAFORM_WORKSPACE_ALLOWLIST:-}
+      TERRAFORM_WORKSPACE_ROOT: /workspaces
+      TERRAFORM_STATE_ROOT: /state
+      TF_VAR_tenancy_ocid: ${OCI_TENANCY_OCID:-}
+      OCI_CLI_CONFIG_FILE: /run/secrets/oci_config
+    depends_on:
+      back:
+        condition: service_healthy
+      terraform-state-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./ops/terraform/workspaces:/workspaces:ro
+      - ./ops/secrets:/run/secrets:ro
+      - ./ops/secrets/oci_config:/.oci/config:ro
+      - terraform_state:/state
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:exec,mode=1777
+    security_opt: [no-new-privileges:true]
+
+  terraform-state-init:
+    image: alpine:3.22
+    command: ["chown", "-R", "65532:65532", "/state"]
+    volumes:
+      - terraform_state:/state
+    restart: "no"
     security_opt: [no-new-privileges:true]
 
   front:
@@ -169,3 +209,4 @@ networks:
 
 volumes:
   postgres_data:
+  terraform_state:

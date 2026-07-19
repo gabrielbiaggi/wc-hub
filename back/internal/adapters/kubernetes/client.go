@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -76,6 +77,8 @@ type Overview struct {
 type list[T any] struct {
 	Items []T `json:"items"`
 }
+
+var resourceNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`)
 
 func New(config Config) (*Client, error) {
 	parsed, err := url.Parse(strings.TrimRight(config.Endpoint, "/"))
@@ -143,7 +146,35 @@ func hasContainerProblem(pod Pod) bool {
 	}
 	return false
 }
+
+func (c *Client) DeploymentAction(ctx context.Context, namespace, name, action string, replicas int) error {
+	if !resourceNamePattern.MatchString(namespace) || !resourceNamePattern.MatchString(name) {
+		return errors.New("Kubernetes namespace or deployment name is invalid")
+	}
+	var payload any
+	switch action {
+	case "scale":
+		if replicas < 0 || replicas > 1000 {
+			return errors.New("Kubernetes replica count is outside the allowed range")
+		}
+		payload = map[string]any{"spec": map[string]any{"replicas": replicas}}
+	case "restart":
+		payload = map[string]any{"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"annotations": map[string]string{"kubectl.kubernetes.io/restartedAt": time.Now().UTC().Format(time.RFC3339)}}}}}
+	default:
+		return errors.New("Kubernetes deployment action is unsupported")
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	path := "/apis/apps/v1/namespaces/" + url.PathEscape(namespace) + "/deployments/" + url.PathEscape(name)
+	return c.request(ctx, http.MethodPatch, path, body, nil)
+}
 func (c *Client) get(ctx context.Context, path string, destination any) error {
+	return c.request(ctx, http.MethodGet, path, nil, destination)
+}
+
+func (c *Client) request(ctx context.Context, method, path string, requestBody []byte, destination any) error {
 	if c == nil || c.http == nil {
 		return errors.New("Kubernetes adapter is not configured")
 	}
@@ -156,12 +187,15 @@ func (c *Client) get(ctx context.Context, path string, destination any) error {
 	if len(token) < 20 {
 		return errors.New("Kubernetes service account token is invalid")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(requestBody))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+string(token))
 	req.Header.Set("Accept", "application/json")
+	if len(requestBody) > 0 {
+		req.Header.Set("Content-Type", "application/merge-patch+json")
+	}
 	response, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("Kubernetes API request: %w", err)
@@ -173,6 +207,9 @@ func (c *Client) get(ctx context.Context, path string, destination any) error {
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return fmt.Errorf("Kubernetes API returned %d", response.StatusCode)
+	}
+	if destination == nil || len(body) == 0 {
+		return nil
 	}
 	if err = json.Unmarshal(body, destination); err != nil {
 		return fmt.Errorf("decode Kubernetes API response: %w", err)

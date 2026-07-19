@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,6 +19,8 @@ import (
 )
 
 const maxResponseBytes = 16 << 20
+
+var containerIDPattern = regexp.MustCompile(`^[a-f0-9]{12,64}$`)
 
 type Config struct {
 	Endpoint          string
@@ -288,6 +291,38 @@ func (c *Client) ListImages(ctx context.Context) ([]Image, error) {
 		items = append(items, item)
 	}
 	return items, nil
+}
+
+func (c *Client) ContainerAction(ctx context.Context, id, action string) error {
+	id = strings.ToLower(strings.TrimSpace(id))
+	if !containerIDPattern.MatchString(id) {
+		return errors.New("Docker container ID is invalid")
+	}
+	if action != "start" && action != "stop" && action != "restart" {
+		return errors.New("Docker container action is unsupported")
+	}
+	path := "/containers/" + id + "/" + action
+	if action == "stop" || action == "restart" {
+		path += "?t=15"
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, nil)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Accept", "application/json")
+	response, err := c.http.Do(request)
+	if err != nil {
+		return fmt.Errorf("Docker action request: %w", err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, 4096))
+	if err != nil {
+		return err
+	}
+	if response.StatusCode != http.StatusNoContent && response.StatusCode != http.StatusNotModified {
+		return fmt.Errorf("Docker API returned %d: %s", response.StatusCode, sanitize(body))
+	}
+	return nil
 }
 
 func (c *Client) Stats(ctx context.Context, containers []Container) ([]ContainerStats, []string) {

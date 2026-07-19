@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { ArrowDownRight, ArrowUpRight, Cpu, Database, Layers3, RefreshCw, ShieldCheck, TriangleAlert, Zap } from 'lucide-vue-next'
 import { getOverview } from '@/lib/api'
@@ -7,7 +8,16 @@ import StatusBadge from '@/components/ui/StatusBadge.vue'
 import TelemetryChart from '@/components/charts/TelemetryChart.vue'
 const query = useQuery({ queryKey: ['overview'], queryFn: getOverview, refetchInterval: 30_000 })
 const icons = [Cpu, Layers3, Database, TriangleAlert]
-const fallback = { generated_at:new Date().toISOString(), environment:'connecting', self_protected:true, metrics:[], activity:[], series:[30,34,32,39,42,47,45,51,49,56,60,58] }
+const fallback = { generated_at:new Date().toISOString(), environment:'connecting', self_protected:true, metrics:[], activity:[], series:[] as number[] }
+const snapshot=computed(()=>query.data.value??fallback)
+const seriesStats=computed(()=>{
+  const values=snapshot.value.series
+  const latest=values.at(-1)??0
+  const peak=values.length?Math.max(...values):0
+  const average=values.length?values.reduce((sum,value)=>sum+value,0)/values.length:0
+  return {latest,peak,average,count:values.length}
+})
+const systemCards=computed(()=>snapshot.value.metrics.slice(0,3).map(metric=>({name:metric.label,meta:`${metric.value} ${metric.unit}`,value:metric.status})))
 </script>
 
 <template>
@@ -27,11 +37,11 @@ const fallback = { generated_at:new Date().toISOString(), environment:'connectin
     </section>
 
     <section class="grid gap-5 xl:grid-cols-[minmax(0,1.7fr)_minmax(340px,.8fr)]">
-      <article class="overflow-hidden rounded-xl border border-line bg-panel/65 shadow-panel"><header class="flex items-start justify-between border-b border-line/70 px-5 py-4"><div><div class="flex items-center gap-2"><Zap class="h-4 w-4 text-signal"/><h2 class="text-sm font-medium">Aggregate workload</h2></div><p class="mt-1 text-xs text-muted">Compute pressure · last 24 hours</p></div><div class="text-right"><p class="font-mono text-xl text-white">76.4%</p><p class="text-[10px] text-signal">within envelope</p></div></header><div class="h-[290px] px-3 pb-2 pt-4"><TelemetryChart :values="(query.data.value ?? fallback).series" /></div><footer class="grid grid-cols-3 border-t border-line/70"><div v-for="item in [{k:'CPU PEAK',v:'82%'},{k:'MEMORY',v:'61%'},{k:'I/O WAIT',v:'2.8%'}]" :key="item.k" class="border-r border-line/70 px-5 py-3 last:border-0"><p class="font-mono text-[9px] tracking-widest text-muted">{{item.k}}</p><p class="mt-1 font-mono text-sm text-slate-200">{{item.v}}</p></div></footer></article>
+      <article class="overflow-hidden rounded-xl border border-line bg-panel/65 shadow-panel"><header class="flex items-start justify-between border-b border-line/70 px-5 py-4"><div><div class="flex items-center gap-2"><Zap class="h-4 w-4 text-signal"/><h2 class="text-sm font-medium">Telemetry aggregate</h2></div><p class="mt-1 text-xs text-muted">Persisted samples · last 24 hours</p></div><div class="text-right"><p class="font-mono text-xl text-white">{{seriesStats.latest.toFixed(2)}}</p><p class="text-[10px] text-signal">latest measured value</p></div></header><div class="h-[290px] px-3 pb-2 pt-4"><TelemetryChart :values="snapshot.series" /></div><footer class="grid grid-cols-3 border-t border-line/70"><div v-for="item in [{k:'PEAK',v:seriesStats.peak.toFixed(2)},{k:'AVERAGE',v:seriesStats.average.toFixed(2)},{k:'POINTS',v:String(seriesStats.count)}]" :key="item.k" class="border-r border-line/70 px-5 py-3 last:border-0"><p class="font-mono text-[9px] tracking-widest text-muted">{{item.k}}</p><p class="mt-1 font-mono text-sm text-slate-200">{{item.v}}</p></div></footer></article>
       <article class="rounded-xl border border-line bg-panel/65 shadow-panel"><header class="flex items-center justify-between border-b border-line/70 px-5 py-4"><div><h2 class="text-sm font-medium">Live activity</h2><p class="mt-1 text-xs text-muted">Audit-ready event stream</p></div><span class="h-2 w-2 animate-pulse rounded-full bg-signal shadow-[0_0_10px_#49e29d]" /></header><div class="divide-y divide-line/60 px-5"><div v-for="event in (query.data.value ?? fallback).activity" :key="event.id" class="flex gap-3 py-4"><span :class="['mt-1.5 h-2 w-2 shrink-0 rounded-full',event.severity==='success'?'bg-signal':'bg-pulse']"/><div class="min-w-0"><p class="text-xs leading-relaxed text-slate-300">{{event.message}}</p><div class="mt-1.5 flex gap-2 font-mono text-[9px] uppercase tracking-wider text-muted"><span>{{event.source}}</span><span>·</span><time>{{new Date(event.at).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}}</time></div></div></div></div><RouterLink to="/audit" class="m-3 flex cursor-pointer items-center justify-center rounded-lg border border-line py-2.5 text-xs text-muted transition-colors hover:border-slate-600 hover:text-white">View complete audit trail</RouterLink></article>
     </section>
 
-    <section class="grid gap-3 md:grid-cols-3"><article v-for="system in [{name:'Proxmox cluster',meta:'4 nodes · 21 VMs',value:'99.98%'},{name:'K3s fabric',meta:'3 nodes · 84 pods',value:'Healthy'},{name:'Storage fabric',meta:'MergerFS · 18.2 TB',value:'68%'}]" :key="system.name" class="flex items-center gap-4 rounded-xl border border-line bg-panel/50 p-4"><div class="grid h-10 w-10 place-items-center rounded-full border border-signal/15 bg-signal/[.06]"><span class="h-2 w-2 rounded-full bg-signal shadow-[0_0_9px_#49e29d]" /></div><div class="min-w-0 flex-1"><p class="text-sm text-slate-200">{{system.name}}</p><p class="mt-0.5 text-[11px] text-muted">{{system.meta}}</p></div><span class="font-mono text-xs text-slate-300">{{system.value}}</span></article></section>
+    <section class="grid gap-3 md:grid-cols-3"><article v-for="system in systemCards" :key="system.name" class="flex items-center gap-4 rounded-xl border border-line bg-panel/50 p-4"><div class="grid h-10 w-10 place-items-center rounded-full border border-signal/15 bg-signal/[.06]"><span class="h-2 w-2 rounded-full bg-signal shadow-[0_0_9px_#49e29d]" /></div><div class="min-w-0 flex-1"><p class="text-sm text-slate-200">{{system.name}}</p><p class="mt-0.5 text-[11px] text-muted">{{system.meta}}</p></div><span class="font-mono text-xs uppercase text-slate-300">{{system.value}}</span></article></section>
   </div>
 </template>
 

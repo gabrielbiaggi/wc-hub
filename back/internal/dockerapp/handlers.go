@@ -16,6 +16,10 @@ type Reader interface {
 	Stats(context.Context, []dockeradapter.Container) ([]dockeradapter.ContainerStats, []string)
 }
 
+type Controller interface {
+	ContainerAction(context.Context, string, string) error
+}
+
 type Handler struct{ reader Reader }
 
 func NewHandler(reader Reader) *Handler { return &Handler{reader: reader} }
@@ -79,6 +83,23 @@ func (h *Handler) Stats(w http.ResponseWriter, r *http.Request) {
 	}
 	items, warnings := h.reader.Stats(r.Context(), containers)
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "warnings": warnings})
+}
+
+func (h *Handler) ContainerAction(w http.ResponseWriter, r *http.Request) {
+	if !h.available(w) {
+		return
+	}
+	controller, ok := h.reader.(Controller)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "docker_control_unavailable", "Docker control is not configured.")
+		return
+	}
+	id, action := r.PathValue("id"), r.PathValue("action")
+	if err := controller.ContainerAction(r.Context(), id, action); err != nil {
+		writeError(w, http.StatusBadGateway, "docker_action_failed", "Docker rejected the container action.")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"container_id": id, "action": action, "status": "accepted"})
 }
 
 func (h *Handler) available(w http.ResponseWriter) bool {

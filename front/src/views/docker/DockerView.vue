@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useQuery } from '@tanstack/vue-query'
-import { Box, Boxes, Container, Cpu, Database, HardDrive, Network, RefreshCw, ShieldCheck } from 'lucide-vue-next'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
+import { Box, Boxes, Container, Cpu, Database, HardDrive, Network, Play, RefreshCw, RotateCcw, ShieldCheck, Square } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
-import { getDockerInventory, type DockerContainerStats } from '@/lib/api_docker'
+import { getDockerInventory, runDockerContainerAction, type DockerContainerStats } from '@/lib/api_docker'
 
 const tab = ref<'containers' | 'images'>('containers')
+const queryClient = useQueryClient()
 const query = useQuery({ queryKey: ['docker-inventory'], queryFn: getDockerInventory, refetchInterval: 15_000 })
+const action = useMutation({ mutationFn: (input: { id: string; action: 'start' | 'stop' | 'restart' }) => runDockerContainerAction(input.id, input.action), onSuccess: () => setTimeout(() => queryClient.invalidateQueries({ queryKey: ['docker-inventory'] }), 800) })
 const containers = computed(() => query.data.value?.containers ?? [])
 const images = computed(() => query.data.value?.images ?? [])
 const running = computed(() => containers.value.filter((item) => item.state === 'running').length)
@@ -22,6 +24,9 @@ const formatBytes = (value = 0) => {
 const shortID = (value: string) => value.replace(/^sha256:/, '').slice(0, 12)
 const nameOf = (names: string[]) => names[0]?.replace(/^\//, '') || 'unnamed'
 const statsOf = (id: string): DockerContainerStats | undefined => statsByContainer.value.get(id)
+const execute = (id: string, operation: 'start' | 'stop' | 'restart') => {
+  if (window.confirm(`Confirma ${operation} no container ${shortID(id)}?`)) action.mutate({ id, action: operation })
+}
 </script>
 
 <template>
@@ -30,7 +35,7 @@ const statsOf = (id: string): DockerContainerStats | undefined => statsByContain
       <div>
         <div class="flex flex-wrap gap-2">
           <StatusBadge :status="query.data.value?.health.reachable ? 'healthy' : 'warning'" :label="query.data.value?.health.reachable ? 'daemon reachable' : 'proxy unavailable'" />
-          <span class="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-signal"><ShieldCheck class="h-3.5 w-3.5" />restricted read-only proxy</span>
+          <span class="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-signal"><ShieldCheck class="h-3.5 w-3.5" />authenticated operations proxy</span>
         </div>
         <h1 class="mt-4 text-3xl font-semibold tracking-tight">Docker runtime</h1>
         <p class="mt-2 text-sm text-muted">Containers, imagens e sinais vitais coletados pela API restrita, sem montar o socket no Control Plane.</p>
@@ -39,6 +44,7 @@ const statsOf = (id: string): DockerContainerStats | undefined => statsByContain
     </header>
 
     <div v-if="query.isError.value" class="rounded-xl border border-danger/20 bg-danger/5 p-4 text-sm text-danger">O proxy Docker não respondeu. Verifique o endpoint restrito, a identidade mTLS e a allowlist de leitura.</div>
+    <div v-if="action.isError.value" class="rounded-xl border border-danger/20 bg-danger/5 p-4 text-sm text-danger">O daemon rejeitou a operação solicitada.</div>
     <div v-if="query.data.value?.warnings.length" class="rounded-xl border border-warning/20 bg-warning/5 p-4 text-xs text-warning">{{ query.data.value.warnings.join(' · ') }}</div>
 
     <section class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -64,11 +70,11 @@ const statsOf = (id: string): DockerContainerStats | undefined => statsByContain
 
       <div v-if="query.isLoading.value" class="grid min-h-72 place-items-center"><div class="h-8 w-8 animate-spin rounded-full border-2 border-line border-t-signal" /></div>
       <div v-else-if="tab === 'containers'" class="divide-y divide-line/60">
-        <article v-for="container in containers" :key="container.id" class="grid gap-4 px-5 py-4 transition-colors hover:bg-white/[.02] xl:grid-cols-[1.2fr_.8fr_1fr_140px] xl:items-center">
+        <article v-for="container in containers" :key="container.id" class="grid gap-4 px-5 py-4 transition-colors hover:bg-white/[.02] xl:grid-cols-[1.2fr_.7fr_1fr_220px] xl:items-center">
           <div class="flex min-w-0 items-center gap-3"><div class="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-line bg-slate-950/50"><Container class="h-4 w-4 text-slate-300" /></div><div class="min-w-0"><p class="truncate text-sm text-slate-200">{{ nameOf(container.names) }}</p><p class="mt-1 truncate font-mono text-[10px] text-muted">{{ shortID(container.id) }} · {{ container.image }}</p></div></div>
           <div><StatusBadge :status="container.state === 'running' ? 'healthy' : container.state === 'exited' ? 'critical' : 'warning'" :label="container.state" /><p class="mt-2 truncate text-[10px] text-muted">{{ container.status }}</p></div>
           <div v-if="statsOf(container.id)" class="grid grid-cols-2 gap-x-4 gap-y-2 font-mono text-[10px]"><span class="flex items-center gap-1.5 text-muted"><Cpu class="h-3 w-3" />CPU</span><span class="text-right text-slate-300">{{ statsOf(container.id)?.cpu_percent.toFixed(1) }}%</span><span class="flex items-center gap-1.5 text-muted"><HardDrive class="h-3 w-3" />MEM</span><span class="text-right text-slate-300">{{ formatBytes(statsOf(container.id)?.memory_usage) }}</span><span class="flex items-center gap-1.5 text-muted"><Network class="h-3 w-3" />NET</span><span class="text-right text-slate-300">{{ formatBytes((statsOf(container.id)?.network_rx ?? 0) + (statsOf(container.id)?.network_tx ?? 0)) }}</span></div><p v-else class="text-xs text-muted">Stats disponíveis quando running.</p>
-          <div class="font-mono text-[10px] text-muted xl:text-right"><p>{{ container.ports.length }} ports</p><p class="mt-1">{{ Object.keys(container.labels).length }} labels</p></div>
+          <div class="flex flex-wrap justify-end gap-2"><Button v-if="container.state !== 'running'" variant="outline" :disabled="action.isPending.value" @click="execute(container.id,'start')"><Play class="h-3.5 w-3.5"/>Start</Button><Button v-if="container.state === 'running'" variant="outline" :disabled="action.isPending.value" @click="execute(container.id,'restart')"><RotateCcw class="h-3.5 w-3.5"/>Restart</Button><Button v-if="container.state === 'running'" variant="danger" :disabled="action.isPending.value" @click="execute(container.id,'stop')"><Square class="h-3.5 w-3.5"/>Stop</Button></div>
         </article>
         <div v-if="!containers.length" class="grid min-h-64 place-items-center text-center"><div><Container class="mx-auto h-7 w-7 text-muted" /><p class="mt-3 text-sm text-muted">Nenhum container encontrado.</p></div></div>
       </div>

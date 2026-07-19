@@ -2,11 +2,13 @@ package app
 
 import (
 	"encoding/json"
+	proxmoxadapter "github.com/webcreations/wc-hub/back/internal/adapters/proxmox"
 	auditrepo "github.com/webcreations/wc-hub/back/internal/audit/repository"
 	jobs "github.com/webcreations/wc-hub/back/internal/jobs/domain"
 	security "github.com/webcreations/wc-hub/back/internal/security/domain"
 	telemetrydomain "github.com/webcreations/wc-hub/back/internal/telemetry/domain"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -32,6 +34,64 @@ func (a *App) proxmoxSync(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = a.audit.Append(r.Context(), auditrepo.Record{ActorID: session.User.ID, Action: "proxmox.sync.enqueue", Scope: security.ScopeRemote, ResourceType: "job", ResourceID: job.ID, TargetName: "Proxmox", Risk: security.RiskDangerous, Decision: "allowed", RequestID: requestID(r.Context()), SourceIP: remoteIP(r)})
 	writeJSON(w, 202, job)
+}
+func (a *App) proxmoxInventory(w http.ResponseWriter, r *http.Request) {
+	if len(a.proxmoxClients) == 0 {
+		writeError(w, 409, "proxmox_unconfigured", "Proxmox API is not configured.")
+		return
+	}
+	snapshot := proxmoxadapter.Snapshot{CapturedAt: time.Now().UTC()}
+	for _, client := range a.proxmoxClients {
+		cluster, err := client.Snapshot(r.Context())
+		if err != nil {
+			writeError(w, 502, "proxmox_inventory_failed", "One or more Proxmox clusters could not be loaded.")
+			return
+		}
+		snapshot.Nodes = append(snapshot.Nodes, cluster.Nodes...)
+		snapshot.VMs = append(snapshot.VMs, cluster.VMs...)
+		snapshot.Containers = append(snapshot.Containers, cluster.Containers...)
+		snapshot.Storage = append(snapshot.Storage, cluster.Storage...)
+	}
+	writeJSON(w, 200, snapshot)
+}
+func (a *App) proxmoxPowerAction(w http.ResponseWriter, r *http.Request) {
+	if len(a.proxmoxClients) == 0 {
+		writeError(w, 409, "proxmox_unconfigured", "Proxmox API is not configured.")
+		return
+	}
+	vmid, err := strconv.Atoi(r.PathValue("vmid"))
+	if err != nil {
+		writeError(w, 400, "invalid_resource", "Proxmox VMID is invalid.")
+		return
+	}
+	node, kind, action := r.PathValue("node"), r.PathValue("kind"), r.PathValue("action")
+	var target *proxmoxadapter.Client
+	for _, client := range a.proxmoxClients {
+		snapshot, snapshotErr := client.Snapshot(r.Context())
+		if snapshotErr != nil {
+			continue
+		}
+		for _, candidate := range snapshot.Nodes {
+			if candidate.Node == node {
+				target = client
+				break
+			}
+		}
+		if target != nil {
+			break
+		}
+	}
+	if target == nil {
+		writeError(w, 404, "proxmox_node_not_found", "The Proxmox node was not found in configured clusters.")
+		return
+	}
+	if err = target.PowerAction(r.Context(), node, kind, vmid, action); err != nil {
+		writeError(w, 502, "proxmox_action_failed", "Proxmox rejected the power action.")
+		return
+	}
+	session := currentSession(r)
+	_ = a.audit.Append(r.Context(), auditrepo.Record{ActorID: session.User.ID, Action: "proxmox." + kind + "." + action, Scope: security.ScopeRemote, ResourceType: kind, ResourceID: strconv.Itoa(vmid), TargetName: node, Risk: security.RiskCritical, Decision: "allowed", RequestID: requestID(r.Context()), SourceIP: remoteIP(r)})
+	writeJSON(w, 202, map[string]any{"node": node, "kind": kind, "vmid": vmid, "action": action, "status": "accepted"})
 }
 func (a *App) listJobs(w http.ResponseWriter, r *http.Request) {
 	items, err := a.jobs.List(r.Context(), 100)

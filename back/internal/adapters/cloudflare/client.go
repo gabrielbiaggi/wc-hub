@@ -1,8 +1,4 @@
-// Package cloudflare implements the read-only Cloudflare API boundary.
-//
-// The client deliberately exposes no mutation methods. Account and zone
-// allowlists are enforced before a request is built, and the API token only
-// exists in plaintext while do is executing.
+// Package cloudflare implements the allowlisted Cloudflare API boundary.
 package cloudflare
 
 import (
@@ -197,6 +193,15 @@ type DNSRecord struct {
 	ModifiedAt time.Time `json:"modified_at"`
 }
 
+type DNSRecordInput struct {
+	Type    string `json:"type"`
+	Name    string `json:"name"`
+	Content string `json:"content"`
+	Proxied bool   `json:"proxied"`
+	TTL     int    `json:"ttl"`
+	Comment string `json:"comment,omitempty"`
+}
+
 type ClientError struct {
 	StatusCode int
 	Code       int
@@ -357,13 +362,69 @@ func (c *Client) ListDNSRecords(ctx context.Context, zoneID string) ([]DNSRecord
 	return result, nil
 }
 
+func (c *Client) CreateDNSRecord(ctx context.Context, zoneID string, input DNSRecordInput) (DNSRecord, error) {
+	return c.writeDNSRecord(ctx, http.MethodPost, zoneID, "", input)
+}
+
+func (c *Client) UpdateDNSRecord(ctx context.Context, zoneID, recordID string, input DNSRecordInput) (DNSRecord, error) {
+	if !externalIDPattern.MatchString(recordID) {
+		return DNSRecord{}, errors.New("cloudflare DNS record ID is invalid")
+	}
+	return c.writeDNSRecord(ctx, http.MethodPut, zoneID, recordID, input)
+}
+
+func (c *Client) writeDNSRecord(ctx context.Context, method, zoneID, recordID string, input DNSRecordInput) (DNSRecord, error) {
+	if !c.ZoneAllowed(zoneID) {
+		return DNSRecord{}, ErrZoneNotAllowed
+	}
+	input.Type = strings.ToUpper(strings.TrimSpace(input.Type))
+	input.Name, input.Content, input.Comment = strings.TrimSpace(input.Name), strings.TrimSpace(input.Content), strings.TrimSpace(input.Comment)
+	allowedTypes := map[string]bool{"A": true, "AAAA": true, "CNAME": true, "TXT": true, "MX": true, "NS": true, "SRV": true, "CAA": true, "PTR": true, "HTTPS": true, "SVCB": true}
+	if !allowedTypes[input.Type] || input.Name == "" || len(input.Name) > 255 || input.Content == "" || len(input.Content) > 4096 || len(input.Comment) > 255 {
+		return DNSRecord{}, errors.New("cloudflare DNS record payload is invalid")
+	}
+	if input.TTL == 0 {
+		input.TTL = 1
+	}
+	if input.TTL != 1 && (input.TTL < 60 || input.TTL > 86400) {
+		return DNSRecord{}, errors.New("cloudflare DNS TTL is invalid")
+	}
+	body, err := json.Marshal(input)
+	if err != nil {
+		return DNSRecord{}, err
+	}
+	path := "/zones/" + url.PathEscape(zoneID) + "/dns_records"
+	if recordID != "" {
+		path += "/" + url.PathEscape(recordID)
+	}
+	var wire dnsRecordWire
+	if _, err = c.do(ctx, method, path, nil, body, &wire); err != nil {
+		return DNSRecord{}, err
+	}
+	return DNSRecord{ID: wire.ID, ZoneID: zoneID, Type: wire.Type, Name: wire.Name, Content: wire.Content, Proxied: wire.Proxied, Proxiable: wire.Proxiable, TTL: wire.TTL, Comment: wire.Comment, ModifiedAt: wire.ModifiedAt}, nil
+}
+
+func (c *Client) DeleteDNSRecord(ctx context.Context, zoneID, recordID string) error {
+	if !c.ZoneAllowed(zoneID) {
+		return ErrZoneNotAllowed
+	}
+	if !externalIDPattern.MatchString(recordID) {
+		return errors.New("cloudflare DNS record ID is invalid")
+	}
+	var result struct {
+		ID string `json:"id"`
+	}
+	_, err := c.do(ctx, http.MethodDelete, "/zones/"+url.PathEscape(zoneID)+"/dns_records/"+url.PathEscape(recordID), nil, nil, &result)
+	return err
+}
+
 func (c *Client) list(ctx context.Context, path string, query url.Values, destination any) error {
 	page := 1
 	all := make([]json.RawMessage, 0)
 	for {
 		query.Set("page", fmt.Sprintf("%d", page))
 		var items []json.RawMessage
-		info, err := c.do(ctx, path, query, &items)
+		info, err := c.do(ctx, http.MethodGet, path, query, nil, &items)
 		if err != nil {
 			return err
 		}
@@ -390,7 +451,7 @@ func (c *Client) list(ctx context.Context, path string, query url.Values, destin
 	return nil
 }
 
-func (c *Client) do(ctx context.Context, path string, query url.Values, destination any) (resultInfo, error) {
+func (c *Client) do(ctx context.Context, method, path string, query url.Values, requestBody []byte, destination any) (resultInfo, error) {
 	envelope, err := c.credentials.EncryptedToken(ctx)
 	if err != nil {
 		return resultInfo{}, fmt.Errorf("load encrypted Cloudflare credential")
@@ -406,14 +467,19 @@ func (c *Client) do(ctx context.Context, path string, query url.Values, destinat
 
 	endpoint := *c.baseURL
 	endpoint.Path = strings.TrimRight(c.baseURL.Path, "/") + path
-	endpoint.RawQuery = query.Encode()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+	if query != nil {
+		endpoint.RawQuery = query.Encode()
+	}
+	request, err := http.NewRequestWithContext(ctx, method, endpoint.String(), strings.NewReader(string(requestBody)))
 	if err != nil {
 		return resultInfo{}, fmt.Errorf("build Cloudflare request: %w", ErrUpstream)
 	}
 	request.Header.Set("Authorization", "Bearer "+string(token))
 	request.Header.Set("Accept", "application/json")
-	request.Header.Set("User-Agent", "wc-hub/cloudflare-readonly")
+	request.Header.Set("User-Agent", "wc-hub/cloudflare")
+	if len(requestBody) > 0 {
+		request.Header.Set("Content-Type", "application/json")
+	}
 	defer request.Header.Del("Authorization")
 
 	response, err := c.http.Do(request)

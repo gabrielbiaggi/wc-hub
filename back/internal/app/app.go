@@ -21,6 +21,7 @@ import (
 	githubadapter "github.com/webcreations/wc-hub/back/internal/adapters/github"
 	kubernetesadapter "github.com/webcreations/wc-hub/back/internal/adapters/kubernetes"
 	mergerfsadapter "github.com/webcreations/wc-hub/back/internal/adapters/mergerfs"
+	ociadapter "github.com/webcreations/wc-hub/back/internal/adapters/oci"
 	proxmoxadapter "github.com/webcreations/wc-hub/back/internal/adapters/proxmox"
 	terraformadapter "github.com/webcreations/wc-hub/back/internal/adapters/terraform"
 	auditrepo "github.com/webcreations/wc-hub/back/internal/audit/repository"
@@ -36,6 +37,7 @@ import (
 	jobdomain "github.com/webcreations/wc-hub/back/internal/jobs/domain"
 	jobrepo "github.com/webcreations/wc-hub/back/internal/jobs/repository"
 	kubernetesapp "github.com/webcreations/wc-hub/back/internal/kubernetesapp"
+	ociapp "github.com/webcreations/wc-hub/back/internal/ociapp"
 	overview "github.com/webcreations/wc-hub/back/internal/overview/application"
 	"github.com/webcreations/wc-hub/back/internal/platform/config"
 	proxmoxapp "github.com/webcreations/wc-hub/back/internal/proxmox/application"
@@ -67,16 +69,19 @@ type App struct {
 	jobs                      *jobrepo.Postgres
 	proxmox                   *proxmoxrepo.Postgres
 	proxmoxClient             *proxmoxadapter.Client
+	proxmoxClients            []*proxmoxadapter.Client
 	dockerClient              *dockeradapter.Client
 	kubernetesClient          *kubernetesadapter.Client
 	cloudflareHandler         *cloudflareapp.Handler
 	githubClient              *githubadapter.Client
 	terraformRunner           *terraformadapter.Runner
 	storageClient             *mergerfsadapter.Client
+	ociHandler                *ociapp.Handler
 	telemetry                 *telemetryrepo.Postgres
 	terminal                  *terminalrepo.Postgres
 	terminalGateway           *terminalapp.Gateway
 	developmentMasterLocation *time.Location
+	loginLimiter              *loginLimiter
 	cancelWorkers             context.CancelFunc
 }
 
@@ -103,7 +108,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, fun
 		pool.Close()
 		return nil, nil, err
 	}
-	application := &App{cfg: cfg, logger: logger, overview: overview.New(cfg.Environment, cfg.SelfProtected), policy: security.NewEngine(cfg.LocalAllowlist), db: pool}
+	application := &App{cfg: cfg, logger: logger, overview: overview.New(pool, cfg.Environment, cfg.SelfProtected), policy: security.NewEngine(cfg.LocalAllowlist), db: pool, loginLimiter: newLoginLimiter()}
 	authRepository := authrepo.NewPostgres(pool)
 	application.auth = authapp.New(authRepository, cfg.SessionTTL)
 	if cfg.DevelopmentMasterLogin {
@@ -129,10 +134,19 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, fun
 			logger.Error("Proxmox adapter disabled", "error", clientErr)
 		} else {
 			application.proxmoxClient = client
+			application.proxmoxClients = append(application.proxmoxClients, client)
 			if _, err = pool.Exec(ctx, `UPDATE schedules SET enabled=true,next_run_at=LEAST(next_run_at,now()) WHERE name='proxmox-inventory-sync'`); err != nil {
 				logger.Error("enable Proxmox schedule failed", "error", err)
 			}
 		}
+	}
+	for _, configPath := range cfg.ProxmoxAdditionalConfigs {
+		client, clientErr := proxmoxadapter.NewFromEnvFile(configPath)
+		if clientErr != nil {
+			logger.Error("additional Proxmox adapter disabled", "config_path", configPath, "error", clientErr)
+			continue
+		}
+		application.proxmoxClients = append(application.proxmoxClients, client)
 	}
 	if cfg.DockerEndpoint != "" {
 		client, clientErr := dockeradapter.NewWithConfig(dockeradapter.Config{Endpoint: cfg.DockerEndpoint, CACertificatePath: cfg.DockerTLSCA, ClientCertPath: cfg.DockerClientCert, ClientKeyPath: cfg.DockerClientKey})
@@ -201,6 +215,17 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, fun
 			application.storageClient = client
 		}
 	}
+	if cfg.OCIConfigPath != "" {
+		client, clientErr := ociadapter.New(cfg.OCIConfigPath, cfg.OCIConfigProfile)
+		if clientErr != nil {
+			logger.Error("OCI adapter disabled", "error", clientErr)
+		} else {
+			application.ociHandler = ociapp.NewHandler(client, func(ctx context.Context, event ociapp.AuditEvent) {
+				session, _ := ctx.Value(sessionContextKey).(authdomain.Session)
+				_ = application.audit.Append(ctx, auditrepo.Record{ActorID: session.User.ID, Action: event.Action, Scope: security.ScopeCloud, ResourceType: "oci_instance", ResourceID: event.ResourceID, TargetName: event.TargetName, Risk: security.RiskCritical, Decision: "allowed", Payload: event.Payload})
+			})
+		}
+	}
 	if gateway, gatewayErr := terminalapp.NewGateway(application.terminal, cfg.SSHPrivateKeyPath, cfg.SSHKnownHostsPath, cfg.PublicURL); gatewayErr != nil {
 		logger.Warn("SSH terminal disabled", "error", gatewayErr)
 	} else {
@@ -256,6 +281,8 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("PATCH /api/v1/alerts/{id}", a.protect("hosts.execute.safe", a.updateAlert))
 	mux.HandleFunc("GET /api/v1/proxmox/summary", a.protect("proxmox.read", a.proxmoxSummary))
 	mux.HandleFunc("POST /api/v1/proxmox/sync", a.protect("proxmox.sync", a.proxmoxSync))
+	mux.HandleFunc("GET /api/v1/proxmox/inventory", a.protect("proxmox.read", a.proxmoxInventory))
+	mux.HandleFunc("POST /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/{action}", a.protect("proxmox.manage", a.proxmoxPowerAction))
 	mux.HandleFunc("GET /api/v1/jobs", a.protect("jobs.read", a.listJobs))
 	mux.HandleFunc("POST /api/v1/jobs", a.protect("jobs.manage", a.createJob))
 	mux.HandleFunc("POST /api/v1/agents/hosts/{host_id}/token", a.protect("agents.manage", a.provisionAgentToken))
@@ -271,6 +298,7 @@ func (a *App) Handler() http.Handler {
 	githubapp.MountRoutes(mux, a.protect, a.githubClient)
 	terraformapp.MountRoutes(mux, a.protect, a.terraformRunner)
 	storageapp.MountRoutes(mux, a.protect, a.storageClient)
+	ociapp.MountRoutes(mux, a.protect, a.ociHandler)
 	return a.middleware(mux)
 }
 
@@ -278,7 +306,12 @@ func (a *App) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"status": "ok", "time": time.Now().UTC(), "self_protected": a.cfg.SelfProtected})
 }
 func (a *App) getOverview(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, a.overview.Snapshot())
+	snapshot, err := a.overview.Snapshot(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "overview_failed", "Could not aggregate the operational overview.")
+		return
+	}
+	writeJSON(w, 200, snapshot)
 }
 func (a *App) modules(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, []string{"overview", "proxmox", "cloud", "kubernetes", "docker", "github", "tunnels", "terraform", "telemetry", "remote-access", "storage", "settings", "audit"})

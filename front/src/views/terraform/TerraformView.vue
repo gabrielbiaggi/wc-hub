@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
-import { FileCode2, Play, Plus, RefreshCw, ShieldCheck, SquareMinus, TriangleAlert } from 'lucide-vue-next'
+import { FileCode2, Play, Plus, RefreshCw, Rocket, ShieldCheck, SquareMinus, TriangleAlert } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import { getTerraformRuns, startTerraformRun } from '@/lib/api_terraform'
@@ -13,15 +13,17 @@ const query = useQuery({ queryKey: ['terraform-runs'], queryFn: getTerraformRuns
 const runs = computed(() => query.data.value?.items ?? [])
 const selected = computed(() => runs.value.find((item) => item.id === selectedID.value) ?? runs.value[0])
 const mutation = useMutation({
-  mutationFn: (operation: 'validate' | 'plan') => startTerraformRun(operation, workspace.value),
+  mutationFn: (operation: 'validate' | 'plan' | 'apply') => startTerraformRun(operation, workspace.value),
   onSuccess: (run) => {
     selectedID.value = run.id
     void queryClient.invalidateQueries({ queryKey: ['terraform-runs'] })
   },
 })
 
-const run = (operation: 'validate' | 'plan') => {
-  if (workspace.value) mutation.mutate(operation)
+const run = (operation: 'validate' | 'plan' | 'apply') => {
+  if (!workspace.value) return
+  if (operation === 'apply' && window.prompt(`Digite APPLY ${workspace.value} para confirmar a execução real:`) !== `APPLY ${workspace.value}`) return
+  mutation.mutate(operation)
 }
 </script>
 
@@ -33,11 +35,11 @@ const run = (operation: 'validate' | 'plan') => {
         <span class="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase text-signal"><ShieldCheck class="h-3.5 w-3.5" />typed operations only</span>
       </div>
       <h1 class="mt-4 text-3xl font-semibold">Terraform plans</h1>
-      <p class="mt-2 text-sm text-muted">Validate e plan executados fora da API, em worker efêmero com workspaces allowlisted.</p>
+      <p class="mt-2 text-sm text-muted">Validate, plan e apply executados fora da API, com state isolado e workspaces allowlisted.</p>
     </header>
 
     <section class="rounded-xl border border-line bg-panel/65 p-5">
-      <div class="grid gap-4 md:grid-cols-[1fr_auto_auto]">
+      <div class="grid gap-4 md:grid-cols-[1fr_auto_auto_auto]">
         <label class="text-xs text-muted">Workspace
           <select v-model="workspace" class="field">
             <option value="" disabled>Selecione um workspace</option>
@@ -46,6 +48,7 @@ const run = (operation: 'validate' | 'plan') => {
         </label>
         <Button class="self-end" variant="outline" :disabled="!workspace || mutation.isPending.value" @click="run('validate')"><FileCode2 class="h-4 w-4" />Validate</Button>
         <Button class="self-end" :disabled="!workspace || mutation.isPending.value" @click="run('plan')"><Play class="h-4 w-4" />Plan</Button>
+        <Button class="self-end" variant="danger" :disabled="!workspace || mutation.isPending.value" @click="run('apply')"><Rocket class="h-4 w-4" />Apply</Button>
       </div>
       <p v-if="query.isError.value" class="mt-4 text-xs text-danger">O worker Terraform não está disponível.</p>
       <p v-else-if="mutation.isError.value" class="mt-4 text-xs text-danger">O worker recusou a solicitação. Confirme workspace e credenciais efêmeras.</p>

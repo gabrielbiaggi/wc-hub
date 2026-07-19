@@ -65,3 +65,8 @@ export const getCloudflareTunnels = async (accountID: string) =>
 
 export const getCloudflareDNSRecords = async (zoneID: string) =>
   (await api.get<{ items: CloudflareDNSRecord[] }>(`/v1/cloudflare/zones/${encodeURIComponent(zoneID)}/dns-records`)).data.items
+
+export interface CloudflareDNSInput { type:string; name:string; content:string; proxied:boolean; ttl:number; comment?:string }
+export const createCloudflareDNSRecord = async(zoneID:string,input:CloudflareDNSInput)=>(await api.post<CloudflareDNSRecord>(`/v1/cloudflare/zones/${encodeURIComponent(zoneID)}/dns-records`,input)).data
+export const updateCloudflareDNSRecord = async(zoneID:string,recordID:string,input:CloudflareDNSInput)=>(await api.put<CloudflareDNSRecord>(`/v1/cloudflare/zones/${encodeURIComponent(zoneID)}/dns-records/${encodeURIComponent(recordID)}`,input)).data
+export const deleteCloudflareDNSRecord = async(zoneID:string,recordID:string)=>api.delete(`/v1/cloudflare/zones/${encodeURIComponent(zoneID)}/dns-records/${encodeURIComponent(recordID)}`)

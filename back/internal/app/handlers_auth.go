@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -63,6 +64,18 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
+	identity := strings.ToLower(strings.TrimSpace(req.Email))
+	limiterKeys := []string{"ip:" + remoteIP(r), "account:" + identity}
+	if allowed, retry := a.loginLimiter.allow(limiterKeys, time.Now()); !allowed {
+		seconds := int(retry.Round(time.Second) / time.Second)
+		if seconds < 1 {
+			seconds = 1
+		}
+		w.Header().Set("Retry-After", strconv.Itoa(seconds))
+		_ = a.audit.Append(r.Context(), auditrepo.Record{Action: "auth.login.throttled", Scope: security.ScopeLocal, ResourceType: "session", TargetName: identity, Risk: security.RiskCritical, Decision: "denied", Reason: "progressive login backoff", RequestID: requestID(r.Context()), SourceIP: remoteIP(r)})
+		writeError(w, http.StatusTooManyRequests, "login_throttled", "Too many failed login attempts. Try again later.")
+		return
+	}
 	var tokens authapp.Tokens
 	var err error
 	developmentMaster := a.cfg.DevelopmentMasterLogin && strings.EqualFold(strings.TrimSpace(req.Email), authdomain.DevelopmentMasterUsername)
@@ -72,6 +85,7 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 		tokens, err = a.auth.Login(r.Context(), req.Email, req.Password, r.UserAgent(), remoteIP(r))
 	}
 	if err != nil {
+		a.loginLimiter.failure(limiterKeys, time.Now())
 		action := "auth.login"
 		risk := security.RiskDangerous
 		if developmentMaster {
@@ -82,6 +96,7 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 401, "invalid_credentials", "Email or password is invalid.")
 		return
 	}
+	a.loginLimiter.success(limiterKeys)
 	a.setCookie(w, tokens.Session, tokens.Expires)
 	action := "auth.login"
 	risk := security.RiskSafe

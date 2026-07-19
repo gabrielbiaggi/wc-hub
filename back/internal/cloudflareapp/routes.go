@@ -7,8 +7,7 @@ import "net/http"
 // without importing application internals.
 type AuthMiddleware func(permission string, next http.HandlerFunc) http.HandlerFunc
 
-// MountRoutes registers only read-only Cloudflare routes. The caller owns
-// authentication, RBAC, CSRF and global request middleware.
+// MountRoutes registers allowlisted Cloudflare inventory and mutation routes.
 func MountRoutes(mux *http.ServeMux, authMiddleware AuthMiddleware, handler *Handler) {
 	if mux == nil || authMiddleware == nil {
 		panic("cloudflareapp: mux and auth middleware are required")
@@ -26,4 +25,7 @@ func MountRoutes(mux *http.ServeMux, authMiddleware AuthMiddleware, handler *Han
 	mux.HandleFunc("GET /api/v1/cloudflare/overview", authMiddleware(permission, handler.Overview))
 	mux.HandleFunc("GET /api/v1/cloudflare/accounts/{account_id}/tunnels", authMiddleware(permission, handler.Tunnels))
 	mux.HandleFunc("GET /api/v1/cloudflare/zones/{zone_id}/dns-records", authMiddleware(permission, handler.DNSRecords))
+	mux.HandleFunc("POST /api/v1/cloudflare/zones/{zone_id}/dns-records", authMiddleware("cloudflare.manage", handler.CreateDNSRecord))
+	mux.HandleFunc("PUT /api/v1/cloudflare/zones/{zone_id}/dns-records/{record_id}", authMiddleware("cloudflare.manage", handler.UpdateDNSRecord))
+	mux.HandleFunc("DELETE /api/v1/cloudflare/zones/{zone_id}/dns-records/{record_id}", authMiddleware("cloudflare.manage", handler.DeleteDNSRecord))
 }

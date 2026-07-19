@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -37,6 +38,13 @@ type Repository struct {
 	UpdatedAt       time.Time `json:"updated_at"`
 	OpenIssuesCount int       `json:"open_issues_count"`
 	StargazersCount int       `json:"stargazers_count"`
+	ForksCount      int       `json:"forks_count"`
+	Size            int       `json:"size"`
+	Language        string    `json:"language"`
+	Visibility      string    `json:"visibility"`
+	Permissions     struct {
+		Admin, Maintain, Push, Triage, Pull bool
+	} `json:"permissions"`
 }
 type WorkflowRun struct {
 	ID           int64     `json:"id"`
@@ -119,30 +127,77 @@ func validRepository(value string) bool {
 
 func (c *Client) Overview(ctx context.Context) (Overview, error) {
 	result := Overview{GeneratedAt: time.Now().UTC(), Projects: []Project{}, Warnings: []string{}}
-	for _, fullName := range c.repositories {
-		project := Project{WorkflowRuns: []WorkflowRun{}, Releases: []Release{}}
-		if err := c.get(ctx, "/repos/"+fullName, &project.Repository); err != nil {
-			project.Error = "repository unavailable"
-			result.Warnings = append(result.Warnings, fullName+" unavailable")
-			result.Projects = append(result.Projects, project)
-			continue
-		}
-		var runs struct {
-			WorkflowRuns []WorkflowRun `json:"workflow_runs"`
-		}
-		if err := c.get(ctx, "/repos/"+fullName+"/actions/runs?per_page=20", &runs); err != nil {
-			result.Warnings = append(result.Warnings, fullName+" workflows unavailable")
-		} else {
-			project.WorkflowRuns = runs.WorkflowRuns
-		}
-		if err := c.get(ctx, "/repos/"+fullName+"/releases?per_page=20", &project.Releases); err != nil {
-			result.Warnings = append(result.Warnings, fullName+" releases unavailable")
-		}
-		result.Projects = append(result.Projects, project)
+	type loaded struct {
+		project  Project
+		warnings []string
+	}
+	items := make([]loaded, len(c.repositories))
+	semaphore := make(chan struct{}, 6)
+	var wait sync.WaitGroup
+	for index, fullName := range c.repositories {
+		wait.Add(1)
+		go func(index int, fullName string) {
+			defer wait.Done()
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+			items[index].project, items[index].warnings = c.loadProject(ctx, fullName)
+		}(index, fullName)
+	}
+	wait.Wait()
+	for _, item := range items {
+		result.Projects = append(result.Projects, item.project)
+		result.Warnings = append(result.Warnings, item.warnings...)
 	}
 	return result, nil
 }
+
+func (c *Client) loadProject(ctx context.Context, fullName string) (Project, []string) {
+	project := Project{WorkflowRuns: []WorkflowRun{}, Releases: []Release{}}
+	warnings := []string{}
+	if err := c.get(ctx, "/repos/"+fullName, &project.Repository); err != nil {
+		project.Error = "repository unavailable"
+		return project, []string{fullName + " unavailable"}
+	}
+	var runs struct {
+		WorkflowRuns []WorkflowRun `json:"workflow_runs"`
+	}
+	if err := c.get(ctx, "/repos/"+fullName+"/actions/runs?per_page=20", &runs); err != nil {
+		warnings = append(warnings, fullName+" workflows unavailable")
+	} else {
+		project.WorkflowRuns = runs.WorkflowRuns
+	}
+	if err := c.get(ctx, "/repos/"+fullName+"/releases?per_page=20", &project.Releases); err != nil {
+		warnings = append(warnings, fullName+" releases unavailable")
+	}
+	return project, warnings
+}
+
+func (c *Client) RunAction(ctx context.Context, fullName string, runID int64, action string) error {
+	if !c.repositoryAllowed(fullName) {
+		return errors.New("GitHub repository is not allowlisted")
+	}
+	if runID <= 0 {
+		return errors.New("GitHub workflow run ID is invalid")
+	}
+	if action != "rerun" && action != "cancel" {
+		return errors.New("unsupported GitHub workflow action")
+	}
+	return c.request(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/actions/runs/%d/%s", fullName, runID, action), nil)
+}
+
+func (c *Client) repositoryAllowed(fullName string) bool {
+	for _, allowed := range c.repositories {
+		if allowed == fullName {
+			return true
+		}
+	}
+	return false
+}
 func (c *Client) get(ctx context.Context, path string, destination any) error {
+	return c.request(ctx, http.MethodGet, path, destination)
+}
+
+func (c *Client) request(ctx context.Context, method, path string, destination any) error {
 	cleanPath := path
 	rawQuery := ""
 	if index := strings.Index(path, "?"); index >= 0 {
@@ -150,7 +205,7 @@ func (c *Client) get(ctx context.Context, path string, destination any) error {
 		rawQuery = path[index+1:]
 	}
 	endpoint := &url.URL{Scheme: "https", Host: "api.github.com", Path: cleanPath, RawQuery: rawQuery}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, method, endpoint.String(), nil)
 	if err != nil {
 		return err
 	}
@@ -168,6 +223,9 @@ func (c *Client) get(ctx context.Context, path string, destination any) error {
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return fmt.Errorf("GitHub API returned %d", response.StatusCode)
+	}
+	if destination == nil || len(body) == 0 {
+		return nil
 	}
 	if err = json.Unmarshal(body, destination); err != nil {
 		return fmt.Errorf("decode GitHub response: %w", err)

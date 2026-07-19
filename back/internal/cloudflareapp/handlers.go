@@ -22,6 +22,12 @@ type Reader interface {
 	ListDNSRecords(context.Context, string) ([]cloudflareadapter.DNSRecord, error)
 }
 
+type DNSWriter interface {
+	CreateDNSRecord(context.Context, string, cloudflareadapter.DNSRecordInput) (cloudflareadapter.DNSRecord, error)
+	UpdateDNSRecord(context.Context, string, string, cloudflareadapter.DNSRecordInput) (cloudflareadapter.DNSRecord, error)
+	DeleteDNSRecord(context.Context, string, string) error
+}
+
 // AuditEvent is intentionally provider-neutral so the global application can
 // translate it into its hash-chained audit repository without this plugin
 // importing application internals.
@@ -229,6 +235,74 @@ func (h *Handler) DNSRecords(w http.ResponseWriter, request *http.Request) {
 	}
 	h.emit(ctx, AuditEvent{Action: "cloudflare.dns.read", ResourceType: "cloudflare_zone", TargetName: zoneID, Decision: "allowed", Reason: "read-only allowlisted request", Payload: map[string]any{"item_count": len(records)}})
 	writeJSON(w, http.StatusOK, map[string]any{"items": records})
+}
+
+func (h *Handler) CreateDNSRecord(w http.ResponseWriter, request *http.Request) {
+	h.writeDNSRecord(w, request, false)
+}
+
+func (h *Handler) UpdateDNSRecord(w http.ResponseWriter, request *http.Request) {
+	h.writeDNSRecord(w, request, true)
+}
+
+func (h *Handler) writeDNSRecord(w http.ResponseWriter, request *http.Request, update bool) {
+	zoneID := request.PathValue("zone_id")
+	if _, allowed := h.allowedZones[zoneID]; !allowed || !h.reader.ZoneAllowed(zoneID) {
+		writeError(w, 403, "zone_not_allowed", "The requested Cloudflare zone is not allowlisted.")
+		return
+	}
+	writer, ok := h.reader.(DNSWriter)
+	if !ok {
+		writeError(w, 503, "cloudflare_write_unavailable", "Cloudflare mutation access is not configured.")
+		return
+	}
+	var input cloudflareadapter.DNSRecordInput
+	decoder := json.NewDecoder(http.MaxBytesReader(w, request.Body, 16<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeError(w, 400, "invalid_request", "DNS record payload is invalid.")
+		return
+	}
+	ctx, cancel := context.WithTimeout(request.Context(), h.timeout)
+	defer cancel()
+	var record cloudflareadapter.DNSRecord
+	var err error
+	action := "cloudflare.dns.create"
+	if update {
+		action = "cloudflare.dns.update"
+		record, err = writer.UpdateDNSRecord(ctx, zoneID, request.PathValue("record_id"), input)
+	} else {
+		record, err = writer.CreateDNSRecord(ctx, zoneID, input)
+	}
+	if err != nil {
+		h.emit(ctx, AuditEvent{Action: action, ResourceType: "cloudflare_dns_record", TargetName: input.Name, Decision: "failed", Reason: "provider rejected mutation"})
+		writeError(w, 502, "cloudflare_dns_write_failed", "Cloudflare rejected the DNS change.")
+		return
+	}
+	h.emit(ctx, AuditEvent{Action: action, ResourceType: "cloudflare_dns_record", TargetName: record.Name, Decision: "allowed", Reason: "allowlisted zone mutation", Payload: map[string]any{"zone_id": zoneID, "record_id": record.ID, "type": record.Type}})
+	writeJSON(w, map[bool]int{false: 201, true: 200}[update], record)
+}
+
+func (h *Handler) DeleteDNSRecord(w http.ResponseWriter, request *http.Request) {
+	zoneID, recordID := request.PathValue("zone_id"), request.PathValue("record_id")
+	if _, allowed := h.allowedZones[zoneID]; !allowed || !h.reader.ZoneAllowed(zoneID) {
+		writeError(w, 403, "zone_not_allowed", "The requested Cloudflare zone is not allowlisted.")
+		return
+	}
+	writer, ok := h.reader.(DNSWriter)
+	if !ok {
+		writeError(w, 503, "cloudflare_write_unavailable", "Cloudflare mutation access is not configured.")
+		return
+	}
+	ctx, cancel := context.WithTimeout(request.Context(), h.timeout)
+	defer cancel()
+	if err := writer.DeleteDNSRecord(ctx, zoneID, recordID); err != nil {
+		h.emit(ctx, AuditEvent{Action: "cloudflare.dns.delete", ResourceType: "cloudflare_dns_record", TargetName: recordID, Decision: "failed", Reason: "provider rejected mutation"})
+		writeError(w, 502, "cloudflare_dns_delete_failed", "Cloudflare rejected the DNS deletion.")
+		return
+	}
+	h.emit(ctx, AuditEvent{Action: "cloudflare.dns.delete", ResourceType: "cloudflare_dns_record", TargetName: recordID, Decision: "allowed", Reason: "allowlisted zone mutation", Payload: map[string]any{"zone_id": zoneID}})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) emit(ctx context.Context, event AuditEvent) {

@@ -93,7 +93,7 @@ func (r *Runner) Workspaces() []string {
 	return values
 }
 func (r *Runner) Start(ctx context.Context, operation, workspace string) (Run, error) {
-	if operation != "validate" && operation != "plan" {
+	if operation != "validate" && operation != "plan" && operation != "apply" {
 		return Run{}, errors.New("Terraform operation is not allowlisted")
 	}
 	if _, ok := r.workspaces[workspace]; !ok {

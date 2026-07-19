@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"mime"
 	"os"
@@ -126,6 +127,110 @@ func (c *Client) Open(relative string) (*os.File, os.FileInfo, error) {
 		return nil, nil, errors.New("cannot stream a directory")
 	}
 	return file, info, nil
+}
+
+func (c *Client) CreateDirectory(parent, name string) (Entry, error) {
+	target, err := c.newTarget(parent, name)
+	if err != nil {
+		return Entry{}, err
+	}
+	if err = os.Mkdir(target, 0o750); err != nil {
+		return Entry{}, err
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		return Entry{}, err
+	}
+	return c.entry(target, info), nil
+}
+
+func (c *Client) WriteFile(ctx context.Context, parent, name string, source io.Reader) (Entry, error) {
+	target, err := c.newTarget(parent, name)
+	if err != nil {
+		return Entry{}, err
+	}
+	file, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
+	if err != nil {
+		return Entry{}, err
+	}
+	_, copyErr := io.Copy(file, &contextReader{ctx: ctx, reader: io.LimitReader(source, 256<<20)})
+	closeErr := file.Close()
+	if copyErr != nil {
+		return Entry{}, copyErr
+	}
+	if closeErr != nil {
+		return Entry{}, closeErr
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		return Entry{}, err
+	}
+	return c.entry(target, info), nil
+}
+
+func (c *Client) Rename(relative, name string) (Entry, error) {
+	source, err := c.resolve(relative)
+	if err != nil {
+		return Entry{}, err
+	}
+	target, err := c.newTarget(filepath.ToSlash(filepath.Dir(relative)), name)
+	if err != nil {
+		return Entry{}, err
+	}
+	if err = os.Rename(source, target); err != nil {
+		return Entry{}, err
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		return Entry{}, err
+	}
+	return c.entry(target, info), nil
+}
+
+func (c *Client) Delete(relative string) error {
+	target, err := c.resolve(relative)
+	if err != nil {
+		return err
+	}
+	if target == c.root {
+		return ErrPathDenied
+	}
+	return os.Remove(target)
+}
+
+func (c *Client) newTarget(parent, name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" || name == "." || name == ".." || len(name) > 255 || strings.ContainsAny(name, `/\\`) {
+		return "", ErrPathDenied
+	}
+	parentPath, err := c.resolve(parent)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(parentPath)
+	if err != nil || !info.IsDir() {
+		return "", ErrPathDenied
+	}
+	target := filepath.Join(parentPath, name)
+	rel, err := filepath.Rel(c.root, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", ErrPathDenied
+	}
+	return target, nil
+}
+
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r *contextReader) Read(buffer []byte) (int, error) {
+	select {
+	case <-r.ctx.Done():
+		return 0, r.ctx.Err()
+	default:
+		return r.reader.Read(buffer)
+	}
 }
 func (c *Client) resolve(relative string) (string, error) {
 	relative = strings.TrimSpace(strings.ReplaceAll(relative, "\\", "/"))

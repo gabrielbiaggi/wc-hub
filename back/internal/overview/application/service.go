@@ -1,6 +1,11 @@
 package application
 
-import "time"
+import (
+	"context"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
 
 type Metric struct {
 	Label  string  `json:"label"`
@@ -26,18 +31,70 @@ type Snapshot struct {
 }
 
 type Service struct {
+	db            *pgxpool.Pool
 	environment   string
 	selfProtected bool
 }
 
-func New(environment string, selfProtected bool) *Service {
-	return &Service{environment: environment, selfProtected: selfProtected}
+func New(db *pgxpool.Pool, environment string, selfProtected bool) *Service {
+	return &Service{db: db, environment: environment, selfProtected: selfProtected}
 }
-func (s *Service) Snapshot() Snapshot {
-	now := time.Now().UTC()
-	return Snapshot{GeneratedAt: now, Environment: s.environment, SelfProtected: s.selfProtected,
-		Metrics:  []Metric{{"Compute nodes", 8, "online", 1.2, "healthy"}, {"Running workloads", 47, "active", 4.8, "healthy"}, {"Storage pool", 68, "% used", 2.1, "warning"}, {"Open alerts", 3, "signals", -12, "warning"}},
-		Activity: []Activity{{"evt-1", "policy", "Self-protection policy loaded", "success", now.Add(-2 * time.Minute)}, {"evt-2", "telemetry", "Metrics collectors awaiting adapters", "info", now.Add(-8 * time.Minute)}, {"evt-3", "control-plane", "WC Hub API is operational", "success", now.Add(-15 * time.Minute)}},
-		Series:   []float64{31, 35, 32, 41, 43, 48, 45, 52, 49, 58, 55, 61, 57, 64, 62, 68, 63, 66, 71, 68, 73, 69, 72, 76},
+
+func (s *Service) Snapshot(ctx context.Context) (Snapshot, error) {
+	result := Snapshot{GeneratedAt: time.Now().UTC(), Environment: s.environment, SelfProtected: s.selfProtected, Metrics: []Metric{}, Activity: []Activity{}, Series: []float64{}}
+	var nodes, workloads, samples, alerts int
+	err := s.db.QueryRow(ctx, `
+		SELECT
+		  (SELECT count(*) FROM nodes),
+		  (SELECT count(*) FROM virtual_machines WHERE status='online') + (SELECT count(*) FROM containers WHERE status='online'),
+		  (SELECT count(*) FROM metrics_snapshots WHERE captured_at > now() - interval '1 hour'),
+		  (SELECT count(*) FROM alerts WHERE status='open')`).Scan(&nodes, &workloads, &samples, &alerts)
+	if err != nil {
+		return result, err
 	}
+	alertStatus := "healthy"
+	if alerts > 0 {
+		alertStatus = "warning"
+	}
+	result.Metrics = []Metric{
+		{Label: "Compute nodes", Value: float64(nodes), Unit: "discovered", Status: "healthy"},
+		{Label: "Active workloads", Value: float64(workloads), Unit: "online", Status: "healthy"},
+		{Label: "Telemetry samples", Value: float64(samples), Unit: "last hour", Status: "healthy"},
+		{Label: "Open alerts", Value: float64(alerts), Unit: "signals", Status: alertStatus},
+	}
+	rows, err := s.db.Query(ctx, `SELECT id::text,action,COALESCE(target_name,resource_type),decision,occurred_at FROM audit_logs ORDER BY occurred_at DESC LIMIT 8`)
+	if err != nil {
+		return result, err
+	}
+	for rows.Next() {
+		var item Activity
+		var action, target, decision string
+		if err = rows.Scan(&item.ID, &action, &target, &decision, &item.At); err != nil {
+			rows.Close()
+			return result, err
+		}
+		item.Source = action
+		item.Message = target
+		item.Severity = "info"
+		if decision == "allowed" || decision == "succeeded" {
+			item.Severity = "success"
+		} else if decision == "denied" || decision == "failed" {
+			item.Severity = "warning"
+		}
+		result.Activity = append(result.Activity, item)
+	}
+	rows.Close()
+	seriesRows, err := s.db.Query(ctx, `SELECT avg(value) FROM metrics_snapshots WHERE captured_at > now() - interval '24 hours' GROUP BY date_trunc('hour',captured_at) ORDER BY date_trunc('hour',captured_at)`)
+	if err != nil {
+		return result, err
+	}
+	defer seriesRows.Close()
+	for seriesRows.Next() {
+		var value float64
+		if err = seriesRows.Scan(&value); err != nil {
+			return result, err
+		}
+		result.Series = append(result.Series, value)
+	}
+	return result, seriesRows.Err()
 }

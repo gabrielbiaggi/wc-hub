@@ -10,4 +10,5 @@ type AuthMiddleware func(string, http.HandlerFunc) http.HandlerFunc
 func MountRoutes(mux *http.ServeMux, auth AuthMiddleware, client *kubernetesadapter.Client) {
 	handler := &Handler{client: client}
 	mux.HandleFunc("GET /api/v1/kubernetes/overview", auth("kubernetes.read", handler.Overview))
+	mux.HandleFunc("POST /api/v1/kubernetes/namespaces/{namespace}/deployments/{name}/{action}", auth("kubernetes.manage", handler.DeploymentAction))
 }

@@ -7,3 +7,4 @@ export interface KubePod{metadata:KubeMetadata;status:{phase:string;reason:strin
 export interface KubeEvent{metadata:KubeMetadata;type:string;reason:string;message:string;count:number;lastTimestamp:string;regarding?:{kind:string;namespace:string;name:string};involvedObject?:{kind:string;namespace:string;name:string}}
 export interface KubernetesOverview{generated_at:string;nodes:KubeNode[];deployments:KubeDeployment[];problem_pods:KubePod[];events:KubeEvent[]}
 export const getKubernetesOverview=async()=>(await api.get<KubernetesOverview>('/v1/kubernetes/overview')).data
+export const runKubernetesDeploymentAction=async(namespace:string,name:string,action:'scale'|'restart',replicas?:number)=>(await api.post<{status:string}>(`/v1/kubernetes/namespaces/${encodeURIComponent(namespace)}/deployments/${encodeURIComponent(name)}/${action}`,action==='scale'?{replicas}:{})).data

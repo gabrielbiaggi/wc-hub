@@ -25,6 +25,7 @@ type Config struct {
 	ProxmoxTokenID            string
 	ProxmoxSecret             string
 	ProxmoxTLSCA              string
+	ProxmoxAdditionalConfigs  []string
 	DockerEndpoint            string
 	DockerTLSCA               string
 	DockerClientCert          string
@@ -41,6 +42,8 @@ type Config struct {
 	TerraformWorkerToken      string
 	TerraformWorkspaces       []string
 	MergerFSRoot              string
+	OCIConfigPath             string
+	OCIConfigProfile          string
 	WorkerID                  string
 	WorkerCount               int
 	SSHPrivateKeyPath         string
@@ -67,6 +70,7 @@ func Load() Config {
 		ProxmoxTokenID:            env("PROXMOX_API_TOKEN_ID", ""),
 		ProxmoxSecret:             env("PROXMOX_API_TOKEN_SECRET", ""),
 		ProxmoxTLSCA:              env("PROXMOX_TLS_CA_PATH", ""),
+		ProxmoxAdditionalConfigs:  split(env("PROXMOX_ADDITIONAL_CONFIG_PATHS", "")),
 		DockerEndpoint:            strings.TrimRight(env("DOCKER_PROXY_URL", ""), "/"),
 		DockerTLSCA:               env("DOCKER_TLS_CA_PATH", ""),
 		DockerClientCert:          env("DOCKER_CLIENT_CERT_PATH", ""),
@@ -83,6 +87,8 @@ func Load() Config {
 		TerraformWorkerToken:      env("TERRAFORM_WORKER_TOKEN", ""),
 		TerraformWorkspaces:       split(env("TERRAFORM_WORKSPACE_ALLOWLIST", "")),
 		MergerFSRoot:              env("MERGERFS_ROOT", ""),
+		OCIConfigPath:             env("OCI_CONFIG_PATH", ""),
+		OCIConfigProfile:          env("OCI_CONFIG_PROFILE", "DEFAULT"),
 		WorkerID:                  env("WC_HUB_WORKER_ID", "wc-hub-1"),
 		WorkerCount:               envInt("WC_HUB_WORKER_COUNT", 2),
 		SSHPrivateKeyPath:         env("WC_HUB_SSH_PRIVATE_KEY_PATH", ""),

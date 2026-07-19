@@ -2,7 +2,7 @@ import axios from 'axios'
 
 let csrfToken = sessionStorage.getItem('wc_hub_csrf') ?? ''
 export const setCSRFToken = (token: string) => { csrfToken = token; token ? sessionStorage.setItem('wc_hub_csrf', token) : sessionStorage.removeItem('wc_hub_csrf') }
-export const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || '/api', timeout: 10_000, withCredentials: true, headers: { Accept: 'application/json' } })
+export const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || '/api', timeout: 30_000, withCredentials: true, headers: { Accept: 'application/json' } })
 api.interceptors.request.use((config) => { if (csrfToken && config.method && !['get','head','options'].includes(config.method)) config.headers.set('X-CSRF-Token', csrfToken); return config })
 
 export interface User { id:string; email:string; display_name:string; totp_enabled:boolean; roles:string[]; permissions:string[] }
@@ -18,6 +18,10 @@ export interface Role { id:string; slug:string; name:string; description:string;
 export interface Permission { id:string; slug:string; description:string; risk:'safe'|'dangerous'|'critical' }
 export interface Alert { id:string; resource_type:string; resource_id?:string; severity:string; title:string; description:string; status:'open'|'acknowledged'|'resolved'; acknowledged_at?:string; resolved_at?:string; created_at:string }
 export interface ProxmoxSummary { configured:boolean; status:string; last_checked_at?:string; nodes:number; virtual_machines:number; containers:number; storage_pools:number }
+export interface ProxmoxNode { node:string;status:string;cpu:number;maxcpu:number;mem:number;maxmem:number;uptime:number;level:string }
+export interface ProxmoxGuest { vmid:number;name:string;status:string;cpu:number;cpus:number;mem:number;maxmem:number;maxdisk:number;uptime:number;node:string;type:'qemu'|'lxc';template?:number }
+export interface ProxmoxStorage { storage:string;type:string;status:string;active:number;total:number;used:number;avail:number;shared:number;node:string }
+export interface ProxmoxInventory { captured_at:string;nodes:ProxmoxNode[];virtual_machines:ProxmoxGuest[];containers:ProxmoxGuest[];storage:ProxmoxStorage[] }
 export interface Job { id:string; kind:string; payload:Record<string,unknown>; status:string; priority:number; attempts:number; max_attempts:number; run_after:string; locked_by?:string; last_error?:string; created_at:string; started_at?:string; finished_at?:string }
 export interface HostMetric { host_id:string; host_name:string; metric:string; value:number; unit:string; captured_at:string }
 
@@ -42,6 +46,8 @@ export const enrollTOTP = async () => (await api.post<{secret:string;otpauth_uri
 export const confirmTOTP = async (code:string) => (await api.post<{totp_enabled:boolean}>('/v1/auth/totp/confirm', {code})).data
 export const getProxmoxSummary = async () => (await api.get<ProxmoxSummary>('/v1/proxmox/summary')).data
 export const syncProxmox = async () => (await api.post<Job>('/v1/proxmox/sync', {})).data
+export const getProxmoxInventory = async () => (await api.get<ProxmoxInventory>('/v1/proxmox/inventory')).data
+export const runProxmoxPowerAction = async(node:string,kind:'qemu'|'lxc',vmid:number,action:'start'|'stop'|'shutdown'|'reboot'|'reset')=>(await api.post<{status:string}>(`/v1/proxmox/nodes/${encodeURIComponent(node)}/${kind}/${vmid}/${action}`,{})).data
 export const getJobs = async () => (await api.get<{items:Job[]}>('/v1/jobs')).data.items
 export const enqueueJob = async (kind:string) => (await api.post<Job>('/v1/jobs', {kind,payload:{},priority:100,max_attempts:5})).data
 export const getHostTelemetry = async () => (await api.get<{items:HostMetric[]}>('/v1/telemetry/hosts')).data.items
@@ -53,3 +59,4 @@ export * from './api_cloudflare'
 export * from './api_github'
 export * from './api_terraform'
 export * from './api_storage'
+export * from './api_oci'

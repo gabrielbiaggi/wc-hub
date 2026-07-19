@@ -50,13 +50,13 @@ func TestRunnerUsesTypedRunContract(t *testing.T) {
 	}
 }
 
-func TestRunnerRejectsMutationAndUnknownWorkspace(t *testing.T) {
+func TestRunnerRejectsUnknownOperationAndWorkspace(t *testing.T) {
 	runner, err := New(Config{WorkerURL: "http://127.0.0.1:9999", WorkerToken: []byte("ephemeral-worker-token-value"), Workspaces: []string{"production"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = runner.Start(context.Background(), "apply", "production"); err == nil {
-		t.Fatal("expected apply to be rejected")
+	if _, err = runner.Start(context.Background(), "destroy", "production"); err == nil {
+		t.Fatal("expected destroy to be rejected")
 	}
 	if _, err = runner.Start(context.Background(), "plan", "outside"); err == nil {
 		t.Fatal("expected unknown workspace to be rejected")
