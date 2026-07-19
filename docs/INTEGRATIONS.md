@@ -13,3 +13,5 @@
 
 Adapters must implement health reporting and stable external IDs. Credentials are encrypted with envelope encryption and are only decrypted inside the adapter call boundary.
 
+Runtime activation, secret filenames, allowlist formats and the Terraform worker HTTP contract are documented in [INTEGRATIONS_RUNTIME.md](INTEGRATIONS_RUNTIME.md).
+

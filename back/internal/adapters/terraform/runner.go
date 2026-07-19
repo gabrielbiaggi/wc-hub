@@ -100,13 +100,15 @@ func (r *Runner) Start(ctx context.Context, operation, workspace string) (Run, e
 		return Run{}, errors.New("Terraform workspace is not allowlisted")
 	}
 	var run Run
-	err := r.request(ctx, http.MethodPost, "/v1/"+operation, map[string]string{"workspace": workspace}, &run)
+	err := r.request(ctx, http.MethodPost, "/v1/runs", map[string]string{"operation": operation, "workspace": workspace}, &run)
 	return run, err
 }
 func (r *Runner) List(ctx context.Context) ([]Run, error) {
-	runs := []Run{}
-	err := r.request(ctx, http.MethodGet, "/v1/runs?limit=100", nil, &runs)
-	return runs, err
+	result := struct {
+		Items []Run `json:"items"`
+	}{Items: []Run{}}
+	err := r.request(ctx, http.MethodGet, "/v1/runs?limit=100", nil, &result)
+	return result.Items, err
 }
 func (r *Runner) request(ctx context.Context, method, path string, payload any, destination any) error {
 	endpoint := *r.baseURL

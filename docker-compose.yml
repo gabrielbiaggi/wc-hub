@@ -50,6 +50,22 @@ services:
       PROXMOX_API_TOKEN_ID: ${PROXMOX_API_TOKEN_ID:-}
       PROXMOX_API_TOKEN_SECRET: ${PROXMOX_API_TOKEN_SECRET:-}
       PROXMOX_TLS_CA_PATH: ${PROXMOX_TLS_CA_PATH:-/run/secrets/proxmox_ca.pem}
+      DOCKER_PROXY_URL: ${DOCKER_PROXY_URL:-}
+      DOCKER_TLS_CA_PATH: ${DOCKER_TLS_CA_PATH:-/run/secrets/docker_ca.pem}
+      DOCKER_CLIENT_CERT_PATH: ${DOCKER_CLIENT_CERT_PATH:-/run/secrets/docker_client.pem}
+      DOCKER_CLIENT_KEY_PATH: ${DOCKER_CLIENT_KEY_PATH:-/run/secrets/docker_client_key.pem}
+      KUBERNETES_API_URL: ${KUBERNETES_API_URL:-}
+      KUBERNETES_TOKEN_PATH: ${KUBERNETES_TOKEN_PATH:-/run/secrets/kubernetes_service_account_token}
+      KUBERNETES_CA_PATH: ${KUBERNETES_CA_PATH:-/run/secrets/kubernetes_ca.pem}
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+      CLOUDFLARE_ACCOUNT_ALLOWLIST: ${CLOUDFLARE_ACCOUNT_ALLOWLIST:-}
+      CLOUDFLARE_ZONE_ALLOWLIST: ${CLOUDFLARE_ZONE_ALLOWLIST:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_REPOSITORY_ALLOWLIST: ${GITHUB_REPOSITORY_ALLOWLIST:-}
+      TERRAFORM_WORKER_URL: ${TERRAFORM_WORKER_URL:-}
+      TERRAFORM_WORKER_TOKEN: ${TERRAFORM_WORKER_TOKEN:-}
+      TERRAFORM_WORKSPACE_ALLOWLIST: ${TERRAFORM_WORKSPACE_ALLOWLIST:-}
+      MERGERFS_ROOT: ${MERGERFS_ROOT:-/mnt/drive}
       WC_HUB_SSH_PRIVATE_KEY_PATH: ${WC_HUB_SSH_PRIVATE_KEY_PATH:-/run/secrets/ssh_private_key}
       WC_HUB_SSH_KNOWN_HOSTS_PATH: ${WC_HUB_SSH_KNOWN_HOSTS_PATH:-/run/secrets/ssh_known_hosts}
     depends_on:
@@ -57,6 +73,7 @@ services:
         condition: service_completed_successfully
     volumes:
       - ./ops/secrets:/run/secrets:ro
+      - ${MERGERFS_HOST_ROOT:-./ops/storage}:/mnt/drive:ro
     healthcheck:
       test: ["CMD", "/app/wc-hub", "healthcheck"]
       interval: 10s
