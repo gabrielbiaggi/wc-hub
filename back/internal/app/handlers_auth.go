@@ -3,8 +3,11 @@ package app
 import (
 	"errors"
 	"net/http"
+	"strings"
+	"time"
 
 	auditrepo "github.com/webcreations/wc-hub/back/internal/audit/repository"
+	authapp "github.com/webcreations/wc-hub/back/internal/auth/application"
 	authdomain "github.com/webcreations/wc-hub/back/internal/auth/domain"
 	security "github.com/webcreations/wc-hub/back/internal/security/domain"
 )
@@ -19,6 +22,10 @@ type totpRequest struct {
 }
 
 func (a *App) bootstrapStatus(w http.ResponseWriter, r *http.Request) {
+	if a.cfg.DevelopmentMasterLogin {
+		writeJSON(w, http.StatusOK, map[string]bool{"bootstrap_required": false})
+		return
+	}
 	open, err := a.auth.BootstrapOpen(r.Context())
 	if err != nil {
 		a.logger.Error("bootstrap status failed", "error", err)
@@ -28,6 +35,10 @@ func (a *App) bootstrapStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]bool{"bootstrap_required": open})
 }
 func (a *App) bootstrap(w http.ResponseWriter, r *http.Request) {
+	if a.cfg.DevelopmentMasterLogin {
+		writeError(w, http.StatusConflict, "bootstrap_disabled", "Bootstrap is disabled while the development master login is enabled.")
+		return
+	}
 	var req authRequest
 	if !decodeJSON(w, r, &req) {
 		return
@@ -52,14 +63,35 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	tokens, err := a.auth.Login(r.Context(), req.Email, req.Password, r.UserAgent(), remoteIP(r))
+	var tokens authapp.Tokens
+	var err error
+	developmentMaster := a.cfg.DevelopmentMasterLogin && strings.EqualFold(strings.TrimSpace(req.Email), authdomain.DevelopmentMasterUsername)
+	if developmentMaster {
+		tokens, err = a.auth.LoginDevelopmentMaster(r.Context(), req.Email, req.Password, r.UserAgent(), remoteIP(r), time.Now(), a.developmentMasterLocation)
+	} else {
+		tokens, err = a.auth.Login(r.Context(), req.Email, req.Password, r.UserAgent(), remoteIP(r))
+	}
 	if err != nil {
-		_ = a.audit.Append(r.Context(), auditrepo.Record{Action: "auth.login", Scope: security.ScopeLocal, ResourceType: "session", TargetName: req.Email, Risk: security.RiskDangerous, Decision: "denied", Reason: "invalid credentials", RequestID: requestID(r.Context()), SourceIP: remoteIP(r)})
+		action := "auth.login"
+		risk := security.RiskDangerous
+		if developmentMaster {
+			action = "auth.development_master.login"
+			risk = security.RiskCritical
+		}
+		_ = a.audit.Append(r.Context(), auditrepo.Record{Action: action, Scope: security.ScopeLocal, ResourceType: "session", TargetName: req.Email, Risk: risk, Decision: "denied", Reason: "invalid credentials", RequestID: requestID(r.Context()), SourceIP: remoteIP(r)})
 		writeError(w, 401, "invalid_credentials", "Email or password is invalid.")
 		return
 	}
 	a.setCookie(w, tokens.Session, tokens.Expires)
-	_ = a.audit.Append(r.Context(), auditrepo.Record{ActorID: tokens.User.ID, Action: "auth.login", Scope: security.ScopeLocal, ResourceType: "session", TargetName: tokens.User.Email, Risk: security.RiskSafe, Decision: "allowed", RequestID: requestID(r.Context()), SourceIP: remoteIP(r)})
+	action := "auth.login"
+	risk := security.RiskSafe
+	reason := ""
+	if developmentMaster {
+		action = "auth.development_master.login"
+		risk = security.RiskCritical
+		reason = "development-only hourly master credential"
+	}
+	_ = a.audit.Append(r.Context(), auditrepo.Record{ActorID: tokens.User.ID, Action: action, Scope: security.ScopeLocal, ResourceType: "session", TargetName: tokens.User.Email, Risk: risk, Decision: "allowed", Reason: reason, RequestID: requestID(r.Context()), SourceIP: remoteIP(r)})
 	writeJSON(w, 200, tokens)
 }
 func (a *App) session(w http.ResponseWriter, r *http.Request) {

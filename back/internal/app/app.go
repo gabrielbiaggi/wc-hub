@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	_ "time/tzdata"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	cloudflareadapter "github.com/webcreations/wc-hub/back/internal/adapters/cloudflare"
@@ -55,32 +56,44 @@ const sessionContextKey contextKey = "session"
 const sessionCookie = "wc_hub_session"
 
 type App struct {
-	cfg               config.Config
-	logger            *slog.Logger
-	overview          *overview.Service
-	policy            *security.Engine
-	db                *pgxpool.Pool
-	auth              *authapp.Service
-	audit             *auditrepo.Postgres
-	inventory         inventorydomain.Repository
-	jobs              *jobrepo.Postgres
-	proxmox           *proxmoxrepo.Postgres
-	proxmoxClient     *proxmoxadapter.Client
-	dockerClient      *dockeradapter.Client
-	kubernetesClient  *kubernetesadapter.Client
-	cloudflareHandler *cloudflareapp.Handler
-	githubClient      *githubadapter.Client
-	terraformRunner   *terraformadapter.Runner
-	storageClient     *mergerfsadapter.Client
-	telemetry         *telemetryrepo.Postgres
-	terminal          *terminalrepo.Postgres
-	terminalGateway   *terminalapp.Gateway
-	cancelWorkers     context.CancelFunc
+	cfg                       config.Config
+	logger                    *slog.Logger
+	overview                  *overview.Service
+	policy                    *security.Engine
+	db                        *pgxpool.Pool
+	auth                      *authapp.Service
+	audit                     *auditrepo.Postgres
+	inventory                 inventorydomain.Repository
+	jobs                      *jobrepo.Postgres
+	proxmox                   *proxmoxrepo.Postgres
+	proxmoxClient             *proxmoxadapter.Client
+	dockerClient              *dockeradapter.Client
+	kubernetesClient          *kubernetesadapter.Client
+	cloudflareHandler         *cloudflareapp.Handler
+	githubClient              *githubadapter.Client
+	terraformRunner           *terraformadapter.Runner
+	storageClient             *mergerfsadapter.Client
+	telemetry                 *telemetryrepo.Postgres
+	terminal                  *terminalrepo.Postgres
+	terminalGateway           *terminalapp.Gateway
+	developmentMasterLocation *time.Location
+	cancelWorkers             context.CancelFunc
 }
 
 func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, func(), error) {
 	if cfg.DatabaseURL == "" {
 		return nil, nil, fmt.Errorf("WC_HUB_DATABASE_URL is required")
+	}
+	var developmentMasterLocation *time.Location
+	if cfg.DevelopmentMasterLogin {
+		if !developmentMasterAllowed(cfg.Environment) {
+			return nil, nil, fmt.Errorf("WC_HUB_DEV_MASTER_LOGIN is forbidden outside development, local, or test environments")
+		}
+		location, locationErr := time.LoadLocation(cfg.DevelopmentMasterTimezone)
+		if locationErr != nil {
+			return nil, nil, fmt.Errorf("load development master timezone: %w", locationErr)
+		}
+		developmentMasterLocation = location
 	}
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -91,7 +104,16 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, fun
 		return nil, nil, err
 	}
 	application := &App{cfg: cfg, logger: logger, overview: overview.New(cfg.Environment, cfg.SelfProtected), policy: security.NewEngine(cfg.LocalAllowlist), db: pool}
-	application.auth = authapp.New(authrepo.NewPostgres(pool), cfg.SessionTTL)
+	authRepository := authrepo.NewPostgres(pool)
+	application.auth = authapp.New(authRepository, cfg.SessionTTL)
+	if cfg.DevelopmentMasterLogin {
+		if _, masterErr := authRepository.EnsureDevelopmentMaster(ctx); masterErr != nil {
+			pool.Close()
+			return nil, nil, fmt.Errorf("ensure development master: %w", masterErr)
+		}
+		application.developmentMasterLocation = developmentMasterLocation
+		logger.Warn("development-only hourly master login enabled", "username", authdomain.DevelopmentMasterUsername, "timezone", developmentMasterLocation.String())
+	}
 	if err := application.auth.ConfigureTOTP(cfg.EncryptionKey, cfg.TOTPIssuer); err != nil {
 		logger.Warn("TOTP enrollment disabled", "error", err)
 	}

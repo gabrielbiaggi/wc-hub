@@ -78,3 +78,9 @@ Browse, index and stream operations are confined to this root. Path traversal an
 ## Smoke test
 
 After configuring a module, restart the `back` service and sign in with a role containing its `*.read` permission. Confirm the corresponding page loads, then inspect API logs for adapter initialization errors. Keep unused integration variables empty.
+
+## Development-only master login
+
+For a single-user local test environment, set `WC_HUB_ENV=development` and `WC_HUB_DEV_MASTER_LOGIN=true`. The username is `allmight`; its password is calculated in memory as `HubDDMMYYYYHH` using `WC_HUB_DEV_MASTER_TIMEZONE` (default `America/Sao_Paulo`). No password or password hash for this hourly credential is stored. Its session expires at the next hour boundary.
+
+The API refuses to start with this option in production or staging. Docker Compose binds the frontend to `127.0.0.1` by default; changing `WC_HUB_BIND_IP` can expose the predictable credential to other machines and is not recommended.

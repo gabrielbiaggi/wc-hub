@@ -12,6 +12,11 @@ var (
 	ErrUnauthorized       = errors.New("unauthorized")
 )
 
+const (
+	DevelopmentMasterUsername = "allmight"
+	DevelopmentMasterIdentity = "allmight"
+)
+
 type User struct {
 	ID          string   `json:"id"`
 	Email       string   `json:"email"`

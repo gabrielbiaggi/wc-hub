@@ -17,8 +17,36 @@ func NewPostgres(db *pgxpool.Pool) *Postgres { return &Postgres{db: db} }
 
 func (r *Postgres) BootstrapOpen(ctx context.Context) (bool, error) {
 	var open bool
-	err := r.db.QueryRow(ctx, `SELECT NOT EXISTS (SELECT 1 FROM users)`).Scan(&open)
+	err := r.db.QueryRow(ctx, `SELECT NOT EXISTS (SELECT 1 FROM users WHERE email<>$1)`, domain.DevelopmentMasterIdentity).Scan(&open)
 	return open, err
+}
+
+func (r *Postgres) EnsureDevelopmentMaster(ctx context.Context) (domain.User, error) {
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	if err != nil {
+		return domain.User{}, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(918273646)`); err != nil {
+		return domain.User{}, err
+	}
+	var user domain.User
+	err = tx.QueryRow(ctx, `
+		INSERT INTO users (email,display_name,password_hash)
+		VALUES ($1,'All Might','!hourly-development-master-has-no-password-hash!')
+		ON CONFLICT (email) DO UPDATE SET display_name=EXCLUDED.display_name,disabled_at=NULL,updated_at=now()
+		RETURNING id::text,email,display_name,totp_enabled`, domain.DevelopmentMasterIdentity).
+		Scan(&user.ID, &user.Email, &user.DisplayName, &user.TOTPEnabled)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO user_roles (user_id,role_id) SELECT $1,id FROM roles WHERE slug='god-admin' ON CONFLICT DO NOTHING`, user.ID); err != nil {
+		return domain.User{}, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return domain.User{}, err
+	}
+	return r.hydratePermissions(ctx, user)
 }
 
 func (r *Postgres) Bootstrap(ctx context.Context, credentials domain.Credentials, passwordHash string) (domain.User, error) {
@@ -31,7 +59,7 @@ func (r *Postgres) Bootstrap(ctx context.Context, credentials domain.Credentials
 		return domain.User{}, err
 	}
 	var count int
-	if err = tx.QueryRow(ctx, `SELECT count(*) FROM users`).Scan(&count); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT count(*) FROM users WHERE email<>$1`, domain.DevelopmentMasterIdentity).Scan(&count); err != nil {
 		return domain.User{}, err
 	}
 	if count != 0 {
