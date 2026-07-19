@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -8,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -23,16 +25,21 @@ const maxResponseBytes = 16 << 20
 var containerIDPattern = regexp.MustCompile(`^[a-f0-9]{12,64}$`)
 
 type Config struct {
-	Endpoint          string
-	CACertificatePath string
-	ClientCertPath    string
-	ClientKeyPath     string
-	Timeout           time.Duration
+	Endpoint           string
+	FallbackSocketPath string
+	CACertificatePath  string
+	ClientCertPath     string
+	ClientKeyPath      string
+	Timeout            time.Duration
 }
 
 type Client struct {
-	baseURL string
-	http    *http.Client
+	primary  endpoint
+	fallback *endpoint
+}
+type endpoint struct {
+	name, baseURL string
+	http          *http.Client
 }
 
 type Health struct {
@@ -173,14 +180,6 @@ func New(endpoint string) (*Client, error) {
 }
 
 func NewWithConfig(config Config) (*Client, error) {
-	parsed, err := url.Parse(strings.TrimSpace(config.Endpoint))
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return nil, errors.New("Docker endpoint must be an explicit HTTP(S) restricted proxy URL")
-	}
-	if parsed.User != nil {
-		return nil, errors.New("Docker endpoint must not embed credentials")
-	}
-
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
 	if config.CACertificatePath != "" {
 		contents, err := os.ReadFile(config.CACertificatePath)
@@ -214,25 +213,38 @@ func NewWithConfig(config Config) (*Client, error) {
 		IdleConnTimeout:    60 * time.Second,
 		DisableCompression: false,
 	}
-	return &Client{
-		baseURL: strings.TrimRight(parsed.String(), "/"),
-		http:    &http.Client{Timeout: timeout, Transport: transport},
-	}, nil
+	client := &Client{}
+	if rawEndpoint := strings.TrimSpace(config.Endpoint); rawEndpoint != "" {
+		parsed, err := url.Parse(rawEndpoint)
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return nil, errors.New("Docker endpoint must be an explicit HTTP(S) restricted proxy URL")
+		}
+		if parsed.User != nil {
+			return nil, errors.New("Docker endpoint must not embed credentials")
+		}
+		client.primary = endpoint{name: "Docker endpoint " + parsed.Host, baseURL: strings.TrimRight(parsed.String(), "/"), http: &http.Client{Timeout: timeout, Transport: transport}}
+	}
+	if socketPath := strings.TrimSpace(config.FallbackSocketPath); socketPath != "" {
+		dialer := &net.Dialer{Timeout: timeout}
+		client.fallback = &endpoint{name: "Docker socket " + socketPath, baseURL: "http://docker", http: &http.Client{Timeout: timeout, Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return dialer.DialContext(ctx, "unix", socketPath)
+		}}}}
+	}
+	if client.primary.http == nil && client.fallback == nil {
+		return nil, errors.New("Docker endpoint or Unix socket path is required")
+	}
+	return client, nil
 }
 
 func (c *Client) Configured() bool {
-	return c != nil && c.baseURL != "" && c.http != nil
+	return c != nil && (c.primary.http != nil || c.fallback != nil)
 }
 
 func (c *Client) Health(ctx context.Context) (Health, error) {
 	if !c.Configured() {
 		return Health{}, errors.New("Docker adapter is not configured")
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/_ping", nil)
-	if err != nil {
-		return Health{}, err
-	}
-	response, err := c.http.Do(request)
+	response, err := c.do(ctx, http.MethodGet, "/_ping", nil, nil)
 	if err != nil {
 		return Health{}, fmt.Errorf("Docker ping: %w", err)
 	}
@@ -305,12 +317,7 @@ func (c *Client) ContainerAction(ctx context.Context, id, action string) error {
 	if action == "stop" || action == "restart" {
 		path += "?t=15"
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, nil)
-	if err != nil {
-		return err
-	}
-	request.Header.Set("Accept", "application/json")
-	response, err := c.http.Do(request)
+	response, err := c.do(ctx, http.MethodPost, path, nil, http.Header{"Accept": []string{"application/json"}})
 	if err != nil {
 		return fmt.Errorf("Docker action request: %w", err)
 	}
@@ -348,7 +355,7 @@ func (c *Client) Exec(ctx context.Context, id string, command []string) (string,
 	if err != nil {
 		return "", err
 	}
-	return decodeDockerStream(raw), nil
+	return decodeDockerStream(raw)
 }
 
 func (c *Client) postJSON(ctx context.Context, path string, payload, destination any) error {
@@ -356,13 +363,7 @@ func (c *Client) postJSON(ctx context.Context, path string, payload, destination
 	if err != nil {
 		return err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, strings.NewReader(string(body)))
-	if err != nil {
-		return err
-	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Accept", "application/json")
-	response, err := c.http.Do(request)
+	response, err := c.do(ctx, http.MethodPost, path, body, http.Header{"Content-Type": []string{"application/json"}, "Accept": []string{"application/json"}})
 	if err != nil {
 		return fmt.Errorf("Docker request: %w", err)
 	}
@@ -385,12 +386,7 @@ func (c *Client) postRaw(ctx context.Context, path string, payload any) ([]byte,
 	if err != nil {
 		return nil, err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, strings.NewReader(string(body)))
-	if err != nil {
-		return nil, err
-	}
-	request.Header.Set("Content-Type", "application/json")
-	response, err := c.http.Do(request)
+	response, err := c.do(ctx, http.MethodPost, path, body, http.Header{"Content-Type": []string{"application/json"}})
 	if err != nil {
 		return nil, err
 	}
@@ -405,13 +401,13 @@ func (c *Client) postRaw(ctx context.Context, path string, payload any) ([]byte,
 	return result, nil
 }
 
-func decodeDockerStream(raw []byte) string {
+func decodeDockerStream(raw []byte) (string, error) {
 	var output strings.Builder
 	for len(raw) >= 8 {
 		size := int(raw[4])<<24 | int(raw[5])<<16 | int(raw[6])<<8 | int(raw[7])
 		raw = raw[8:]
 		if size < 0 || size > len(raw) {
-			break
+			return "", errors.New("Docker exec stream is malformed")
 		}
 		output.Write(raw[:size])
 		raw = raw[size:]
@@ -419,10 +415,10 @@ func decodeDockerStream(raw []byte) string {
 	if output.Len() == 0 {
 		output.Write(raw)
 	}
-	return output.String()
+	return output.String(), nil
 }
 
-func (c *Client) Stats(ctx context.Context, containers []Container) ([]ContainerStats, []string) {
+func (c *Client) Stats(ctx context.Context, containers []Container) ([]ContainerStats, error) {
 	running := make([]Container, 0, len(containers))
 	for _, container := range containers {
 		if strings.EqualFold(container.State, "running") {
@@ -430,7 +426,7 @@ func (c *Client) Stats(ctx context.Context, containers []Container) ([]Container
 		}
 	}
 	stats := make([]ContainerStats, len(running))
-	warnings := make([]string, 0)
+	errorsByContainer := make([]error, len(running))
 	var wait sync.WaitGroup
 	var lock sync.Mutex
 	semaphore := make(chan struct{}, 4)
@@ -443,7 +439,7 @@ func (c *Client) Stats(ctx context.Context, containers []Container) ([]Container
 			item, err := c.containerStats(ctx, container.ID)
 			if err != nil {
 				lock.Lock()
-				warnings = append(warnings, "stats unavailable for "+shortID(container.ID))
+				errorsByContainer[index] = fmt.Errorf("stats for container %s: %w", shortID(container.ID), err)
 				lock.Unlock()
 				return
 			}
@@ -451,13 +447,18 @@ func (c *Client) Stats(ctx context.Context, containers []Container) ([]Container
 		}(index, container)
 	}
 	wait.Wait()
+	for _, err := range errorsByContainer {
+		if err != nil {
+			return nil, err
+		}
+	}
 	filtered := stats[:0]
 	for _, item := range stats {
 		if item.ContainerID != "" {
 			filtered = append(filtered, item)
 		}
 	}
-	return filtered, warnings
+	return filtered, nil
 }
 
 func (c *Client) Inventory(ctx context.Context) (Inventory, error) {
@@ -475,7 +476,10 @@ func (c *Client) Inventory(ctx context.Context) (Inventory, error) {
 	if err != nil {
 		return result, err
 	}
-	result.Stats, result.Warnings = c.Stats(ctx, result.Containers)
+	result.Stats, err = c.Stats(ctx, result.Containers)
+	if err != nil {
+		return result, err
+	}
 	return result, nil
 }
 
@@ -485,19 +489,14 @@ func (c *Client) containerStats(ctx context.Context, id string) (ContainerStats,
 	if err := c.get(ctx, path, &raw); err != nil {
 		return ContainerStats{}, err
 	}
-	return normalizeStats(raw), nil
+	return normalizeStats(raw)
 }
 
 func (c *Client) get(ctx context.Context, path string, destination any) error {
 	if !c.Configured() {
 		return errors.New("Docker adapter is not configured")
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
-	if err != nil {
-		return err
-	}
-	request.Header.Set("Accept", "application/json")
-	response, err := c.http.Do(request)
+	response, err := c.do(ctx, http.MethodGet, path, nil, http.Header{"Accept": []string{"application/json"}})
 	if err != nil {
 		return fmt.Errorf("Docker request: %w", err)
 	}
@@ -520,7 +519,45 @@ func (c *Client) get(ctx context.Context, path string, destination any) error {
 	return nil
 }
 
-func normalizeStats(raw rawStats) ContainerStats {
+func (c *Client) do(ctx context.Context, method, path string, body []byte, headers http.Header) (*http.Response, error) {
+	if !c.Configured() {
+		return nil, errors.New("Docker adapter is not configured")
+	}
+	if c.primary.http == nil && c.fallback != nil {
+		return c.doEndpoint(ctx, *c.fallback, method, path, body, headers)
+	}
+	response, primaryErr := c.doEndpoint(ctx, c.primary, method, path, body, headers)
+	if primaryErr == nil || c.fallback == nil {
+		return response, primaryErr
+	}
+	response, fallbackErr := c.doEndpoint(ctx, *c.fallback, method, path, body, headers)
+	if fallbackErr == nil {
+		return response, nil
+	}
+	return nil, fmt.Errorf("%s failed: %v; %s fallback failed: %w", c.primary.name, primaryErr, c.fallback.name, fallbackErr)
+}
+
+func (c *Client) doEndpoint(ctx context.Context, endpoint endpoint, method, path string, body []byte, headers http.Header) (*http.Response, error) {
+	if endpoint.http == nil {
+		return nil, errors.New("not configured")
+	}
+	request, err := http.NewRequestWithContext(ctx, method, endpoint.baseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	for key, values := range headers {
+		for _, value := range values {
+			request.Header.Add(key, value)
+		}
+	}
+	response, err := endpoint.http.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	return response, nil
+}
+
+func normalizeStats(raw rawStats) (ContainerStats, error) {
 	onlineCPUs := raw.CPUStats.OnlineCPUs
 	if onlineCPUs == 0 {
 		onlineCPUs = uint32(len(raw.CPUStats.CPUUsage.PercpuUsage))
@@ -552,7 +589,13 @@ func normalizeStats(raw rawStats) ContainerStats {
 			blockWrite += entry.Value
 		}
 	}
-	readAt, _ := time.Parse(time.RFC3339Nano, raw.Read)
+	if strings.TrimSpace(raw.Read) == "" {
+		return ContainerStats{}, errors.New("Docker stats response has no timestamp")
+	}
+	readAt, err := time.Parse(time.RFC3339Nano, raw.Read)
+	if err != nil {
+		return ContainerStats{}, fmt.Errorf("parse Docker stats timestamp: %w", err)
+	}
 	return ContainerStats{
 		ContainerID:   raw.ID,
 		Name:          strings.TrimPrefix(raw.Name, "/"),
@@ -565,7 +608,7 @@ func normalizeStats(raw rawStats) ContainerStats {
 		NetworkTX:     networkTX,
 		BlockRead:     blockRead,
 		BlockWrite:    blockWrite,
-	}
+	}, nil
 }
 
 func counterDelta(current, previous uint64) float64 {

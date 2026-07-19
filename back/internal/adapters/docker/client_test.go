@@ -2,10 +2,15 @@ package docker
 
 import (
 	"context"
+	"errors"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewRejectsDirectSocketAndEmbeddedCredentials(t *testing.T) {
@@ -64,6 +69,51 @@ func TestInventoryNormalizesDockerAPIAndStats(t *testing.T) {
 	stats := inventory.Stats[0]
 	if stats.CPUPercent != 40 || stats.MemoryUsage != 800 || stats.MemoryPercent != 20 || stats.NetworkRX != 10 || stats.BlockWrite != 40 {
 		t.Fatalf("stats were not normalized: %#v", stats)
+	}
+}
+
+func TestFallsBackToUnixSocketWhenPrimaryTransportFails(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "docker.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/_ping":
+			if _, writeErr := io.WriteString(w, "OK"); writeErr != nil {
+				t.Errorf("write Docker ping response: %v", writeErr)
+			}
+		case "/version":
+			w.Header().Set("Content-Type", "application/json")
+			if _, writeErr := io.WriteString(w, `{"Version":"27.5.1","ApiVersion":"1.47","Os":"linux","Arch":"amd64"}`); writeErr != nil {
+				t.Errorf("write Docker version response: %v", writeErr)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})}
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- server.Serve(listener) }()
+	t.Cleanup(func() {
+		if closeErr := server.Close(); closeErr != nil && !errors.Is(closeErr, http.ErrServerClosed) {
+			t.Errorf("close Unix socket HTTP server: %v", closeErr)
+		}
+		if resultErr := <-serveErr; resultErr != nil && !errors.Is(resultErr, http.ErrServerClosed) {
+			t.Errorf("serve Unix socket HTTP server: %v", resultErr)
+		}
+	})
+
+	client, err := NewWithConfig(Config{Endpoint: "http://127.0.0.1:1", FallbackSocketPath: socketPath, Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	health, err := client.Health(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !health.Reachable || health.Version != "27.5.1" {
+		t.Fatalf("Unix socket fallback did not serve Docker health: %#v", health)
 	}
 }
 

@@ -8,8 +8,8 @@ type AuthMiddleware func(permission string, next http.HandlerFunc) http.HandlerF
 
 // MountRoutes exports the Docker module as an isolated plugin. The global app
 // only needs to call this function with its existing RBAC middleware.
-func MountRoutes(mux *http.ServeMux, authMiddleware AuthMiddleware, reader Reader) {
-	handler := NewHandler(reader)
+func MountRoutes(mux *http.ServeMux, authMiddleware AuthMiddleware, reader Reader, initErr ...string) {
+	handler := NewHandler(reader, initErr...)
 	mux.HandleFunc("GET /api/v1/docker/health", authMiddleware(ReadPermission, handler.Health))
 	mux.HandleFunc("GET /api/v1/docker/inventory", authMiddleware(ReadPermission, handler.Inventory))
 	mux.HandleFunc("GET /api/v1/docker/containers", authMiddleware(ReadPermission, handler.Containers))

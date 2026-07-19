@@ -30,6 +30,7 @@ type Snapshot struct {
 	Subnets             []Subnet             `json:"subnets"`
 	AutonomousDatabases []AutonomousDatabase `json:"autonomous_databases"`
 	DBSystems           []DBSystem           `json:"db_systems"`
+	BlockVolumes        []BlockVolume        `json:"block_volumes"`
 }
 
 type Region struct {
@@ -115,6 +116,17 @@ type DBSystem struct {
 	TimeCreated        *common.SDKTime `json:"time_created,omitempty"`
 }
 
+type BlockVolume struct {
+	ID                 string          `json:"id"`
+	DisplayName        string          `json:"display_name"`
+	LifecycleState     string          `json:"lifecycle_state"`
+	AvailabilityDomain string          `json:"availability_domain"`
+	CompartmentID      string          `json:"compartment_id"`
+	SizeGB             int64           `json:"size_gb"`
+	VPUsPerGB          int64           `json:"vpus_per_gb"`
+	TimeCreated        *common.SDKTime `json:"time_created,omitempty"`
+}
+
 type LaunchInstanceInput struct {
 	CompartmentID      string  `json:"compartment_id"`
 	AvailabilityDomain string  `json:"availability_domain"`
@@ -175,8 +187,23 @@ func (c *Client) Snapshot(ctx context.Context) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("create OCI database client: %w", err)
 	}
+	blockstorageClient, err := core.NewBlockstorageClientWithConfigurationProvider(c.provider)
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("create OCI block storage client: %w", err)
+	}
 
-	result := Snapshot{CapturedAt: time.Now().UTC()}
+	result := Snapshot{
+		CapturedAt:          time.Now().UTC(),
+		Regions:             []Region{},
+		AvailabilityDomains: []AvailabilityDomain{},
+		Compartments:        []Compartment{},
+		Instances:           []Instance{},
+		VCNs:                []VCN{},
+		Subnets:             []Subnet{},
+		AutonomousDatabases: []AutonomousDatabase{},
+		DBSystems:           []DBSystem{},
+		BlockVolumes:        []BlockVolume{},
+	}
 	regions, err := identityClient.ListRegionSubscriptions(ctx, identity.ListRegionSubscriptionsRequest{TenancyId: common.String(c.tenancy)})
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("list OCI regions: %w", err)
@@ -197,18 +224,25 @@ func (c *Client) Snapshot(ctx context.Context) (Snapshot, error) {
 	}
 
 	result.Compartments = append(result.Compartments, Compartment{ID: c.tenancy, Name: "root tenancy", LifecycleState: "ACTIVE"})
-	compartments, err := identityClient.ListCompartments(ctx, identity.ListCompartmentsRequest{
-		CompartmentId:          common.String(c.tenancy),
-		CompartmentIdInSubtree: common.Bool(true),
-		AccessLevel:            identity.ListCompartmentsAccessLevelAny,
-		LifecycleState:         identity.CompartmentLifecycleStateActive,
-		Limit:                  common.Int(1000),
-	})
-	if err != nil {
-		return Snapshot{}, fmt.Errorf("list OCI compartments: %w", err)
-	}
-	for _, item := range compartments.Items {
-		result.Compartments = append(result.Compartments, Compartment{ID: stringValue(item.Id), Name: stringValue(item.Name), Description: stringValue(item.Description), LifecycleState: string(item.LifecycleState), ParentID: stringValue(item.CompartmentId)})
+	for page := (*string)(nil); ; {
+		compartments, requestErr := identityClient.ListCompartments(ctx, identity.ListCompartmentsRequest{
+			CompartmentId:          common.String(c.tenancy),
+			CompartmentIdInSubtree: common.Bool(true),
+			AccessLevel:            identity.ListCompartmentsAccessLevelAny,
+			LifecycleState:         identity.CompartmentLifecycleStateActive,
+			Limit:                  common.Int(1000),
+			Page:                   page,
+		})
+		if requestErr != nil {
+			return Snapshot{}, fmt.Errorf("list OCI compartments: %w", requestErr)
+		}
+		for _, item := range compartments.Items {
+			result.Compartments = append(result.Compartments, Compartment{ID: stringValue(item.Id), Name: stringValue(item.Name), Description: stringValue(item.Description), LifecycleState: string(item.LifecycleState), ParentID: stringValue(item.CompartmentId)})
+		}
+		if !hasNextPage(compartments.OpcNextPage) {
+			break
+		}
+		page = compartments.OpcNextPage
 	}
 
 	type resources struct {
@@ -217,6 +251,7 @@ func (c *Client) Snapshot(ctx context.Context) (Snapshot, error) {
 		subnets             []Subnet
 		autonomousDatabases []AutonomousDatabase
 		dbSystems           []DBSystem
+		blockVolumes        []BlockVolume
 		err                 error
 	}
 	resourceCh := make(chan resources, len(result.Compartments))
@@ -230,64 +265,112 @@ func (c *Client) Snapshot(ctx context.Context) (Snapshot, error) {
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
 			bundle := resources{}
-			instances, requestErr := computeClient.ListInstances(ctx, core.ListInstancesRequest{CompartmentId: common.String(compartmentID), Limit: common.Int(1000)})
-			if requestErr != nil {
-				bundle.err = fmt.Errorf("list instances in compartment %s: %w", compartmentID, requestErr)
-				resourceCh <- bundle
-				return
-			}
-			for _, item := range instances.Items {
-				if item.LifecycleState == core.InstanceLifecycleStateTerminated {
-					continue
+			for page := (*string)(nil); ; {
+				instances, requestErr := computeClient.ListInstances(ctx, core.ListInstancesRequest{CompartmentId: common.String(compartmentID), Limit: common.Int(1000), Page: page})
+				if requestErr != nil {
+					bundle.err = fmt.Errorf("list instances in compartment %s: %w", compartmentID, requestErr)
+					resourceCh <- bundle
+					return
 				}
-				mapped := Instance{ID: stringValue(item.Id), DisplayName: stringValue(item.DisplayName), LifecycleState: string(item.LifecycleState), Shape: stringValue(item.Shape), AvailabilityDomain: stringValue(item.AvailabilityDomain), FaultDomain: stringValue(item.FaultDomain), Region: stringValue(item.Region), CompartmentID: stringValue(item.CompartmentId), TimeCreated: item.TimeCreated, Tags: item.FreeformTags}
-				if item.ShapeConfig != nil {
-					mapped.OCPUs = float32Value(item.ShapeConfig.Ocpus)
-					mapped.MemoryGB = float32Value(item.ShapeConfig.MemoryInGBs)
+				for _, item := range instances.Items {
+					if item.LifecycleState == core.InstanceLifecycleStateTerminated {
+						continue
+					}
+					mapped := Instance{ID: stringValue(item.Id), DisplayName: stringValue(item.DisplayName), LifecycleState: string(item.LifecycleState), Shape: stringValue(item.Shape), AvailabilityDomain: stringValue(item.AvailabilityDomain), FaultDomain: stringValue(item.FaultDomain), Region: stringValue(item.Region), CompartmentID: stringValue(item.CompartmentId), TimeCreated: item.TimeCreated, Tags: item.FreeformTags}
+					if item.ShapeConfig != nil {
+						mapped.OCPUs = float32Value(item.ShapeConfig.Ocpus)
+						mapped.MemoryGB = float32Value(item.ShapeConfig.MemoryInGBs)
+					}
+					bundle.instances = append(bundle.instances, mapped)
 				}
-				bundle.instances = append(bundle.instances, mapped)
-			}
-			vcns, requestErr := networkClient.ListVcns(ctx, core.ListVcnsRequest{CompartmentId: common.String(compartmentID), Limit: common.Int(1000)})
-			if requestErr != nil {
-				bundle.err = fmt.Errorf("list VCNs in compartment %s: %w", compartmentID, requestErr)
-				resourceCh <- bundle
-				return
-			}
-			for _, item := range vcns.Items {
-				if item.LifecycleState == core.VcnLifecycleStateTerminated {
-					continue
+				if !hasNextPage(instances.OpcNextPage) {
+					break
 				}
-				bundle.vcns = append(bundle.vcns, VCN{ID: stringValue(item.Id), DisplayName: stringValue(item.DisplayName), CIDRBlocks: item.CidrBlocks, LifecycleState: string(item.LifecycleState), DNSLabel: stringValue(item.DnsLabel), CompartmentID: stringValue(item.CompartmentId), TimeCreated: item.TimeCreated})
+				page = instances.OpcNextPage
 			}
-			subnets, requestErr := networkClient.ListSubnets(ctx, core.ListSubnetsRequest{CompartmentId: common.String(compartmentID), Limit: common.Int(1000)})
-			if requestErr != nil {
-				bundle.err = fmt.Errorf("list subnets in compartment %s: %w", compartmentID, requestErr)
-				resourceCh <- bundle
-				return
-			}
-			for _, item := range subnets.Items {
-				if item.LifecycleState == core.SubnetLifecycleStateTerminated {
-					continue
+			for page := (*string)(nil); ; {
+				vcns, requestErr := networkClient.ListVcns(ctx, core.ListVcnsRequest{CompartmentId: common.String(compartmentID), Limit: common.Int(1000), Page: page})
+				if requestErr != nil {
+					bundle.err = fmt.Errorf("list VCNs in compartment %s: %w", compartmentID, requestErr)
+					resourceCh <- bundle
+					return
 				}
-				bundle.subnets = append(bundle.subnets, Subnet{ID: stringValue(item.Id), DisplayName: stringValue(item.DisplayName), CIDRBlock: stringValue(item.CidrBlock), AvailabilityDomain: stringValue(item.AvailabilityDomain), LifecycleState: string(item.LifecycleState), VCNID: stringValue(item.VcnId), CompartmentID: stringValue(item.CompartmentId), ProhibitPublicIPOnVNIC: boolValue(item.ProhibitPublicIpOnVnic)})
+				for _, item := range vcns.Items {
+					if item.LifecycleState == core.VcnLifecycleStateTerminated {
+						continue
+					}
+					bundle.vcns = append(bundle.vcns, VCN{ID: stringValue(item.Id), DisplayName: stringValue(item.DisplayName), CIDRBlocks: item.CidrBlocks, LifecycleState: string(item.LifecycleState), DNSLabel: stringValue(item.DnsLabel), CompartmentID: stringValue(item.CompartmentId), TimeCreated: item.TimeCreated})
+				}
+				if !hasNextPage(vcns.OpcNextPage) {
+					break
+				}
+				page = vcns.OpcNextPage
 			}
-			autonomous, requestErr := databaseClient.ListAutonomousDatabases(ctx, database.ListAutonomousDatabasesRequest{CompartmentId: common.String(compartmentID), Limit: common.Int(1000)})
-			if requestErr != nil {
-				bundle.err = fmt.Errorf("list autonomous databases in compartment %s: %w", compartmentID, requestErr)
-				resourceCh <- bundle
-				return
+			for page := (*string)(nil); ; {
+				subnets, requestErr := networkClient.ListSubnets(ctx, core.ListSubnetsRequest{CompartmentId: common.String(compartmentID), Limit: common.Int(1000), Page: page})
+				if requestErr != nil {
+					bundle.err = fmt.Errorf("list subnets in compartment %s: %w", compartmentID, requestErr)
+					resourceCh <- bundle
+					return
+				}
+				for _, item := range subnets.Items {
+					if item.LifecycleState == core.SubnetLifecycleStateTerminated {
+						continue
+					}
+					bundle.subnets = append(bundle.subnets, Subnet{ID: stringValue(item.Id), DisplayName: stringValue(item.DisplayName), CIDRBlock: stringValue(item.CidrBlock), AvailabilityDomain: stringValue(item.AvailabilityDomain), LifecycleState: string(item.LifecycleState), VCNID: stringValue(item.VcnId), CompartmentID: stringValue(item.CompartmentId), ProhibitPublicIPOnVNIC: boolValue(item.ProhibitPublicIpOnVnic)})
+				}
+				if !hasNextPage(subnets.OpcNextPage) {
+					break
+				}
+				page = subnets.OpcNextPage
 			}
-			for _, item := range autonomous.Items {
-				bundle.autonomousDatabases = append(bundle.autonomousDatabases, AutonomousDatabase{ID: stringValue(item.Id), DisplayName: stringValue(item.DisplayName), DBName: stringValue(item.DbName), LifecycleState: string(item.LifecycleState), LifecycleDetails: stringValue(item.LifecycleDetails), CompartmentID: stringValue(item.CompartmentId), Workload: string(item.DbWorkload), ComputeModel: string(item.ComputeModel), ComputeCount: float32Value(item.ComputeCount), StorageTB: intValue(item.DataStorageSizeInTBs), FreeTier: boolValue(item.IsFreeTier), TimeCreated: item.TimeCreated})
+			for page := (*string)(nil); ; {
+				autonomous, requestErr := databaseClient.ListAutonomousDatabases(ctx, database.ListAutonomousDatabasesRequest{CompartmentId: common.String(compartmentID), Limit: common.Int(1000), Page: page})
+				if requestErr != nil {
+					bundle.err = fmt.Errorf("list autonomous databases in compartment %s: %w", compartmentID, requestErr)
+					resourceCh <- bundle
+					return
+				}
+				for _, item := range autonomous.Items {
+					bundle.autonomousDatabases = append(bundle.autonomousDatabases, AutonomousDatabase{ID: stringValue(item.Id), DisplayName: stringValue(item.DisplayName), DBName: stringValue(item.DbName), LifecycleState: string(item.LifecycleState), LifecycleDetails: stringValue(item.LifecycleDetails), CompartmentID: stringValue(item.CompartmentId), Workload: string(item.DbWorkload), ComputeModel: string(item.ComputeModel), ComputeCount: float32Value(item.ComputeCount), StorageTB: intValue(item.DataStorageSizeInTBs), FreeTier: boolValue(item.IsFreeTier), TimeCreated: item.TimeCreated})
+				}
+				if !hasNextPage(autonomous.OpcNextPage) {
+					break
+				}
+				page = autonomous.OpcNextPage
 			}
-			dbSystems, requestErr := databaseClient.ListDbSystems(ctx, database.ListDbSystemsRequest{CompartmentId: common.String(compartmentID), Limit: common.Int(1000)})
-			if requestErr != nil {
-				bundle.err = fmt.Errorf("list DB systems in compartment %s: %w", compartmentID, requestErr)
-				resourceCh <- bundle
-				return
+			for page := (*string)(nil); ; {
+				dbSystems, requestErr := databaseClient.ListDbSystems(ctx, database.ListDbSystemsRequest{CompartmentId: common.String(compartmentID), Limit: common.Int(1000), Page: page})
+				if requestErr != nil {
+					bundle.err = fmt.Errorf("list DB systems in compartment %s: %w", compartmentID, requestErr)
+					resourceCh <- bundle
+					return
+				}
+				for _, item := range dbSystems.Items {
+					bundle.dbSystems = append(bundle.dbSystems, DBSystem{ID: stringValue(item.Id), DisplayName: stringValue(item.DisplayName), LifecycleState: string(item.LifecycleState), AvailabilityDomain: stringValue(item.AvailabilityDomain), Shape: stringValue(item.Shape), CompartmentID: stringValue(item.CompartmentId), SubnetID: stringValue(item.SubnetId), DatabaseEdition: string(item.DatabaseEdition), CPUCoreCount: intValue(item.CpuCoreCount), MemoryGB: intValue(item.MemorySizeInGBs), TimeCreated: item.TimeCreated})
+				}
+				if !hasNextPage(dbSystems.OpcNextPage) {
+					break
+				}
+				page = dbSystems.OpcNextPage
 			}
-			for _, item := range dbSystems.Items {
-				bundle.dbSystems = append(bundle.dbSystems, DBSystem{ID: stringValue(item.Id), DisplayName: stringValue(item.DisplayName), LifecycleState: string(item.LifecycleState), AvailabilityDomain: stringValue(item.AvailabilityDomain), Shape: stringValue(item.Shape), CompartmentID: stringValue(item.CompartmentId), SubnetID: stringValue(item.SubnetId), DatabaseEdition: string(item.DatabaseEdition), CPUCoreCount: intValue(item.CpuCoreCount), MemoryGB: intValue(item.MemorySizeInGBs), TimeCreated: item.TimeCreated})
+			for page := (*string)(nil); ; {
+				volumes, requestErr := blockstorageClient.ListVolumes(ctx, core.ListVolumesRequest{CompartmentId: common.String(compartmentID), Limit: common.Int(1000), Page: page})
+				if requestErr != nil {
+					bundle.err = fmt.Errorf("list block volumes in compartment %s: %w", compartmentID, requestErr)
+					resourceCh <- bundle
+					return
+				}
+				for _, item := range volumes.Items {
+					if item.LifecycleState == core.VolumeLifecycleStateTerminated {
+						continue
+					}
+					bundle.blockVolumes = append(bundle.blockVolumes, BlockVolume{ID: stringValue(item.Id), DisplayName: stringValue(item.DisplayName), LifecycleState: string(item.LifecycleState), AvailabilityDomain: stringValue(item.AvailabilityDomain), CompartmentID: stringValue(item.CompartmentId), SizeGB: int64Value(item.SizeInGBs), VPUsPerGB: int64Value(item.VpusPerGB), TimeCreated: item.TimeCreated})
+				}
+				if !hasNextPage(volumes.OpcNextPage) {
+					break
+				}
+				page = volumes.OpcNextPage
 			}
 			resourceCh <- bundle
 		}()
@@ -303,6 +386,7 @@ func (c *Client) Snapshot(ctx context.Context) (Snapshot, error) {
 		result.Subnets = append(result.Subnets, bundle.subnets...)
 		result.AutonomousDatabases = append(result.AutonomousDatabases, bundle.autonomousDatabases...)
 		result.DBSystems = append(result.DBSystems, bundle.dbSystems...)
+		result.BlockVolumes = append(result.BlockVolumes, bundle.blockVolumes...)
 	}
 	sort.Slice(result.Instances, func(i, j int) bool { return result.Instances[i].DisplayName < result.Instances[j].DisplayName })
 	sort.Slice(result.VCNs, func(i, j int) bool { return result.VCNs[i].DisplayName < result.VCNs[j].DisplayName })
@@ -311,6 +395,7 @@ func (c *Client) Snapshot(ctx context.Context) (Snapshot, error) {
 		return result.AutonomousDatabases[i].DisplayName < result.AutonomousDatabases[j].DisplayName
 	})
 	sort.Slice(result.DBSystems, func(i, j int) bool { return result.DBSystems[i].DisplayName < result.DBSystems[j].DisplayName })
+	sort.Slice(result.BlockVolumes, func(i, j int) bool { return result.BlockVolumes[i].DisplayName < result.BlockVolumes[j].DisplayName })
 	return result, nil
 }
 
@@ -337,6 +422,17 @@ func intValue(value *int) int {
 		return 0
 	}
 	return *value
+}
+
+func int64Value(value *int64) int64 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func hasNextPage(page *string) bool {
+	return page != nil && strings.TrimSpace(*page) != ""
 }
 
 func (c *Client) LaunchInstance(ctx context.Context, input LaunchInstanceInput) (string, error) {

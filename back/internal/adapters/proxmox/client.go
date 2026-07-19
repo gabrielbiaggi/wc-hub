@@ -22,6 +22,13 @@ type Client struct {
 	secret           []byte
 	http             *http.Client
 }
+type Config struct {
+	URL                string
+	TokenID            string
+	Secret             []byte
+	CAPath             string
+	InsecureSkipVerify bool
+}
 type Node struct {
 	Cluster   string  `json:"cluster"`
 	Node      string  `json:"node"`
@@ -112,19 +119,29 @@ type envelope[T any] struct {
 	Data T `json:"data"`
 }
 
-var nodeNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,100}$`)
+var (
+	nodeNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,100}$`)
+	tokenIDPattern  = regexp.MustCompile(`^[^@\s]+@[A-Za-z0-9_.-]+![A-Za-z0-9_.-]+$`)
+)
 
 func New(baseURL, tokenID string, secret []byte, caPath string) (*Client, error) {
-	if baseURL == "" || tokenID == "" || len(secret) == 0 {
+	return NewWithConfig(Config{URL: baseURL, TokenID: tokenID, Secret: secret, CAPath: caPath})
+}
+
+func NewWithConfig(config Config) (*Client, error) {
+	if config.URL == "" || config.TokenID == "" || len(config.Secret) == 0 {
 		return nil, fmt.Errorf("Proxmox URL and API token are required")
 	}
-	parsed, err := url.Parse(baseURL)
+	if !tokenIDPattern.MatchString(config.TokenID) {
+		return nil, fmt.Errorf("Proxmox token ID must use USER@REALM!TOKENID format")
+	}
+	parsed, err := url.Parse(config.URL)
 	if err != nil || parsed.Scheme != "https" {
 		return nil, fmt.Errorf("Proxmox API URL must use HTTPS")
 	}
-	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
-	if caPath != "" {
-		pem, err := os.ReadFile(caPath)
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: config.InsecureSkipVerify} // #nosec G402 -- explicitly enabled only for homelab certificates.
+	if config.CAPath != "" {
+		pem, err := os.ReadFile(config.CAPath)
 		if err != nil {
 			return nil, fmt.Errorf("read Proxmox CA: %w", err)
 		}
@@ -135,7 +152,7 @@ func New(baseURL, tokenID string, secret []byte, caPath string) (*Client, error)
 		tlsConfig.RootCAs = pool
 	}
 	transport := &http.Transport{TLSClientConfig: tlsConfig, MaxIdleConns: 20, IdleConnTimeout: 60 * time.Second}
-	return &Client{baseURL: strings.TrimRight(baseURL, "/"), tokenID: tokenID, secret: append([]byte(nil), secret...), http: &http.Client{Timeout: 20 * time.Second, Transport: transport}}, nil
+	return &Client{baseURL: strings.TrimRight(config.URL, "/"), tokenID: config.TokenID, secret: append([]byte(nil), config.Secret...), http: &http.Client{Timeout: 20 * time.Second, Transport: transport}}, nil
 }
 
 // NewFromEnvFile loads an additional cluster from a root-readable secret file.
@@ -159,26 +176,43 @@ func NewFromEnvFile(path string) (*Client, error) {
 			continue
 		}
 		key = strings.TrimSpace(key)
-		if key == "PROXMOX_API_URL" || key == "PROXMOX_API_TOKEN_ID" || key == "PROXMOX_API_TOKEN_SECRET" || key == "PROXMOX_TLS_CA_PATH" {
+		if key == "PROXMOX_API_URL" || key == "PROXMOX_API_TOKEN_ID" || key == "PROXMOX_API_TOKEN_SECRET" || key == "PROXMOX_TLS_CA_PATH" || key == "PROXMOX_TLS_INSECURE_SKIP_VERIFY" {
 			values[key] = strings.Trim(strings.TrimSpace(value), `"'`)
 		}
 	}
 	if err = scanner.Err(); err != nil {
 		return nil, fmt.Errorf("read Proxmox cluster config: %w", err)
 	}
-	return New(values["PROXMOX_API_URL"], values["PROXMOX_API_TOKEN_ID"], []byte(values["PROXMOX_API_TOKEN_SECRET"]), values["PROXMOX_TLS_CA_PATH"])
+	insecure := false
+	if raw := values["PROXMOX_TLS_INSECURE_SKIP_VERIFY"]; raw != "" {
+		parsed, parseErr := strconv.ParseBool(raw)
+		if parseErr != nil {
+			return nil, fmt.Errorf("parse PROXMOX_TLS_INSECURE_SKIP_VERIFY: %w", parseErr)
+		}
+		insecure = parsed
+	}
+	return NewWithConfig(Config{URL: values["PROXMOX_API_URL"], TokenID: values["PROXMOX_API_TOKEN_ID"], Secret: []byte(values["PROXMOX_API_TOKEN_SECRET"]), CAPath: values["PROXMOX_TLS_CA_PATH"], InsecureSkipVerify: insecure})
 }
 func (c *Client) Configured() bool { return c != nil && c.baseURL != "" }
 func (c *Client) ID() string {
-	parsed, _ := url.Parse(c.baseURL)
-	if parsed == nil {
+	if c == nil {
+		return "proxmox"
+	}
+	parsed, err := url.Parse(c.baseURL)
+	if err != nil || parsed == nil || parsed.Hostname() == "" {
 		return "proxmox"
 	}
 	return parsed.Hostname()
 }
 func (c *Client) Snapshot(ctx context.Context) (Snapshot, error) {
-	var result Snapshot
-	result.CapturedAt = time.Now().UTC()
+	result := Snapshot{
+		CapturedAt: time.Now().UTC(),
+		Nodes:      []Node{},
+		VMs:        []VM{},
+		Containers: []VM{},
+		Storage:    []Storage{},
+		Warnings:   []string{},
+	}
 	if err := c.get(ctx, "/api2/json/nodes", &result.Nodes); err != nil {
 		return result, err
 	}

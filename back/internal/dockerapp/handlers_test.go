@@ -23,8 +23,8 @@ func (fakeReader) ListContainers(context.Context) ([]dockeradapter.Container, er
 func (fakeReader) ListImages(context.Context) ([]dockeradapter.Image, error) {
 	return []dockeradapter.Image{}, nil
 }
-func (fakeReader) Stats(context.Context, []dockeradapter.Container) ([]dockeradapter.ContainerStats, []string) {
-	return []dockeradapter.ContainerStats{}, []string{}
+func (fakeReader) Stats(context.Context, []dockeradapter.Container) ([]dockeradapter.ContainerStats, error) {
+	return []dockeradapter.ContainerStats{}, nil
 }
 
 func TestMountRoutesAppliesExistingReadPermission(t *testing.T) {

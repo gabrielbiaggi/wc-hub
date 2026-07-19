@@ -2,7 +2,7 @@
 
 Central de operações para infraestrutura, projetos e acesso remoto. O WC Hub é um monorepo com um backend Go responsável por políticas, integrações, execução de jobs e auditoria, e um shell Vue focado em observabilidade e controle.
 
-> Estado: control plane funcional em expansão. Identidade, RBAC, auditoria, Proxmox, Docker, Kubernetes, GitHub, Cloudflare, MergerFS e o cliente de worker Terraform estão conectados ao runtime. Oracle Cloud, WebAuthn, o worker Terraform real e notification routing ainda não foram entregues. Consulte a [auditoria de cobertura](docs/FEATURE_COVERAGE_AUDIT.md).
+> Estado: control plane funcional em expansão. Identidade, RBAC, auditoria, Proxmox, Docker, Kubernetes, GitHub, Cloudflare, MergerFS, VNC, PBS, monitoramento/webhooks, NUT/Wake-on-LAN e o cliente de worker Terraform estão conectados ao runtime. WebAuthn e um worker Terraform distribuído ainda não foram entregues. Consulte a [auditoria de cobertura](docs/FEATURE_COVERAGE_AUDIT.md).
 
 ## Arquitetura
 
@@ -49,7 +49,7 @@ Go 1.24+, Node 20+ e PostgreSQL 17 são as versões de referência.
 
 ## Módulos
 
-Proxmox, Kubernetes/K3s, Docker, GitHub, Cloudflare/Tunnels, Terraform, Telemetry, Remote Access, Storage, Settings e Audit possuem rotas reais. O overview ainda contém indicadores demonstrativos e a rota Oracle/Cloud continua como placeholder. A situação detalhada e os critérios de conclusão estão na [matriz de cobertura](docs/FEATURE_COVERAGE_AUDIT.md).
+Proxmox, Kubernetes/K3s, Docker, GitHub, Cloudflare/Tunnels, Terraform, Telemetry, Remote Access, Desktop VNC, PBS/Backups, Uptime/Webhooks, Energia/NUT/Wake-on-LAN, Storage, Settings e Audit possuem rotas reais. O overview ainda contém indicadores demonstrativos. A situação detalhada e os critérios de conclusão estão na [matriz de cobertura](docs/FEATURE_COVERAGE_AUDIT.md).
 
 ## DNS e deploy
 

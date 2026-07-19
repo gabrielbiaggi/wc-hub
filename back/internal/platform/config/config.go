@@ -25,14 +25,17 @@ type Config struct {
 	ProxmoxTokenID            string
 	ProxmoxSecret             string
 	ProxmoxTLSCA              string
+	ProxmoxTLSInsecure        bool
 	ProxmoxAdditionalConfigs  []string
 	DockerEndpoint            string
 	DockerTLSCA               string
 	DockerClientCert          string
 	DockerClientKey           string
+	DockerFallbackSocket      string
 	KubernetesURL             string
 	KubernetesToken           string
 	KubernetesCA              string
+	KubernetesKubeconfig      string
 	CloudflareToken           string
 	CloudflareAccounts        []string
 	CloudflareZones           []string
@@ -50,6 +53,16 @@ type Config struct {
 	SSHKnownHostsPath         string
 	DevelopmentMasterLogin    bool
 	DevelopmentMasterTimezone string
+	VNCTargets                []string
+	PBSURL                    string
+	PBSTokenID                string
+	PBSSecret                 string
+	PBSTLSCA                  string
+	MonitoringEnabled         bool
+	PowerNUTAddress           string
+	PowerNUTUPSName           string
+	PowerWOLTargets           []string
+	PowerWOLBroadcast         string
 }
 
 func Load() Config {
@@ -70,14 +83,17 @@ func Load() Config {
 		ProxmoxTokenID:            env("PROXMOX_API_TOKEN_ID", ""),
 		ProxmoxSecret:             env("PROXMOX_API_TOKEN_SECRET", ""),
 		ProxmoxTLSCA:              env("PROXMOX_TLS_CA_PATH", ""),
+		ProxmoxTLSInsecure:        envBool("PROXMOX_TLS_INSECURE_SKIP_VERIFY", false),
 		ProxmoxAdditionalConfigs:  split(env("PROXMOX_ADDITIONAL_CONFIG_PATHS", "")),
 		DockerEndpoint:            strings.TrimRight(env("DOCKER_PROXY_URL", ""), "/"),
 		DockerTLSCA:               env("DOCKER_TLS_CA_PATH", ""),
 		DockerClientCert:          env("DOCKER_CLIENT_CERT_PATH", ""),
 		DockerClientKey:           env("DOCKER_CLIENT_KEY_PATH", ""),
+		DockerFallbackSocket:      env("DOCKER_FALLBACK_SOCKET_PATH", ""),
 		KubernetesURL:             strings.TrimRight(env("KUBERNETES_API_URL", ""), "/"),
 		KubernetesToken:           env("KUBERNETES_TOKEN_PATH", "/var/run/secrets/kubernetes.io/serviceaccount/token"),
 		KubernetesCA:              env("KUBERNETES_CA_PATH", "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"),
+		KubernetesKubeconfig:      env("KUBERNETES_KUBECONFIG_PATH", ""),
 		CloudflareToken:           env("CLOUDFLARE_API_TOKEN", ""),
 		CloudflareAccounts:        split(env("CLOUDFLARE_ACCOUNT_ALLOWLIST", "")),
 		CloudflareZones:           split(env("CLOUDFLARE_ZONE_ALLOWLIST", "")),
@@ -95,6 +111,16 @@ func Load() Config {
 		SSHKnownHostsPath:         env("WC_HUB_SSH_KNOWN_HOSTS_PATH", ""),
 		DevelopmentMasterLogin:    envBool("WC_HUB_DEV_MASTER_LOGIN", false),
 		DevelopmentMasterTimezone: env("WC_HUB_DEV_MASTER_TIMEZONE", "America/Sao_Paulo"),
+		VNCTargets:                split(env("VNC_ALLOWED_TARGETS", "")),
+		PBSURL:                    strings.TrimRight(env("PBS_API_URL", ""), "/"),
+		PBSTokenID:                env("PBS_API_TOKEN_ID", ""),
+		PBSSecret:                 env("PBS_API_TOKEN_SECRET", ""),
+		PBSTLSCA:                  env("PBS_TLS_CA_PATH", ""),
+		MonitoringEnabled:         envBool("MONITORING_ENABLED", true),
+		PowerNUTAddress:           env("NUT_SERVER", ""),
+		PowerNUTUPSName:           env("NUT_UPS_NAME", ""),
+		PowerWOLTargets:           split(env("WOL_ALLOWED_TARGETS", "")),
+		PowerWOLBroadcast:         env("WOL_BROADCAST_ADDRESS", "255.255.255.255:9"),
 	}
 }
 

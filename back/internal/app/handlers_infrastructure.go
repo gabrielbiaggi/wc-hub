@@ -23,7 +23,7 @@ func (a *App) proxmoxSummary(w http.ResponseWriter, r *http.Request) {
 }
 func (a *App) proxmoxSync(w http.ResponseWriter, r *http.Request) {
 	if a.proxmoxClient == nil {
-		writeError(w, 409, "proxmox_unconfigured", "Set PROXMOX_API_URL and scoped API token credentials.")
+		writeError(w, 409, "proxmox_unconfigured", "Proxmox não configurado: "+a.adapterError("proxmox"))
 		return
 	}
 	session := currentSession(r)
@@ -37,15 +37,22 @@ func (a *App) proxmoxSync(w http.ResponseWriter, r *http.Request) {
 }
 func (a *App) proxmoxInventory(w http.ResponseWriter, r *http.Request) {
 	if len(a.proxmoxClients) == 0 {
-		writeError(w, 409, "proxmox_unconfigured", "Proxmox API is not configured.")
+		writeError(w, 409, "proxmox_unconfigured", "Proxmox não configurado: "+a.adapterError("proxmox"))
 		return
 	}
-	snapshot := proxmoxadapter.Snapshot{CapturedAt: time.Now().UTC()}
+	snapshot := proxmoxadapter.Snapshot{
+		CapturedAt: time.Now().UTC(),
+		Nodes:      []proxmoxadapter.Node{},
+		VMs:        []proxmoxadapter.VM{},
+		Containers: []proxmoxadapter.VM{},
+		Storage:    []proxmoxadapter.Storage{},
+		Warnings:   []string{},
+	}
 	for _, client := range a.proxmoxClients {
 		cluster, err := client.Snapshot(r.Context())
 		if err != nil {
-			snapshot.Warnings = append(snapshot.Warnings, "Cluster "+client.ID()+" indisponível: "+err.Error())
-			continue
+			writeError(w, http.StatusBadGateway, "proxmox_inventory_failed", "Cluster "+client.ID()+": "+err.Error())
+			return
 		}
 		snapshot.Nodes = append(snapshot.Nodes, cluster.Nodes...)
 		snapshot.VMs = append(snapshot.VMs, cluster.VMs...)
@@ -56,7 +63,7 @@ func (a *App) proxmoxInventory(w http.ResponseWriter, r *http.Request) {
 }
 func (a *App) proxmoxPowerAction(w http.ResponseWriter, r *http.Request) {
 	if len(a.proxmoxClients) == 0 {
-		writeError(w, 409, "proxmox_unconfigured", "Proxmox API is not configured.")
+		writeError(w, 409, "proxmox_unconfigured", "Proxmox não configurado: "+a.adapterError("proxmox"))
 		return
 	}
 	vmid, err := strconv.Atoi(r.PathValue("vmid"))
@@ -73,7 +80,8 @@ func (a *App) proxmoxPowerAction(w http.ResponseWriter, r *http.Request) {
 		}
 		snapshot, snapshotErr := client.Snapshot(r.Context())
 		if snapshotErr != nil {
-			continue
+			writeError(w, http.StatusBadGateway, "proxmox_inventory_failed", "Cluster "+client.ID()+": "+snapshotErr.Error())
+			return
 		}
 		for _, candidate := range snapshot.Nodes {
 			if candidate.Node == node {
@@ -90,7 +98,7 @@ func (a *App) proxmoxPowerAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err = target.PowerAction(r.Context(), node, kind, vmid, action); err != nil {
-		writeError(w, 502, "proxmox_action_failed", "Proxmox rejected the power action.")
+		writeError(w, 502, "proxmox_action_failed", "Proxmox rejeitou a ação de energia: "+err.Error())
 		return
 	}
 	session := currentSession(r)
@@ -118,7 +126,7 @@ func (a *App) proxmoxCreateQEMU(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := target.CreateQEMU(r.Context(), input); err != nil {
-		writeError(w, 502, "proxmox_create_failed", "O Proxmox rejeitou a criação da VM.")
+		writeError(w, 502, "proxmox_create_failed", "O Proxmox rejeitou a criação da VM: "+err.Error())
 		return
 	}
 	session := currentSession(r)
@@ -137,7 +145,7 @@ func (a *App) proxmoxCreateLXC(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := target.CreateLXC(r.Context(), input); err != nil {
-		writeError(w, 502, "proxmox_create_failed", "O Proxmox rejeitou a criação do container LXC.")
+		writeError(w, 502, "proxmox_create_failed", "O Proxmox rejeitou a criação do container LXC: "+err.Error())
 		return
 	}
 	input.Password = ""
@@ -158,7 +166,7 @@ func (a *App) proxmoxClone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := target.Clone(r.Context(), input); err != nil {
-		writeError(w, 502, "proxmox_clone_failed", "O Proxmox rejeitou a clonagem.")
+		writeError(w, 502, "proxmox_clone_failed", "O Proxmox rejeitou a clonagem: "+err.Error())
 		return
 	}
 	session := currentSession(r)
@@ -179,7 +187,7 @@ func (a *App) proxmoxDeleteGuest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err = target.DeleteGuest(r.Context(), node, kind, vmid, r.URL.Query().Get("purge") == "true"); err != nil {
-		writeError(w, 502, "proxmox_delete_failed", "O Proxmox rejeitou a exclusão.")
+		writeError(w, 502, "proxmox_delete_failed", "O Proxmox rejeitou a exclusão: "+err.Error())
 		return
 	}
 	session := currentSession(r)

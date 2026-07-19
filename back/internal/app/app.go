@@ -21,13 +21,18 @@ import (
 	githubadapter "github.com/webcreations/wc-hub/back/internal/adapters/github"
 	kubernetesadapter "github.com/webcreations/wc-hub/back/internal/adapters/kubernetes"
 	mergerfsadapter "github.com/webcreations/wc-hub/back/internal/adapters/mergerfs"
+	monitoringadapter "github.com/webcreations/wc-hub/back/internal/adapters/monitoring"
 	ociadapter "github.com/webcreations/wc-hub/back/internal/adapters/oci"
+	pbsadapter "github.com/webcreations/wc-hub/back/internal/adapters/pbs"
+	poweradapter "github.com/webcreations/wc-hub/back/internal/adapters/power"
 	proxmoxadapter "github.com/webcreations/wc-hub/back/internal/adapters/proxmox"
 	terraformadapter "github.com/webcreations/wc-hub/back/internal/adapters/terraform"
+	vncadapter "github.com/webcreations/wc-hub/back/internal/adapters/vnc"
 	auditrepo "github.com/webcreations/wc-hub/back/internal/audit/repository"
 	authapp "github.com/webcreations/wc-hub/back/internal/auth/application"
 	authdomain "github.com/webcreations/wc-hub/back/internal/auth/domain"
 	authrepo "github.com/webcreations/wc-hub/back/internal/auth/repository"
+	backupapp "github.com/webcreations/wc-hub/back/internal/backupapp"
 	cloudflareapp "github.com/webcreations/wc-hub/back/internal/cloudflareapp"
 	dockerapp "github.com/webcreations/wc-hub/back/internal/dockerapp"
 	githubapp "github.com/webcreations/wc-hub/back/internal/githubapp"
@@ -37,9 +42,11 @@ import (
 	jobdomain "github.com/webcreations/wc-hub/back/internal/jobs/domain"
 	jobrepo "github.com/webcreations/wc-hub/back/internal/jobs/repository"
 	kubernetesapp "github.com/webcreations/wc-hub/back/internal/kubernetesapp"
+	monitorapp "github.com/webcreations/wc-hub/back/internal/monitorapp"
 	ociapp "github.com/webcreations/wc-hub/back/internal/ociapp"
 	overview "github.com/webcreations/wc-hub/back/internal/overview/application"
 	"github.com/webcreations/wc-hub/back/internal/platform/config"
+	powerapp "github.com/webcreations/wc-hub/back/internal/powerapp"
 	proxmoxapp "github.com/webcreations/wc-hub/back/internal/proxmox/application"
 	proxmoxrepo "github.com/webcreations/wc-hub/back/internal/proxmox/repository"
 	schedulerrepo "github.com/webcreations/wc-hub/back/internal/scheduler/repository"
@@ -50,6 +57,7 @@ import (
 	terminalapp "github.com/webcreations/wc-hub/back/internal/terminal/application"
 	terminalrepo "github.com/webcreations/wc-hub/back/internal/terminal/repository"
 	terraformapp "github.com/webcreations/wc-hub/back/internal/terraformapp"
+	vncapp "github.com/webcreations/wc-hub/back/internal/vncapp"
 )
 
 type contextKey string
@@ -80,6 +88,11 @@ type App struct {
 	telemetry                 *telemetryrepo.Postgres
 	terminal                  *terminalrepo.Postgres
 	terminalGateway           *terminalapp.Gateway
+	vncGateway                *vncadapter.Gateway
+	pbsClient                 *pbsadapter.Client
+	monitorStore              *monitorapp.Store
+	powerClient               *poweradapter.Client
+	adapterErrors             map[string]string
 	developmentMasterLocation *time.Location
 	loginLimiter              *loginLimiter
 	cancelWorkers             context.CancelFunc
@@ -108,7 +121,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, fun
 		pool.Close()
 		return nil, nil, err
 	}
-	application := &App{cfg: cfg, logger: logger, overview: overview.New(pool, cfg.Environment, cfg.SelfProtected), policy: security.NewEngine(cfg.LocalAllowlist), db: pool, loginLimiter: newLoginLimiter()}
+	application := &App{cfg: cfg, logger: logger, overview: overview.New(pool, cfg.Environment, cfg.SelfProtected), policy: security.NewEngine(cfg.LocalAllowlist), db: pool, loginLimiter: newLoginLimiter(), adapterErrors: map[string]string{}}
 	authRepository := authrepo.NewPostgres(pool)
 	application.auth = authapp.New(authRepository, cfg.SessionTTL)
 	if cfg.DevelopmentMasterLogin {
@@ -128,10 +141,12 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, fun
 	application.proxmox = proxmoxrepo.NewPostgres(pool)
 	application.telemetry = telemetryrepo.NewPostgres(pool)
 	application.terminal = terminalrepo.NewPostgres(pool)
+	application.monitorStore = monitorapp.NewStore(pool)
 	if cfg.ProxmoxURL != "" {
-		client, clientErr := proxmoxadapter.New(cfg.ProxmoxURL, cfg.ProxmoxTokenID, []byte(cfg.ProxmoxSecret), cfg.ProxmoxTLSCA)
+		client, clientErr := proxmoxadapter.NewWithConfig(proxmoxadapter.Config{URL: cfg.ProxmoxURL, TokenID: cfg.ProxmoxTokenID, Secret: []byte(cfg.ProxmoxSecret), CAPath: cfg.ProxmoxTLSCA, InsecureSkipVerify: cfg.ProxmoxTLSInsecure})
 		if clientErr != nil {
 			logger.Error("Proxmox adapter disabled", "error", clientErr)
+			application.setAdapterError("proxmox", clientErr)
 		} else {
 			application.proxmoxClient = client
 			application.proxmoxClients = append(application.proxmoxClients, client)
@@ -139,30 +154,35 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, fun
 				logger.Error("enable Proxmox schedule failed", "error", err)
 			}
 		}
+	} else {
+		application.setAdapterError("proxmox", fmt.Errorf("PROXMOX_API_URL is not configured"))
 	}
 	for _, configPath := range cfg.ProxmoxAdditionalConfigs {
 		client, clientErr := proxmoxadapter.NewFromEnvFile(configPath)
 		if clientErr != nil {
 			logger.Error("additional Proxmox adapter disabled", "config_path", configPath, "error", clientErr)
+			application.setAdapterError("proxmox", clientErr)
 			continue
 		}
 		application.proxmoxClients = append(application.proxmoxClients, client)
 	}
-	if cfg.DockerEndpoint != "" {
-		client, clientErr := dockeradapter.NewWithConfig(dockeradapter.Config{Endpoint: cfg.DockerEndpoint, CACertificatePath: cfg.DockerTLSCA, ClientCertPath: cfg.DockerClientCert, ClientKeyPath: cfg.DockerClientKey})
+	if cfg.DockerEndpoint != "" || cfg.DockerFallbackSocket != "" {
+		client, clientErr := dockeradapter.NewWithConfig(dockeradapter.Config{Endpoint: cfg.DockerEndpoint, FallbackSocketPath: cfg.DockerFallbackSocket, CACertificatePath: cfg.DockerTLSCA, ClientCertPath: cfg.DockerClientCert, ClientKeyPath: cfg.DockerClientKey})
 		if clientErr != nil {
 			logger.Error("Docker adapter disabled", "error", clientErr)
+			application.setAdapterError("docker", clientErr)
 		} else {
 			application.dockerClient = client
 		}
+	} else {
+		application.setAdapterError("docker", fmt.Errorf("DOCKER_PROXY_URL and DOCKER_FALLBACK_SOCKET_PATH are not configured"))
 	}
-	if cfg.KubernetesURL != "" {
-		client, clientErr := kubernetesadapter.New(kubernetesadapter.Config{Endpoint: cfg.KubernetesURL, TokenPath: cfg.KubernetesToken, CAPath: cfg.KubernetesCA})
-		if clientErr != nil {
-			logger.Error("Kubernetes adapter disabled", "error", clientErr)
-		} else {
-			application.kubernetesClient = client
-		}
+	client, clientErr := kubernetesadapter.New(kubernetesadapter.Config{Endpoint: cfg.KubernetesURL, TokenPath: cfg.KubernetesToken, CAPath: cfg.KubernetesCA, KubeconfigPath: cfg.KubernetesKubeconfig})
+	if clientErr != nil {
+		logger.Error("Kubernetes adapter disabled", "error", clientErr)
+		application.setAdapterError("kubernetes", clientErr)
+	} else {
+		application.kubernetesClient = client
 	}
 	if cfg.CloudflareToken != "" && (len(cfg.CloudflareAccounts) > 0 || len(cfg.CloudflareZones) > 0) {
 		kek, decodeErr := base64.StdEncoding.DecodeString(cfg.EncryptionKey)
@@ -219,11 +239,38 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, fun
 		client, clientErr := ociadapter.New(cfg.OCIConfigPath, cfg.OCIConfigProfile)
 		if clientErr != nil {
 			logger.Error("OCI adapter disabled", "error", clientErr)
+			application.setAdapterError("oci", clientErr)
 		} else {
 			application.ociHandler = ociapp.NewHandler(client, func(ctx context.Context, event ociapp.AuditEvent) {
 				session, _ := ctx.Value(sessionContextKey).(authdomain.Session)
 				_ = application.audit.Append(ctx, auditrepo.Record{ActorID: session.User.ID, Action: event.Action, Scope: security.ScopeCloud, ResourceType: "oci_instance", ResourceID: event.ResourceID, TargetName: event.TargetName, Risk: security.RiskCritical, Decision: "allowed", Payload: event.Payload})
 			})
+		}
+	} else {
+		application.setAdapterError("oci", fmt.Errorf("OCI_CONFIG_PATH is not configured"))
+	}
+	if len(cfg.VNCTargets) > 0 {
+		gateway, gatewayErr := vncadapter.New(vncadapter.Config{Targets: cfg.VNCTargets})
+		if gatewayErr != nil {
+			logger.Error("VNC gateway disabled", "error", gatewayErr)
+		} else {
+			application.vncGateway = gateway
+		}
+	}
+	if cfg.PBSURL != "" && cfg.PBSTokenID != "" && cfg.PBSSecret != "" {
+		client, clientErr := pbsadapter.New(pbsadapter.Config{URL: cfg.PBSURL, TokenID: cfg.PBSTokenID, Secret: cfg.PBSSecret, CAPath: cfg.PBSTLSCA})
+		if clientErr != nil {
+			logger.Error("PBS adapter disabled", "error", clientErr)
+		} else {
+			application.pbsClient = client
+		}
+	}
+	if cfg.PowerNUTAddress != "" || len(cfg.PowerWOLTargets) > 0 {
+		client, clientErr := poweradapter.New(poweradapter.Config{NUTAddress: cfg.PowerNUTAddress, UPSName: cfg.PowerNUTUPSName, WOLTargets: cfg.PowerWOLTargets, Broadcast: cfg.PowerWOLBroadcast})
+		if clientErr != nil {
+			logger.Error("power adapter disabled", "error", clientErr)
+		} else {
+			application.powerClient = client
 		}
 	}
 	if gateway, gatewayErr := terminalapp.NewGateway(application.terminal, cfg.SSHPrivateKeyPath, cfg.SSHKnownHostsPath, cfg.PublicURL); gatewayErr != nil {
@@ -236,6 +283,9 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, fun
 	}
 	workerCtx, cancelWorkers := context.WithCancel(ctx)
 	application.cancelWorkers = cancelWorkers
+	if cfg.MonitoringEnabled {
+		monitoringadapter.New(application.monitorStore, 15*time.Second).Start(workerCtx)
+	}
 	handlers := []jobdomain.Handler{proxmoxapp.NewSyncHandler(application.proxmoxClient, application.proxmox, cfg.ProxmoxURL), telemetryapp.NewMaintenanceHandler(application.telemetry)}
 	runner := jobapp.NewRunner(application.jobs, handlers, logger, cfg.WorkerID, cfg.WorkerCount)
 	runner.SetResultHook(func(ctx context.Context, job jobdomain.Job, status string, jobErr error) {
@@ -248,6 +298,21 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, fun
 	runner.Start(workerCtx)
 	schedulerrepo.NewPostgres(pool, application.jobs).Start(workerCtx)
 	return application, func() { cancelWorkers(); pool.Close() }, nil
+}
+
+func (a *App) setAdapterError(provider string, err error) {
+	if err == nil {
+		return
+	}
+	if previous := a.adapterErrors[provider]; previous != "" {
+		a.adapterErrors[provider] = previous + "; " + err.Error()
+		return
+	}
+	a.adapterErrors[provider] = err.Error()
+}
+
+func (a *App) adapterError(provider string) string {
+	return a.adapterErrors[provider]
 }
 
 func (a *App) Handler() http.Handler {
@@ -296,13 +361,31 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/terminal/tickets", a.protect("terminal.connect", a.createTerminalTicket))
 	mux.HandleFunc("GET /api/v1/terminal/sessions", a.protect("audit.read", a.terminalSessions))
 	mux.HandleFunc("GET /ws/terminal", a.terminalWebSocket)
-	dockerapp.MountRoutes(mux, a.protect, a.dockerClient)
-	kubernetesapp.MountRoutes(mux, a.protect, a.kubernetesClient)
+	var dockerReader dockerapp.Reader
+	if a.dockerClient != nil {
+		dockerReader = a.dockerClient
+	}
+	dockerapp.MountRoutes(mux, a.protect, dockerReader, a.adapterError("docker"))
+	kubernetesapp.MountRoutes(mux, a.protect, a.kubernetesClient, a.adapterError("kubernetes"))
 	cloudflareapp.MountRoutes(mux, a.protect, a.cloudflareHandler)
 	githubapp.MountRoutes(mux, a.protect, a.githubClient)
 	terraformapp.MountRoutes(mux, a.protect, a.terraformRunner)
 	storageapp.MountRoutes(mux, a.protect, a.storageClient)
-	ociapp.MountRoutes(mux, a.protect, a.ociHandler)
+	ociapp.MountRoutes(mux, a.protect, a.ociHandler, a.adapterError("oci"))
+	vncapp.MountRoutes(mux, a.protect, a.vncGateway, func(r *http.Request, action, target string) {
+		session := currentSession(r)
+		_ = a.audit.Append(r.Context(), auditrepo.Record{ActorID: session.User.ID, Action: action, Scope: security.ScopeRemote, ResourceType: "vnc_session", TargetName: target, Risk: security.RiskCritical, Decision: "allowed", RequestID: requestID(r.Context()), SourceIP: remoteIP(r)})
+	})
+	var pbsReader backupapp.Reader
+	if a.pbsClient != nil {
+		pbsReader = a.pbsClient
+	}
+	backupapp.MountRoutes(mux, a.protect, pbsReader)
+	monitorapp.MountRoutes(mux, a.protect, a.monitorStore)
+	powerapp.MountRoutes(mux, a.protect, a.powerClient, func(ctx context.Context, action, target, reason string) {
+		session, _ := ctx.Value(sessionContextKey).(authdomain.Session)
+		_ = a.audit.Append(ctx, auditrepo.Record{ActorID: session.User.ID, Action: action, Scope: security.ScopeRemote, ResourceType: "power_target", TargetName: target, Risk: security.RiskCritical, Decision: "allowed", Reason: reason})
+	})
 	return a.middleware(mux)
 }
 

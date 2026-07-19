@@ -22,5 +22,9 @@ export default createRouter({
     { path: '/terraform', name: 'terraform', component: () => import('@/views/terraform/TerraformView.vue') },
     { path: '/storage', name: 'storage', component: () => import('@/views/storage/MergerFSView.vue') },
     { path: '/cloud', name: 'cloud', component: () => import('@/views/oci/OracleCloudView.vue') },
+    { path: '/vnc', name: 'vnc', component: () => import('@/views/vnc/VncView.vue') },
+    { path: '/backups', name: 'backups', component: () => import('@/views/backup/BackupView.vue') },
+    { path: '/uptime', name: 'uptime', component: () => import('@/views/monitor/UptimeView.vue') },
+    { path: '/power', name: 'power', component: () => import('@/views/power/PowerView.vue') },
   ],
 })

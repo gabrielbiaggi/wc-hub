@@ -13,7 +13,7 @@ type Reader interface {
 	Inventory(context.Context) (dockeradapter.Inventory, error)
 	ListContainers(context.Context) ([]dockeradapter.Container, error)
 	ListImages(context.Context) ([]dockeradapter.Image, error)
-	Stats(context.Context, []dockeradapter.Container) ([]dockeradapter.ContainerStats, []string)
+	Stats(context.Context, []dockeradapter.Container) ([]dockeradapter.ContainerStats, error)
 }
 
 type Controller interface {
@@ -41,15 +41,24 @@ func (h *Handler) Exec(w http.ResponseWriter, r *http.Request) {
 	}
 	output, err := controller.Exec(r.Context(), r.PathValue("id"), input.Command)
 	if err != nil {
-		writeError(w, 502, "docker_exec_failed", "O Docker rejeitou a execução.")
+		writeError(w, 502, "docker_exec_failed", "O Docker rejeitou a execução: "+err.Error())
 		return
 	}
 	writeJSON(w, 200, map[string]string{"output": output})
 }
 
-type Handler struct{ reader Reader }
+type Handler struct {
+	reader  Reader
+	initErr string
+}
 
-func NewHandler(reader Reader) *Handler { return &Handler{reader: reader} }
+func NewHandler(reader Reader, initErr ...string) *Handler {
+	message := ""
+	if len(initErr) > 0 {
+		message = initErr[0]
+	}
+	return &Handler{reader: reader, initErr: message}
+}
 
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	if !h.available(w) {
@@ -57,7 +66,7 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	}
 	item, err := h.reader.Health(r.Context())
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "docker_unreachable", "The restricted Docker API proxy is unavailable.")
+		writeError(w, http.StatusBadGateway, "docker_unreachable", "O Docker não respondeu: "+err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, item)
@@ -69,7 +78,7 @@ func (h *Handler) Inventory(w http.ResponseWriter, r *http.Request) {
 	}
 	item, err := h.reader.Inventory(r.Context())
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "docker_inventory_failed", "Docker inventory could not be loaded from the restricted proxy.")
+		writeError(w, http.StatusBadGateway, "docker_inventory_failed", "O inventário Docker não pôde ser carregado: "+err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, item)
@@ -81,7 +90,7 @@ func (h *Handler) Containers(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := h.reader.ListContainers(r.Context())
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "docker_containers_failed", "Docker containers could not be loaded.")
+		writeError(w, http.StatusBadGateway, "docker_containers_failed", "Os containers Docker não puderam ser carregados: "+err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
@@ -93,7 +102,7 @@ func (h *Handler) Images(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := h.reader.ListImages(r.Context())
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "docker_images_failed", "Docker images could not be loaded.")
+		writeError(w, http.StatusBadGateway, "docker_images_failed", "As imagens Docker não puderam ser carregadas: "+err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
@@ -105,11 +114,15 @@ func (h *Handler) Stats(w http.ResponseWriter, r *http.Request) {
 	}
 	containers, err := h.reader.ListContainers(r.Context())
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "docker_stats_failed", "Docker container stats could not be loaded.")
+		writeError(w, http.StatusBadGateway, "docker_stats_failed", "Os containers necessários para as estatísticas Docker não puderam ser carregados: "+err.Error())
 		return
 	}
-	items, warnings := h.reader.Stats(r.Context(), containers)
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "warnings": warnings})
+	items, err := h.reader.Stats(r.Context(), containers)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "docker_stats_failed", "As estatísticas Docker não puderam ser carregadas: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "warnings": []string{}})
 }
 
 func (h *Handler) ContainerAction(w http.ResponseWriter, r *http.Request) {
@@ -123,7 +136,7 @@ func (h *Handler) ContainerAction(w http.ResponseWriter, r *http.Request) {
 	}
 	id, action := r.PathValue("id"), r.PathValue("action")
 	if err := controller.ContainerAction(r.Context(), id, action); err != nil {
-		writeError(w, http.StatusBadGateway, "docker_action_failed", "Docker rejected the container action.")
+		writeError(w, http.StatusBadGateway, "docker_action_failed", "O Docker rejeitou a ação no container: "+err.Error())
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"container_id": id, "action": action, "status": "accepted"})
@@ -133,7 +146,11 @@ func (h *Handler) available(w http.ResponseWriter) bool {
 	if h.reader != nil {
 		return true
 	}
-	writeError(w, http.StatusServiceUnavailable, "docker_unconfigured", "The Docker adapter has not been configured.")
+	message := "O adaptador Docker não está configurado."
+	if h.initErr != "" {
+		message += " " + h.initErr
+	}
+	writeError(w, http.StatusServiceUnavailable, "docker_unconfigured", message)
 	return false
 }
 

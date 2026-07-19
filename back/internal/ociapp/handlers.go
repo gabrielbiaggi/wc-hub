@@ -18,7 +18,7 @@ type Client interface {
 
 func (h *Handler) launchInstance(w http.ResponseWriter, r *http.Request) {
 	if h == nil || h.client == nil {
-		writeError(w, http.StatusConflict, "oci_unconfigured", "As credenciais de assinatura da OCI não estão configuradas.")
+		writeError(w, http.StatusConflict, "oci_unconfigured", h.unconfiguredMessage())
 		return
 	}
 	var input ociadapter.LaunchInstanceInput
@@ -30,7 +30,7 @@ func (h *Handler) launchInstance(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := h.client.LaunchInstance(r.Context(), input)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "oci_launch_failed", "A Oracle Cloud rejeitou a criação da instância.")
+		writeError(w, http.StatusBadGateway, "oci_launch_failed", "A Oracle Cloud rejeitou a criação da instância: "+err.Error())
 		return
 	}
 	if h.audit != nil {
@@ -41,7 +41,7 @@ func (h *Handler) launchInstance(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) createAutonomousDatabase(w http.ResponseWriter, r *http.Request) {
 	if h == nil || h.client == nil {
-		writeError(w, http.StatusConflict, "oci_unconfigured", "As credenciais de assinatura da OCI não estão configuradas.")
+		writeError(w, http.StatusConflict, "oci_unconfigured", h.unconfiguredMessage())
 		return
 	}
 	var input ociadapter.CreateAutonomousDatabaseInput
@@ -54,7 +54,7 @@ func (h *Handler) createAutonomousDatabase(w http.ResponseWriter, r *http.Reques
 	id, err := h.client.CreateAutonomousDatabase(r.Context(), input)
 	input.AdminPassword = ""
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "oci_database_create_failed", "A Oracle Cloud rejeitou a criação do Autonomous Database.")
+		writeError(w, http.StatusBadGateway, "oci_database_create_failed", "A Oracle Cloud rejeitou a criação do Autonomous Database: "+err.Error())
 		return
 	}
 	if h.audit != nil {
@@ -71,22 +71,34 @@ type AuditEvent struct {
 }
 
 type Handler struct {
-	client Client
-	audit  func(context.Context, AuditEvent)
+	client  Client
+	audit   func(context.Context, AuditEvent)
+	initErr string
 }
 
-func NewHandler(client Client, audit func(context.Context, AuditEvent)) *Handler {
-	return &Handler{client: client, audit: audit}
+func NewHandler(client Client, audit func(context.Context, AuditEvent), initErr ...string) *Handler {
+	message := ""
+	if len(initErr) > 0 {
+		message = initErr[0]
+	}
+	return &Handler{client: client, audit: audit, initErr: message}
+}
+
+func (h *Handler) unconfiguredMessage() string {
+	if h != nil && h.initErr != "" {
+		return "OCI não configurada: " + h.initErr
+	}
+	return "As credenciais de assinatura da OCI não estão configuradas."
 }
 
 func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 	if h == nil || h.client == nil {
-		writeError(w, http.StatusConflict, "oci_unconfigured", "OCI signing credentials are not configured.")
+		writeError(w, http.StatusConflict, "oci_unconfigured", h.unconfiguredMessage())
 		return
 	}
 	snapshot, err := h.client.Snapshot(r.Context())
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "oci_inventory_failed", "Oracle Cloud inventory could not be loaded.")
+		writeError(w, http.StatusBadGateway, "oci_inventory_failed", "O inventário OCI não pôde ser carregado: "+err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, snapshot)
@@ -94,7 +106,7 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) instanceAction(w http.ResponseWriter, r *http.Request) {
 	if h == nil || h.client == nil {
-		writeError(w, http.StatusConflict, "oci_unconfigured", "OCI signing credentials are not configured.")
+		writeError(w, http.StatusConflict, "oci_unconfigured", h.unconfiguredMessage())
 		return
 	}
 	var input struct {
@@ -108,7 +120,7 @@ func (h *Handler) instanceAction(w http.ResponseWriter, r *http.Request) {
 	}
 	action := r.PathValue("action")
 	if err := h.client.InstanceAction(r.Context(), input.InstanceID, action); err != nil {
-		writeError(w, http.StatusBadGateway, "oci_action_failed", "Oracle Cloud rejected the instance action.")
+		writeError(w, http.StatusBadGateway, "oci_action_failed", "A Oracle Cloud rejeitou a ação na instância: "+err.Error())
 		return
 	}
 	if h.audit != nil {

@@ -3,28 +3,40 @@ package kubernetes
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
-	"github.com/gorilla/websocket"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/remotecommand"
 )
 
-type Config struct{ Endpoint, TokenPath, CAPath string }
-type Client struct {
-	baseURL, tokenPath string
-	http               *http.Client
-	tlsConfig          *tls.Config
+type Config struct {
+	Endpoint       string
+	TokenPath      string
+	CAPath         string
+	KubeconfigPath string
 }
+
+type Client struct {
+	clientset kubernetes.Interface
+	config    *rest.Config
+	source    string
+}
+
 type Metadata struct {
 	Name, Namespace, UID string
 	CreationTimestamp    time.Time         `json:"creationTimestamp"`
@@ -57,7 +69,6 @@ type Pod struct {
 			Name         string
 			Ready        bool
 			RestartCount int
-			State        map[string]json.RawMessage
 		} `json:"containerStatuses"`
 		Conditions []Condition `json:"conditions"`
 	} `json:"status"`
@@ -78,66 +89,105 @@ type Overview struct {
 	Pods        []Pod        `json:"pods"`
 	Events      []Event      `json:"events"`
 }
-type list[T any] struct {
-	Items []T `json:"items"`
-}
 
 var resourceNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`)
 
-func New(config Config) (*Client, error) {
-	parsed, err := url.Parse(strings.TrimRight(config.Endpoint, "/"))
+// New resolves credentials in the same order used by workloads: in-cluster
+// ServiceAccount first, then KUBECONFIG or ~/.kube/config, followed by the
+// explicitly configured token files retained for existing installations.
+func New(input Config) (*Client, error) {
+	attempts := make([]error, 0, 3)
+	if config, err := rest.InClusterConfig(); err == nil {
+		return newClient(config, "in-cluster ServiceAccount")
+	} else {
+		attempts = append(attempts, fmt.Errorf("in-cluster configuration: %w", err))
+	}
+
+	rules := clientcmd.NewDefaultClientConfigLoadingRules()
+	if path := strings.TrimSpace(input.KubeconfigPath); path != "" {
+		rules.ExplicitPath = path
+	}
+	kubeconfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, &clientcmd.ConfigOverrides{})
+	if config, err := kubeconfig.ClientConfig(); err == nil {
+		return newClient(config, "kubeconfig")
+	} else {
+		attempts = append(attempts, fmt.Errorf("kubeconfig: %w", err))
+	}
+
+	if strings.TrimSpace(input.Endpoint) != "" {
+		config, err := manualConfig(input)
+		if err == nil {
+			return newClient(config, "explicit endpoint and token")
+		}
+		attempts = append(attempts, fmt.Errorf("explicit endpoint: %w", err))
+	}
+	return nil, fmt.Errorf("Kubernetes configuration failed: %w", errors.Join(attempts...))
+}
+
+func manualConfig(input Config) (*rest.Config, error) {
+	parsed, err := url.Parse(strings.TrimRight(strings.TrimSpace(input.Endpoint), "/"))
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
 		return nil, errors.New("Kubernetes API endpoint must be an absolute HTTPS URL")
 	}
-	if config.TokenPath == "" {
+	if strings.TrimSpace(input.TokenPath) == "" {
 		return nil, errors.New("Kubernetes service account token path is required")
 	}
-	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
-	if config.CAPath != "" {
-		pem, readErr := os.ReadFile(config.CAPath)
-		if readErr != nil {
-			return nil, fmt.Errorf("read Kubernetes CA: %w", readErr)
-		}
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(pem) {
-			return nil, errors.New("Kubernetes CA bundle is invalid")
-		}
-		tlsConfig.RootCAs = pool
-	}
-	transport := &http.Transport{TLSClientConfig: tlsConfig, MaxIdleConns: 20, IdleConnTimeout: 60 * time.Second}
-	return &Client{baseURL: parsed.String(), tokenPath: config.TokenPath, http: &http.Client{Timeout: 20 * time.Second, Transport: transport}, tlsConfig: tlsConfig}, nil
+	return &rest.Config{Host: parsed.String(), BearerTokenFile: input.TokenPath, TLSClientConfig: rest.TLSClientConfig{CAFile: input.CAPath}, Timeout: 20 * time.Second}, nil
 }
+
+func newClient(config *rest.Config, source string) (*Client, error) {
+	if config == nil || strings.TrimSpace(config.Host) == "" {
+		return nil, errors.New("Kubernetes client configuration has no API server")
+	}
+	copy := rest.CopyConfig(config)
+	copy.Timeout = 20 * time.Second
+	clientset, err := kubernetes.NewForConfig(copy)
+	if err != nil {
+		return nil, fmt.Errorf("create Kubernetes client from %s: %w", source, err)
+	}
+	return &Client{clientset: clientset, config: copy, source: source}, nil
+}
+
 func (c *Client) Overview(ctx context.Context) (Overview, error) {
-	result := Overview{GeneratedAt: time.Now().UTC(), Nodes: []Node{}, Deployments: []Deployment{}, ProblemPods: []Pod{}, Events: []Event{}}
-	var nodes list[Node]
-	if err := c.get(ctx, "/api/v1/nodes?limit=500", &nodes); err != nil {
+	if c == nil || c.clientset == nil {
+		return Overview{}, errors.New("Kubernetes adapter is not configured")
+	}
+	result := Overview{GeneratedAt: time.Now().UTC(), Nodes: []Node{}, Deployments: []Deployment{}, Pods: []Pod{}, ProblemPods: []Pod{}, Events: []Event{}}
+	nodes, err := c.listNodes(ctx)
+	if err != nil {
 		return result, err
 	}
-	result.Nodes = nodes.Items
-	var deployments list[Deployment]
-	if err := c.get(ctx, "/apis/apps/v1/deployments?limit=1000", &deployments); err != nil {
+	for _, item := range nodes {
+		result.Nodes = append(result.Nodes, mapNode(item))
+	}
+	deployments, err := c.listDeployments(ctx)
+	if err != nil {
 		return result, err
 	}
-	result.Deployments = deployments.Items
-	var pods list[Pod]
-	if err := c.get(ctx, "/api/v1/pods?limit=1000", &pods); err != nil {
+	for _, item := range deployments {
+		result.Deployments = append(result.Deployments, mapDeployment(item))
+	}
+	pods, err := c.listPods(ctx)
+	if err != nil {
 		return result, err
 	}
-	result.Pods = pods.Items
-	for _, pod := range pods.Items {
-		if pod.Status.Phase != "Running" && pod.Status.Phase != "Succeeded" || hasContainerProblem(pod) {
-			result.ProblemPods = append(result.ProblemPods, pod)
+	for _, item := range pods {
+		mapped := mapPod(item)
+		result.Pods = append(result.Pods, mapped)
+		if mapped.Status.Phase != "Running" && mapped.Status.Phase != "Succeeded" || hasContainerProblem(mapped) {
+			result.ProblemPods = append(result.ProblemPods, mapped)
 		}
 	}
-	var events list[Event]
-	if err := c.get(ctx, "/api/v1/events?limit=200", &events); err != nil {
+	events, err := c.listEvents(ctx)
+	if err != nil {
 		return result, err
 	}
-	for _, event := range events.Items {
-		if event.Type == "Warning" {
-			result.Events = append(result.Events, event)
+	for _, item := range events {
+		if item.Type == corev1.EventTypeWarning {
+			result.Events = append(result.Events, mapEvent(item))
 		}
 	}
+	sort.Slice(result.Events, func(i, j int) bool { return result.Events[i].LastTimestamp.Before(result.Events[j].LastTimestamp) })
 	if len(result.Events) > 50 {
 		result.Events = result.Events[len(result.Events)-50:]
 	}
@@ -145,95 +195,182 @@ func (c *Client) Overview(ctx context.Context) (Overview, error) {
 }
 
 func (c *Client) PodLogs(ctx context.Context, namespace, pod, container string, tailLines int) (string, error) {
-	if !resourceNamePattern.MatchString(namespace) || !resourceNamePattern.MatchString(pod) || (container != "" && !resourceNamePattern.MatchString(container)) {
+	if !validPodTarget(namespace, pod, container) {
 		return "", errors.New("Kubernetes pod target is invalid")
 	}
 	if tailLines <= 0 || tailLines > 5000 {
 		tailLines = 500
 	}
-	query := url.Values{"tailLines": {fmt.Sprint(tailLines)}, "timestamps": {"true"}}
-	if container != "" {
-		query.Set("container", container)
+	tail := int64(tailLines)
+	stream, err := c.clientset.CoreV1().Pods(namespace).GetLogs(pod, &corev1.PodLogOptions{Container: container, TailLines: &tail, Timestamps: true}).Stream(ctx)
+	if err != nil {
+		return "", fmt.Errorf("read Kubernetes pod logs: %w", err)
 	}
-	return c.requestText(ctx, "/api/v1/namespaces/"+url.PathEscape(namespace)+"/pods/"+url.PathEscape(pod)+"/log?"+query.Encode())
+	defer stream.Close()
+	contents, err := io.ReadAll(io.LimitReader(stream, 2<<20))
+	if err != nil {
+		return "", fmt.Errorf("read Kubernetes pod log stream: %w", err)
+	}
+	return string(contents), nil
 }
 
 func (c *Client) Exec(ctx context.Context, namespace, pod, container string, command []string) (string, error) {
-	if !resourceNamePattern.MatchString(namespace) || !resourceNamePattern.MatchString(pod) || (container != "" && !resourceNamePattern.MatchString(container)) || len(command) == 0 || len(command) > 32 {
+	if !validPodTarget(namespace, pod, container) || len(command) == 0 || len(command) > 32 {
 		return "", errors.New("Kubernetes exec input is invalid")
 	}
-	token, err := os.ReadFile(c.tokenPath)
-	if err != nil {
-		return "", err
-	}
-	defer zero(token)
-	token = bytes.TrimSpace(token)
-	query := url.Values{"stdout": {"true"}, "stderr": {"true"}, "stdin": {"false"}, "tty": {"false"}}
-	for _, part := range command {
-		if strings.TrimSpace(part) == "" || len(part) > 4096 {
+	for _, item := range command {
+		if strings.TrimSpace(item) == "" || len(item) > 4096 {
 			return "", errors.New("Kubernetes command is invalid")
 		}
-		query.Add("command", part)
 	}
-	if container != "" {
-		query.Set("container", container)
-	}
-	endpoint := strings.Replace(c.baseURL, "https://", "wss://", 1) + "/api/v1/namespaces/" + url.PathEscape(namespace) + "/pods/" + url.PathEscape(pod) + "/exec?" + query.Encode()
-	dialer := websocket.Dialer{TLSClientConfig: c.tlsConfig, HandshakeTimeout: 20 * time.Second, Subprotocols: []string{"v4.channel.k8s.io"}}
-	headers := http.Header{"Authorization": []string{"Bearer " + string(token)}}
-	connection, response, err := dialer.DialContext(ctx, endpoint, headers)
+	request := c.clientset.CoreV1().RESTClient().Post().Resource("pods").Namespace(namespace).Name(pod).SubResource("exec").VersionedParams(&corev1.PodExecOptions{Container: container, Command: command, Stdout: true, Stderr: true, TTY: false}, metav1.ParameterCodec)
+	executor, err := remotecommand.NewSPDYExecutor(c.config, http.MethodPost, request.URL())
 	if err != nil {
-		if response != nil {
-			return "", fmt.Errorf("Kubernetes exec returned %d", response.StatusCode)
-		}
-		return "", err
+		return "", fmt.Errorf("create Kubernetes exec session: %w", err)
 	}
-	defer connection.Close()
-	_ = connection.SetReadDeadline(time.Now().Add(30 * time.Second))
-	var output strings.Builder
-	for output.Len() < 2<<20 {
-		_, message, readErr := connection.ReadMessage()
-		if readErr != nil {
-			if websocket.IsCloseError(readErr, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-				break
-			}
-			if strings.Contains(readErr.Error(), "close 1000") {
-				break
-			}
-			return "", readErr
-		}
-		if len(message) > 1 && (message[0] == 1 || message[0] == 2 || message[0] == 3) {
-			output.Write(message[1:])
-		}
+	var stdout, stderr bytes.Buffer
+	if err = executor.StreamWithContext(ctx, remotecommand.StreamOptions{Stdout: &stdout, Stderr: &stderr, Tty: false}); err != nil {
+		return "", fmt.Errorf("run Kubernetes exec: %w", err)
 	}
-	return output.String(), nil
+	return stdout.String() + stderr.String(), nil
 }
 
-func (c *Client) requestText(ctx context.Context, path string) (string, error) {
-	token, err := os.ReadFile(c.tokenPath)
-	if err != nil {
-		return "", err
+func (c *Client) DeploymentAction(ctx context.Context, namespace, name, action string, replicas int) error {
+	if !resourceNamePattern.MatchString(namespace) || !resourceNamePattern.MatchString(name) {
+		return errors.New("Kubernetes namespace or deployment name is invalid")
 	}
-	defer zero(token)
-	token = bytes.TrimSpace(token)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
-	if err != nil {
-		return "", err
+	var payload []byte
+	switch action {
+	case "scale":
+		if replicas < 0 || replicas > 1000 {
+			return errors.New("Kubernetes replica count is outside the allowed range")
+		}
+		payload = []byte(fmt.Sprintf(`{"spec":{"replicas":%d}}`, replicas))
+	case "restart":
+		value, err := json.Marshal(map[string]any{"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"annotations": map[string]string{"kubectl.kubernetes.io/restartedAt": time.Now().UTC().Format(time.RFC3339)}}}}})
+		if err != nil {
+			return fmt.Errorf("encode Kubernetes restart request: %w", err)
+		}
+		payload = value
+	default:
+		return errors.New("Kubernetes deployment action is unsupported")
 	}
-	req.Header.Set("Authorization", "Bearer "+string(token))
-	response, err := c.http.Do(req)
-	if err != nil {
-		return "", err
+	if _, err := c.clientset.AppsV1().Deployments(namespace).Patch(ctx, name, types.MergePatchType, payload, metav1.PatchOptions{}); err != nil {
+		return fmt.Errorf("patch Kubernetes deployment: %w", err)
 	}
-	defer response.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(response.Body, 2<<20))
-	if err != nil {
-		return "", err
+	return nil
+}
+
+func (c *Client) listNodes(ctx context.Context) ([]corev1.Node, error) {
+	result := []corev1.Node{}
+	continueToken := ""
+	for {
+		page, err := c.clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{Limit: 500, Continue: continueToken})
+		if err != nil {
+			return nil, fmt.Errorf("list Kubernetes nodes: %w", err)
+		}
+		result = append(result, page.Items...)
+		if page.Continue == "" {
+			return result, nil
+		}
+		continueToken = page.Continue
 	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return "", fmt.Errorf("Kubernetes API returned %d", response.StatusCode)
+}
+
+func (c *Client) listDeployments(ctx context.Context) ([]appsv1.Deployment, error) {
+	result := []appsv1.Deployment{}
+	continueToken := ""
+	for {
+		page, err := c.clientset.AppsV1().Deployments("").List(ctx, metav1.ListOptions{Limit: 500, Continue: continueToken})
+		if err != nil {
+			return nil, fmt.Errorf("list Kubernetes deployments: %w", err)
+		}
+		result = append(result, page.Items...)
+		if page.Continue == "" {
+			return result, nil
+		}
+		continueToken = page.Continue
 	}
-	return string(body), nil
+}
+
+func (c *Client) listPods(ctx context.Context) ([]corev1.Pod, error) {
+	result := []corev1.Pod{}
+	continueToken := ""
+	for {
+		page, err := c.clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{Limit: 500, Continue: continueToken})
+		if err != nil {
+			return nil, fmt.Errorf("list Kubernetes pods: %w", err)
+		}
+		result = append(result, page.Items...)
+		if page.Continue == "" {
+			return result, nil
+		}
+		continueToken = page.Continue
+	}
+}
+
+func (c *Client) listEvents(ctx context.Context) ([]corev1.Event, error) {
+	result := []corev1.Event{}
+	continueToken := ""
+	for {
+		page, err := c.clientset.CoreV1().Events("").List(ctx, metav1.ListOptions{Limit: 500, Continue: continueToken})
+		if err != nil {
+			return nil, fmt.Errorf("list Kubernetes events: %w", err)
+		}
+		result = append(result, page.Items...)
+		if page.Continue == "" {
+			return result, nil
+		}
+		continueToken = page.Continue
+	}
+}
+
+func mapMetadata(item metav1.Object) Metadata {
+	labels := item.GetLabels()
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	return Metadata{Name: item.GetName(), Namespace: item.GetNamespace(), UID: string(item.GetUID()), CreationTimestamp: item.GetCreationTimestamp().Time, Labels: labels}
+}
+func mapNode(item corev1.Node) Node {
+	mapped := Node{Metadata: mapMetadata(&item)}
+	for _, condition := range item.Status.Conditions {
+		mapped.Status.Conditions = append(mapped.Status.Conditions, Condition{Type: string(condition.Type), Status: string(condition.Status), Reason: condition.Reason, Message: condition.Message, LastTransitionTime: condition.LastTransitionTime.Time})
+	}
+	mapped.Status.NodeInfo.KubeletVersion, mapped.Status.NodeInfo.OSImage, mapped.Status.NodeInfo.Architecture = item.Status.NodeInfo.KubeletVersion, item.Status.NodeInfo.OSImage, item.Status.NodeInfo.Architecture
+	mapped.Status.Capacity = map[string]string{}
+	for name, quantity := range item.Status.Capacity {
+		mapped.Status.Capacity[string(name)] = quantity.String()
+	}
+	return mapped
+}
+func mapDeployment(item appsv1.Deployment) Deployment {
+	mapped := Deployment{Metadata: mapMetadata(&item)}
+	if item.Spec.Replicas != nil {
+		mapped.Spec.Replicas = int(*item.Spec.Replicas)
+	}
+	mapped.Status.Replicas, mapped.Status.ReadyReplicas, mapped.Status.AvailableReplicas, mapped.Status.UnavailableReplicas = int(item.Status.Replicas), int(item.Status.ReadyReplicas), int(item.Status.AvailableReplicas), int(item.Status.UnavailableReplicas)
+	return mapped
+}
+func mapPod(item corev1.Pod) Pod {
+	mapped := Pod{Metadata: mapMetadata(&item)}
+	mapped.Status.Phase, mapped.Status.Reason, mapped.Status.Message, mapped.Status.PodIP, mapped.Status.HostIP = string(item.Status.Phase), item.Status.Reason, item.Status.Message, item.Status.PodIP, item.Status.HostIP
+	for _, condition := range item.Status.Conditions {
+		mapped.Status.Conditions = append(mapped.Status.Conditions, Condition{Type: string(condition.Type), Status: string(condition.Status), Reason: condition.Reason, Message: condition.Message, LastTransitionTime: condition.LastTransitionTime.Time})
+	}
+	for _, status := range item.Status.ContainerStatuses {
+		mapped.Status.ContainerStatuses = append(mapped.Status.ContainerStatuses, struct {
+			Name         string
+			Ready        bool
+			RestartCount int
+		}{Name: status.Name, Ready: status.Ready, RestartCount: int(status.RestartCount)})
+	}
+	return mapped
+}
+func mapEvent(item corev1.Event) Event {
+	mapped := Event{Metadata: mapMetadata(&item), Type: item.Type, Reason: item.Reason, Message: item.Message, Count: int(item.Count), FirstTimestamp: item.FirstTimestamp.Time, LastTimestamp: item.LastTimestamp.Time}
+	mapped.InvolvedObject.Kind, mapped.InvolvedObject.Namespace, mapped.InvolvedObject.Name, mapped.InvolvedObject.UID = item.InvolvedObject.Kind, item.InvolvedObject.Namespace, item.InvolvedObject.Name, string(item.InvolvedObject.UID)
+	return mapped
 }
 func hasContainerProblem(pod Pod) bool {
 	for _, status := range pod.Status.ContainerStatuses {
@@ -243,78 +380,6 @@ func hasContainerProblem(pod Pod) bool {
 	}
 	return false
 }
-
-func (c *Client) DeploymentAction(ctx context.Context, namespace, name, action string, replicas int) error {
-	if !resourceNamePattern.MatchString(namespace) || !resourceNamePattern.MatchString(name) {
-		return errors.New("Kubernetes namespace or deployment name is invalid")
-	}
-	var payload any
-	switch action {
-	case "scale":
-		if replicas < 0 || replicas > 1000 {
-			return errors.New("Kubernetes replica count is outside the allowed range")
-		}
-		payload = map[string]any{"spec": map[string]any{"replicas": replicas}}
-	case "restart":
-		payload = map[string]any{"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"annotations": map[string]string{"kubectl.kubernetes.io/restartedAt": time.Now().UTC().Format(time.RFC3339)}}}}}
-	default:
-		return errors.New("Kubernetes deployment action is unsupported")
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	path := "/apis/apps/v1/namespaces/" + url.PathEscape(namespace) + "/deployments/" + url.PathEscape(name)
-	return c.request(ctx, http.MethodPatch, path, body, nil)
-}
-func (c *Client) get(ctx context.Context, path string, destination any) error {
-	return c.request(ctx, http.MethodGet, path, nil, destination)
-}
-
-func (c *Client) request(ctx context.Context, method, path string, requestBody []byte, destination any) error {
-	if c == nil || c.http == nil {
-		return errors.New("Kubernetes adapter is not configured")
-	}
-	token, err := os.ReadFile(c.tokenPath)
-	if err != nil {
-		return fmt.Errorf("read Kubernetes service account token: %w", err)
-	}
-	defer zero(token)
-	token = bytes.TrimSpace(token)
-	if len(token) < 20 {
-		return errors.New("Kubernetes service account token is invalid")
-	}
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(requestBody))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+string(token))
-	req.Header.Set("Accept", "application/json")
-	if len(requestBody) > 0 {
-		req.Header.Set("Content-Type", "application/merge-patch+json")
-	}
-	response, err := c.http.Do(req)
-	if err != nil {
-		return fmt.Errorf("Kubernetes API request: %w", err)
-	}
-	defer response.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(response.Body, 16<<20))
-	if err != nil {
-		return err
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("Kubernetes API returned %d", response.StatusCode)
-	}
-	if destination == nil || len(body) == 0 {
-		return nil
-	}
-	if err = json.Unmarshal(body, destination); err != nil {
-		return fmt.Errorf("decode Kubernetes API response: %w", err)
-	}
-	return nil
-}
-func zero(value []byte) {
-	for i := range value {
-		value[i] = 0
-	}
+func validPodTarget(namespace, pod, container string) bool {
+	return resourceNamePattern.MatchString(namespace) && resourceNamePattern.MatchString(pod) && (container == "" || resourceNamePattern.MatchString(container))
 }
