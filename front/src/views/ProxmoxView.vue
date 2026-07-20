@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import {
   Boxes,
+  Camera,
   Copy,
   Database,
   MemoryStick,
@@ -22,15 +23,19 @@ import {
   cloneProxmoxGuest,
   createProxmoxLXC,
   createProxmoxQEMU,
+  createProxmoxSnapshot,
   deleteProxmoxGuest,
+  deleteProxmoxSnapshot,
   getJobs,
   getProxmoxInventory,
+  getProxmoxSnapshots,
   getProxmoxSummary,
   runProxmoxPowerAction,
   syncProxmox,
   type ProxmoxGuest,
   type ProxmoxLXCInput,
   type ProxmoxQEMUInput,
+  type ProxmoxSnapshot,
 } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api_error";
 
@@ -147,6 +152,57 @@ const cloning = useMutation({
       1600,
     ),
 });
+const snapshotGuest = ref<ProxmoxGuest | null>(null);
+const snapshots = useQuery({
+  queryKey: computed(() => [
+    "proxmox-snapshots",
+    snapshotGuest.value?.cluster,
+    snapshotGuest.value?.node,
+    snapshotGuest.value?.type,
+    snapshotGuest.value?.vmid,
+  ]),
+  queryFn: () => {
+    const g = snapshotGuest.value;
+    if (!g) return Promise.resolve([]);
+    return getProxmoxSnapshots(g.cluster, g.node, g.type, g.vmid);
+  },
+  enabled: computed(() => !!snapshotGuest.value),
+  refetchInterval: false,
+});
+const snapshotForm = ref({ name: "", description: "" });
+const createSnapshot = useMutation({
+  mutationFn: () => {
+    const g = snapshotGuest.value;
+    if (!g) throw new Error("No guest selected");
+    return createProxmoxSnapshot(
+      g.cluster,
+      g.node,
+      g.type,
+      g.vmid,
+      snapshotForm.value.name,
+      snapshotForm.value.description,
+    );
+  },
+  onSuccess: () => {
+    snapshotForm.value = { name: "", description: "" };
+    setTimeout(
+      () => client.invalidateQueries({ queryKey: ["proxmox-snapshots"] }),
+      1000,
+    );
+  },
+});
+const removeSnapshot = useMutation({
+  mutationFn: (name: string) => {
+    const g = snapshotGuest.value;
+    if (!g) throw new Error("No guest selected");
+    return deleteProxmoxSnapshot(g.cluster, g.node, g.type, g.vmid, name);
+  },
+  onSuccess: () =>
+    setTimeout(
+      () => client.invalidateQueries({ queryKey: ["proxmox-snapshots"] }),
+      1000,
+    ),
+});
 const lastJob = computed(() =>
   jobs.data.value?.find((job) => job.kind === "proxmox.sync"),
 );
@@ -157,7 +213,9 @@ const providerError = computed(() =>
       sync.error.value ??
       provision.error.value ??
       cloning.error.value ??
-      destructive.error.value,
+      destructive.error.value ??
+      createSnapshot.error.value ??
+      removeSnapshot.error.value,
     "A operação Proxmox falhou.",
   ),
 );
@@ -238,6 +296,30 @@ const removeGuest = (guest: ProxmoxGuest) => {
     ) === phrase
   )
     destructive.mutate(guest);
+};
+const openSnapshots = (guest: ProxmoxGuest) => {
+  snapshotGuest.value = guest;
+};
+const closeSnapshots = () => {
+  snapshotGuest.value = null;
+  snapshotForm.value = { name: "", description: "" };
+};
+const submitSnapshot = () => {
+  if (
+    window.confirm(
+      `Criar snapshot "${snapshotForm.value.name}" de ${snapshotGuest.value?.type.toUpperCase()} ${snapshotGuest.value?.vmid}?`,
+    )
+  )
+    createSnapshot.mutate();
+};
+const deleteSnapshot = (name: string) => {
+  const phrase = `EXCLUIR ${name}`;
+  if (
+    window.prompt(
+      `Excluir snapshot permanentemente. Digite exatamente: ${phrase}`,
+    ) === phrase
+  )
+    removeSnapshot.mutate(name);
 };
 </script>
 
@@ -472,7 +554,9 @@ const removeGuest = (guest: ProxmoxGuest) => {
                 </p>
               </div>
               <div class="flex flex-wrap justify-end gap-2">
-                <Button variant="outline" @click="cloneGuest(guest)"
+                <Button variant="outline" @click="openSnapshots(guest)"
+                  ><Camera class="h-3.5 w-3.5" />Snapshots</Button
+                ><Button variant="outline" @click="cloneGuest(guest)"
                   ><Copy class="h-3.5 w-3.5" />Clonar</Button
                 ><Button
                   v-if="guest.status !== 'running'"
@@ -742,5 +826,108 @@ const removeGuest = (guest: ProxmoxGuest) => {
         </p>
       </aside>
     </section>
+    <div
+      v-if="snapshotGuest"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+      @click.self="closeSnapshots"
+    >
+      <article
+        class="w-full max-w-2xl overflow-hidden rounded-xl border border-line bg-panel shadow-2xl"
+      >
+        <header
+          class="flex items-center justify-between border-b border-line bg-slate-950/40 p-5"
+        >
+          <div>
+            <h2 class="text-lg font-medium">
+              Snapshots · {{ snapshotGuest.type.toUpperCase() }}
+              {{ snapshotGuest.vmid }}
+            </h2>
+            <p class="mt-1 text-xs text-muted">
+              {{ snapshotGuest.name || "sem nome" }} ·
+              {{ snapshotGuest.cluster }} / {{ snapshotGuest.node }}
+            </p>
+          </div>
+          <Button variant="outline" @click="closeSnapshots">Fechar</Button>
+        </header>
+        <div
+          v-if="snapshots.isError.value"
+          class="m-5 rounded-lg border border-danger/20 bg-danger/5 p-4 text-sm text-danger"
+        >
+          Erro ao carregar snapshots:
+          {{ snapshots.error.value?.message }}
+        </div>
+        <div class="max-h-[60vh] divide-y divide-line/60 overflow-y-auto">
+          <div
+            v-for="snap in snapshots.data.value"
+            :key="snap.name"
+            class="flex items-center justify-between gap-4 p-5"
+          >
+            <div class="min-w-0 flex-1">
+              <p class="font-mono text-sm text-white">{{ snap.name }}</p>
+              <p class="mt-1 text-xs text-muted">
+                {{ snap.description || "sem descrição" }}
+              </p>
+              <p class="mt-1 font-mono text-[10px] text-muted">
+                {{
+                  snap.snaptime
+                    ? new Date(snap.snaptime * 1000).toLocaleString("pt-BR")
+                    : "—"
+                }}
+                <template v-if="snap.parent">· Parent: {{ snap.parent }}</template>
+                <template v-if="snap.vmstate">· COM estado de RAM</template>
+              </p>
+            </div>
+            <Button
+              variant="danger"
+              size="sm"
+              :disabled="removeSnapshot.isPending.value"
+              @click="deleteSnapshot(snap.name)"
+              ><Trash2 class="h-3.5 w-3.5" />Excluir</Button
+            >
+          </div>
+          <p
+            v-if="
+              !snapshots.isLoading.value &&
+              !snapshots.data.value?.length
+            "
+            class="p-10 text-center text-sm text-muted"
+          >
+            Nenhum snapshot encontrado.
+          </p>
+        </div>
+        <form
+          class="border-t border-line bg-slate-950/20 p-5"
+          @submit.prevent="submitSnapshot"
+        >
+          <h3 class="mb-4 text-sm font-medium">Criar novo snapshot</h3>
+          <div class="grid gap-3 md:grid-cols-2">
+            <label class="text-xs text-muted"
+              >Nome<input
+                v-model="snapshotForm.name"
+                type="text"
+                required
+                placeholder="backup-20260720"
+                class="mt-1 w-full rounded-lg border border-line bg-slate-950 p-2" /></label
+            ><label class="text-xs text-muted"
+              >Descrição<input
+                v-model="snapshotForm.description"
+                type="text"
+                placeholder="Antes da atualização"
+                class="mt-1 w-full rounded-lg border border-line bg-slate-950 p-2"
+            /></label>
+          </div>
+          <p class="mt-3 text-[10px] text-muted">
+            Snapshots são criados assincronamente pelo Proxmox. Atualize a lista
+            após alguns segundos.
+          </p>
+          <Button
+            type="submit"
+            :disabled="createSnapshot.isPending.value"
+            class="mt-4"
+            ><Camera class="h-4 w-4" />Criar Snapshot</Button
+          >
+        </form>
+      </article>
+    </div>
   </div>
 </template>

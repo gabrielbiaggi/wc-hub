@@ -17,7 +17,11 @@ services:
     tmpfs: !reset []
     security_opt: []
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   front:
     image: node:20-alpine3.20
