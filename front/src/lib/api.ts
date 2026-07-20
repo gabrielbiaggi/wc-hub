@@ -81,6 +81,16 @@ export interface DockerInventory{captured_at:string;health:DockerHealth;containe
 export const getDockerInventory=async():Promise<DockerInventory>=>(await api.get('/v1/docker/inventory')).data
 export const dockerContainerAction=async(id:string,action:'start'|'stop'|'restart')=>(await api.post(`/v1/docker/containers/${id}/${action}`)).data
 export const dockerContainerExec=async(id:string,command:string[])=>(await api.post(`/v1/docker/containers/${id}/exec`,{command})).data
+export interface KubernetesMetadata{name:string;namespace:string;uid:string;created_at:string;labels:Record<string,string>}
+export interface KubernetesNode{metadata:KubernetesMetadata;status:string;roles:string[];capacity:{cpu:string;memory:string;pods:string};allocatable:{cpu:string;memory:string;pods:string};kubelet_version:string;os_image:string}
+export interface KubernetesDeployment{metadata:KubernetesMetadata;replicas:number;ready_replicas:number;available_replicas:number;updated_replicas:number}
+export interface KubernetesPod{metadata:KubernetesMetadata;status:string;phase:string;node_name:string;pod_ip:string;containers:Array<{name:string;image:string;ready:boolean;restart_count:number;state:string}>;conditions:Array<{type:string;status:string;reason:string}>}
+export interface KubernetesEvent{metadata:KubernetesMetadata;involved_object:{kind:string;name:string;namespace:string};reason:string;message:string;type:string;count:number;first_timestamp:string;last_timestamp:string}
+export interface KubernetesOverview{captured_at:string;source:string;nodes:KubernetesNode[];deployments:KubernetesDeployment[];pods:KubernetesPod[];events:KubernetesEvent[];warnings:string[]}
+export const getKubernetesOverview=async():Promise<KubernetesOverview>=>(await api.get('/v1/kubernetes/overview')).data
+export const getKubernetesPodLogs=async(namespace:string,pod:string,container?:string,tail?:number)=>(await api.get(`/v1/kubernetes/namespaces/${encodeURIComponent(namespace)}/pods/${encodeURIComponent(pod)}/logs`,{params:{container,tail}})).data
+export const kubernetesPodExec=async(namespace:string,pod:string,container:string,command:string[])=>(await api.post(`/v1/kubernetes/namespaces/${encodeURIComponent(namespace)}/pods/${encodeURIComponent(pod)}/exec`,{container,command})).data
+export const kubernetesDeploymentAction=async(namespace:string,name:string,action:'scale'|'restart',replicas?:number)=>(await api.post(`/v1/kubernetes/namespaces/${encodeURIComponent(namespace)}/deployments/${encodeURIComponent(name)}/${action}`,{replicas})).data
 export const getJobs = async () => (await api.get<{items:Job[]}>('/v1/jobs')).data.items
 export const enqueueJob = async (kind:string) => (await api.post<Job>('/v1/jobs', {kind,payload:{},priority:100,max_attempts:5})).data
 export const getHostTelemetry = async () => (await api.get<{items:HostMetric[]}>('/v1/telemetry/hosts')).data.items
