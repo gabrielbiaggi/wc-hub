@@ -364,6 +364,8 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/firewall/rules", a.protect("proxmox.read", a.proxmoxGuestFirewallRules))
 	mux.HandleFunc("POST /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/firewall/rules", a.protect("proxmox.manage", a.proxmoxCreateFirewallRule))
 	mux.HandleFunc("DELETE /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/firewall/rules/{pos}", a.protect("proxmox.manage", a.proxmoxDeleteFirewallRule))
+	mux.HandleFunc("GET /api/v1/proxmox/nodes/{node}/backups", a.protect("proxmox.read", a.proxmoxNodeBackups))
+	mux.HandleFunc("POST /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/backup", a.protect("proxmox.manage", a.proxmoxCreateBackup))
 	mux.HandleFunc("GET /api/v1/jobs", a.protect("jobs.read", a.listJobs))
 	mux.HandleFunc("POST /api/v1/jobs", a.protect("jobs.manage", a.createJob))
 	mux.HandleFunc("POST /api/v1/agents/hosts/{host_id}/token", a.protect("agents.manage", a.provisionAgentToken))

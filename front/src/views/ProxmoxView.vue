@@ -7,6 +7,7 @@ import {
   Copy,
   Database,
   ArrowRightLeft,
+  HardDrive,
   MemoryStick,
   Network,
   Play,
@@ -26,6 +27,7 @@ import Button from "@/components/ui/Button.vue";
 import StatusBadge from "@/components/ui/StatusBadge.vue";
 import {
   cloneProxmoxGuest,
+  createProxmoxBackup,
   createProxmoxFirewallRule,
   createProxmoxLXC,
   createProxmoxQEMU,
@@ -36,6 +38,7 @@ import {
   getJobs,
   getProxmoxGuestFirewallRules,
   getProxmoxInventory,
+  getProxmoxNodeBackups,
   getProxmoxNodeNetwork,
   getProxmoxSnapshots,
   getProxmoxSummary,
@@ -44,6 +47,7 @@ import {
   runProxmoxPowerAction,
   syncProxmox,
   updateProxmoxConfig,
+  type ProxmoxBackupInfo,
   type ProxmoxFirewallRule,
   type ProxmoxGuest,
   type ProxmoxLXCInput,
@@ -312,6 +316,23 @@ const removeFirewallRule = useMutation({
   },
   onSuccess: () => setTimeout(() => client.invalidateQueries({ queryKey: ["proxmox-firewall"] }), 800),
 });
+const backupForm = ref({storage: "local", mode: "snapshot", compress: "zstd"});
+const createBackup = useMutation({
+  mutationFn: (guest: ProxmoxGuest) =>
+    createProxmoxBackup(
+      guest.cluster,
+      guest.node,
+      guest.type,
+      guest.vmid,
+      backupForm.value.storage,
+      backupForm.value.mode,
+      backupForm.value.compress,
+    ),
+  onSuccess: () => {
+    client.invalidateQueries({ queryKey: ["jobs"] });
+    setTimeout(() => client.invalidateQueries({ queryKey: ["proxmox-backups"] }), 3000);
+  },
+});
 const lastJob = computed(() =>
   jobs.data.value?.find((job) => job.kind === "proxmox.sync"),
 );
@@ -329,7 +350,8 @@ const providerError = computed(() =>
       migrateGuest.error.value ??
       updateConfig.error.value ??
       createFirewallRule.error.value ??
-      removeFirewallRule.error.value,
+      removeFirewallRule.error.value ??
+      createBackup.error.value,
     "A operação Proxmox falhou.",
   ),
 );
@@ -545,6 +567,34 @@ const deleteFirewallRule = (pos: number) => {
   const phrase = `EXCLUIR ${pos}`;
   if (window.prompt(`Excluir regra de firewall na posição ${pos}. Digite exatamente: ${phrase}`) === phrase) {
     removeFirewallRule.mutate(pos);
+  }
+};
+const backupGuest = (guest: ProxmoxGuest) => {
+  const availableStorages = (inventory.data.value?.storage ?? [])
+    .filter((s) => s.cluster === guest.cluster && s.active && s.type !== "lvm" && s.type !== "lvmthin")
+    .map((s) => s.storage);
+
+  if (availableStorages.length === 0) {
+    window.alert("Nenhum storage disponível para backup neste cluster.");
+    return;
+  }
+
+  const storage = window.prompt(
+    `Criar backup de ${guest.type.toUpperCase()} ${guest.vmid} (${guest.name})\n\nStorages disponíveis: ${availableStorages.join(", ")}\n\nDigite o nome do storage:`,
+    availableStorages[0],
+  );
+
+  if (!storage || !availableStorages.includes(storage)) {
+    if (storage) window.alert("Storage inválido ou indisponível.");
+    return;
+  }
+
+  backupForm.value.storage = storage;
+
+  if (window.confirm(
+    `Confirma backup de ${guest.type.toUpperCase()} ${guest.vmid} (${guest.name})?\n\nStorage: ${storage}\nModo: ${backupForm.value.mode}\nCompressão: ${backupForm.value.compress}\n\nO backup será executado em background.`,
+  )) {
+    createBackup.mutate(guest);
   }
 };
 </script>
@@ -785,6 +835,8 @@ const deleteFirewallRule = (pos: number) => {
                   ><Camera class="h-3.5 w-3.5" />Snapshots</Button
                 ><Button variant="outline" @click="openFirewall(guest)"
                   ><Shield class="h-3.5 w-3.5" />Firewall</Button
+                ><Button variant="outline" @click="backupGuest(guest)"
+                  ><HardDrive class="h-3.5 w-3.5" />Backup</Button
                 ><Button variant="outline" @click="migrate(guest)"
                   ><ArrowRightLeft class="h-3.5 w-3.5" />Migrar</Button
                 ><Button variant="outline" @click="cloneGuest(guest)"

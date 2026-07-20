@@ -478,6 +478,65 @@ func (c *Client) DeleteGuestFirewallRule(ctx context.Context, node, kind string,
 	}
 	return c.request(ctx, http.MethodDelete, fmt.Sprintf("/api2/json/nodes/%s/%s/%d/firewall/rules/%d", url.PathEscape(node), kind, vmid, pos), nil, nil)
 }
+
+type BackupInfo struct {
+	VolID   string  `json:"volid"`
+	Content string  `json:"content"`
+	Size    int64   `json:"size"`
+	Format  string  `json:"format"`
+	Ctime   int64   `json:"ctime"`
+	VMID    int     `json:"vmid"`
+	Notes   string  `json:"notes,omitempty"`
+}
+
+func (c *Client) GetNodeBackups(ctx context.Context, node, storage string) ([]BackupInfo, error) {
+	if !nodeNamePattern.MatchString(node) || storage == "" {
+		return nil, fmt.Errorf("invalid backup list parameters")
+	}
+	var result struct {
+		Data []BackupInfo `json:"data"`
+	}
+	if err := c.request(ctx, http.MethodGet, fmt.Sprintf("/api2/json/nodes/%s/storage/%s/content", url.PathEscape(node), url.PathEscape(storage)), nil, &result); err != nil {
+		return nil, err
+	}
+	// Filter only backups
+	backups := make([]BackupInfo, 0)
+	for _, item := range result.Data {
+		if item.Content == "backup" {
+			backups = append(backups, item)
+		}
+	}
+	return backups, nil
+}
+
+func (c *Client) CreateGuestBackup(ctx context.Context, node, kind string, vmid int, storage, mode, compress string) error {
+	if !nodeNamePattern.MatchString(node) || (kind != "qemu" && kind != "lxc") || vmid < 1 || storage == "" {
+		return fmt.Errorf("invalid backup parameters")
+	}
+	values := url.Values{
+		"vmid":    {fmt.Sprintf("%d", vmid)},
+		"storage": {storage},
+		"mode":    {mode},
+	}
+	if compress != "" {
+		values.Set("compress", compress)
+	}
+	return c.requestForm(ctx, http.MethodPost, fmt.Sprintf("/api2/json/nodes/%s/vzdump", url.PathEscape(node)), values, nil)
+}
+
+func (c *Client) RestoreGuestBackup(ctx context.Context, node, storage, archive string, vmid int, force bool) error {
+	if !nodeNamePattern.MatchString(node) || storage == "" || archive == "" || vmid < 1 {
+		return fmt.Errorf("invalid restore parameters")
+	}
+	values := url.Values{
+		"vmid":    {fmt.Sprintf("%d", vmid)},
+		"archive": {archive},
+	}
+	if force {
+		values.Set("force", "1")
+	}
+	return c.requestForm(ctx, http.MethodPost, fmt.Sprintf("/api2/json/nodes/%s/storage/%s/upload", url.PathEscape(node), url.PathEscape(storage)), values, nil)
+}
 func (c *Client) Version(ctx context.Context) (map[string]any, error) {
 	var result map[string]any
 	err := c.get(ctx, "/api2/json/version", &result)

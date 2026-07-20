@@ -210,3 +210,56 @@ func (a *App) proxmoxDeleteFirewallRule(w http.ResponseWriter, r *http.Request) 
 	}
 	writeJSON(w, 200, map[string]string{"status": "deleted"})
 }
+
+func (a *App) proxmoxNodeBackups(w http.ResponseWriter, r *http.Request) {
+	cluster := r.URL.Query().Get("cluster")
+	storage := r.URL.Query().Get("storage")
+	if cluster == "" || storage == "" {
+		writeError(w, 400, "missing_parameters", "Parâmetros cluster e storage obrigatórios.")
+		return
+	}
+	c := a.proxmoxClient(cluster)
+	if c == nil {
+		writeError(w, 404, "cluster_not_found", "Cluster não encontrado.")
+		return
+	}
+	node := r.PathValue("node")
+	if node == "" {
+		writeError(w, 400, "missing_node", "Node obrigatório.")
+		return
+	}
+	backups, e := c.GetNodeBackups(r.Context(), node, storage)
+	if e != nil {
+		writeError(w, 502, "proxmox_backup_list_failed", e.Error())
+		return
+	}
+	writeJSON(w, 200, backups)
+}
+
+func (a *App) proxmoxCreateBackup(w http.ResponseWriter, r *http.Request) {
+	c, n, k, id, ok := a.snapshotTarget(r)
+	if !ok {
+		writeError(w, 400, "invalid_backup_target", "Destino inválido.")
+		return
+	}
+	var in struct {
+		Storage  string `json:"storage"`
+		Mode     string `json:"mode"`
+		Compress string `json:"compress"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if in.Storage == "" {
+		writeError(w, 400, "missing_storage", "Storage obrigatório.")
+		return
+	}
+	if in.Mode == "" {
+		in.Mode = "snapshot"
+	}
+	if e := c.CreateGuestBackup(r.Context(), n, k, id, in.Storage, in.Mode, in.Compress); e != nil {
+		writeError(w, 502, "proxmox_backup_create_failed", e.Error())
+		return
+	}
+	writeJSON(w, 202, map[string]string{"status": "accepted"})
+}

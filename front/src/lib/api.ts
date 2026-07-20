@@ -69,6 +69,9 @@ export interface ProxmoxFirewallRule{pos:number;type:string;action:string;enable
 export const getProxmoxGuestFirewallRules=async(cluster:string,node:string,kind:'qemu'|'lxc',vmid:number):Promise<ProxmoxFirewallRule[]>=>(await api.get(`/v1/proxmox/nodes/${encodeURIComponent(node)}/${kind}/${vmid}/firewall/rules`,{params:{cluster}})).data
 export const createProxmoxFirewallRule=async(cluster:string,node:string,kind:'qemu'|'lxc',vmid:number,rule:Record<string,string>)=>(await api.post(`/v1/proxmox/nodes/${encodeURIComponent(node)}/${kind}/${vmid}/firewall/rules`,{rule},{params:{cluster}})).data
 export const deleteProxmoxFirewallRule=async(cluster:string,node:string,kind:'qemu'|'lxc',vmid:number,pos:number)=>(await api.delete(`/v1/proxmox/nodes/${encodeURIComponent(node)}/${kind}/${vmid}/firewall/rules/${pos}`,{params:{cluster}})).data
+export interface ProxmoxBackupInfo{volid:string;content:string;size:number;format:string;ctime:number;vmid:number;notes?:string}
+export const getProxmoxNodeBackups=async(cluster:string,node:string,storage:string):Promise<ProxmoxBackupInfo[]>=>(await api.get(`/v1/proxmox/nodes/${encodeURIComponent(node)}/backups`,{params:{cluster,storage}})).data
+export const createProxmoxBackup=async(cluster:string,node:string,kind:'qemu'|'lxc',vmid:number,storage:string,mode:string,compress:string)=>(await api.post(`/v1/proxmox/nodes/${encodeURIComponent(node)}/${kind}/${vmid}/backup`,{storage,mode,compress},{params:{cluster}})).data
 export const getJobs = async () => (await api.get<{items:Job[]}>('/v1/jobs')).data.items
 export const enqueueJob = async (kind:string) => (await api.post<Job>('/v1/jobs', {kind,payload:{},priority:100,max_attempts:5})).data
 export const getHostTelemetry = async () => (await api.get<{items:HostMetric[]}>('/v1/telemetry/hosts')).data.items
