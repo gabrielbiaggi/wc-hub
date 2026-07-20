@@ -45,6 +45,9 @@ type Config struct {
 	TerraformWorkerToken      string
 	TerraformWorkspaces       []string
 	MergerFSRoot              string
+	MergerFSSSHAddress        string
+	MergerFSSSHUser           string
+	MergerFSSSHRoot           string
 	OCIConfigPath             string
 	OCIConfigProfile          string
 	WorkerID                  string
@@ -103,6 +106,9 @@ func Load() Config {
 		TerraformWorkerToken:      env("TERRAFORM_WORKER_TOKEN", ""),
 		TerraformWorkspaces:       split(env("TERRAFORM_WORKSPACE_ALLOWLIST", "")),
 		MergerFSRoot:              env("MERGERFS_ROOT", ""),
+		MergerFSSSHAddress:        env("MERGERFS_SSH_ADDRESS", ""),
+		MergerFSSSHUser:           env("MERGERFS_SSH_USER", "root"),
+		MergerFSSSHRoot:           env("MERGERFS_SSH_ROOT", ""),
 		OCIConfigPath:             env("OCI_CONFIG_PATH", ""),
 		OCIConfigProfile:          env("OCI_CONFIG_PROFILE", "DEFAULT"),
 		WorkerID:                  env("WC_HUB_WORKER_ID", "wc-hub-1"),

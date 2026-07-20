@@ -354,10 +354,6 @@ func (c *Client) ServeVNC(w http.ResponseWriter, r *http.Request, node, kind str
 	if !nodeNamePattern.MatchString(node) || (kind != "qemu" && kind != "lxc") || vmid < 1 {
 		return false, fmt.Errorf("invalid Proxmox console target")
 	}
-	accessTicket, err := c.accessTicket(r.Context())
-	if err != nil {
-		return false, fmt.Errorf("create Proxmox access ticket: %w", err)
-	}
 	var ticket struct {
 		Port   json.RawMessage `json:"port"`
 		Ticket string          `json:"ticket"`
@@ -382,10 +378,12 @@ func (c *Client) ServeVNC(w http.ResponseWriter, r *http.Request, node, kind str
 	endpoint.RawQuery = query.Encode()
 
 	dialer := websocket.Dialer{HandshakeTimeout: 20 * time.Second, TLSClientConfig: c.tlsConfig.Clone(), Subprotocols: []string{"binary"}}
-	header := http.Header{
-		"Authorization": {"PVEAPIToken=" + c.tokenID + "=" + string(c.secret)},
-		"Cookie":        {"PVEAuthCookie=" + accessTicket},
-	}
+	// A Proxmox API token is valid for vncwebsocket as well as vncproxy. Do
+	// not request /access/ticket here: that endpoint creates a browser-login
+	// cookie and rejects token-only authentication on current PVE versions.
+	// Keeping the API token server-side gives the noVNC bridge native console
+	// access without ever sending a PVE session cookie to the browser.
+	header := http.Header{"Authorization": {"PVEAPIToken=" + c.tokenID + "=" + string(c.secret)}}
 	upstream, response, err := dialer.DialContext(r.Context(), endpoint.String(), header)
 	if err != nil {
 		if response != nil {

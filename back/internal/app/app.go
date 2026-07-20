@@ -227,8 +227,8 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, fun
 			application.terraformRunner = runner
 		}
 	}
-	if cfg.MergerFSRoot != "" {
-		client, clientErr := mergerfsadapter.New(cfg.MergerFSRoot)
+	if cfg.MergerFSRoot != "" || (cfg.MergerFSSSHAddress != "" && cfg.MergerFSSSHRoot != "") {
+		client, clientErr := mergerfsadapter.NewWithConfig(mergerfsadapter.Config{Root: cfg.MergerFSRoot, SSHAddress: cfg.MergerFSSSHAddress, SSHUser: cfg.MergerFSSSHUser, SSHRoot: cfg.MergerFSSSHRoot, SSHPrivateKeyPath: cfg.SSHPrivateKeyPath, SSHKnownHostsPath: cfg.SSHKnownHostsPath})
 		if clientErr != nil {
 			logger.Error("MergerFS adapter disabled", "error", clientErr)
 		} else {

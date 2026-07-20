@@ -69,9 +69,9 @@ onBeforeUnmount(disconnect);
             <ShieldCheck class="h-3.5 w-3.5" />ponte noVNC segura
           </span>
         </div>
-        <h1 class="mt-4 text-3xl font-semibold">Desktop remoto</h1>
+        <h1 class="mt-4 text-3xl font-semibold">Console gráfico nativo</h1>
         <p class="mt-2 text-sm text-muted">
-          Console gráfico via noVNC. Para VMs Proxmox, o Hub cria o ticket efêmero no servidor: token e ticket nunca chegam ao navegador.
+          Desktop gráfico via noVNC. Para VMs Proxmox, o Hub cria um ticket efêmero no servidor; esta tela é diferente do Terminal SSH e não expõe token nem ticket ao navegador.
         </p>
       </div>
       <Button variant="outline" @click="targets.refetch"><RefreshCw class="h-4 w-4" />Atualizar alvos</Button>

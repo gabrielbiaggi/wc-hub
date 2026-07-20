@@ -8,6 +8,7 @@ require github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
 
 require (
 	github.com/oracle/oci-go-sdk/v65 v65.121.0
+	github.com/pkg/sftp v1.13.9
 	golang.org/x/crypto v0.52.0
 	k8s.io/api v0.35.0
 	k8s.io/apimachinery v0.35.0
@@ -30,6 +31,7 @@ require (
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
+	github.com/kr/fs v0.1.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/moby/spdystream v0.5.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect

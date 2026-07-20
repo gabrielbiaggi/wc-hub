@@ -62,8 +62,8 @@ const groups = [
   {
     label: "Acesso",
     items: [
-      { to: "/remote-access", label: "Acesso remoto", icon: TerminalSquare },
-      { to: "/vnc", label: "Desktop remoto", icon: Monitor },
+      { to: "/remote-access", label: "Terminal SSH", icon: TerminalSquare },
+      { to: "/vnc", label: "Console gráfico (noVNC)", icon: Monitor },
       { to: "/storage", label: "Armazenamento", icon: HardDrive },
     ],
   },

@@ -1,9 +1,11 @@
 package storageapp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	mergerfsadapter "github.com/webcreations/wc-hub/back/internal/adapters/mergerfs"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -46,9 +48,15 @@ func (h *Handler) Stream(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	name := strings.NewReplacer(`"`, "", "\r", "", "\n", "").Replace(info.Name())
+	name := strings.NewReplacer(`"`, "", "\r", "", "\n", "").Replace(info.Name)
 	w.Header().Set("Content-Disposition", `inline; filename="`+name+`"`)
-	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
+	w.Header().Set("Content-Type", info.MIMEType)
+	if info.Size > 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(info.Size, 10))
+	}
+	if _, err := io.Copy(w, file); err != nil && !errors.Is(err, context.Canceled) {
+		return
+	}
 }
 func (h *Handler) CreateDirectory(w http.ResponseWriter, r *http.Request) {
 	if !h.ready(w) {
@@ -136,7 +144,7 @@ func (h *Handler) failure(w http.ResponseWriter, err error) {
 		writeError(w, 404, "storage_not_found", "Storage entry was not found.")
 		return
 	}
-	writeError(w, 409, "storage_unavailable", "Storage operation could not be completed.")
+	writeError(w, 409, "storage_unavailable", "Storage operation could not be completed: "+err.Error())
 }
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
