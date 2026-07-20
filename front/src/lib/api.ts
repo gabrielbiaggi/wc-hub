@@ -72,6 +72,15 @@ export const deleteProxmoxFirewallRule=async(cluster:string,node:string,kind:'qe
 export interface ProxmoxBackupInfo{volid:string;content:string;size:number;format:string;ctime:number;vmid:number;notes?:string}
 export const getProxmoxNodeBackups=async(cluster:string,node:string,storage:string):Promise<ProxmoxBackupInfo[]>=>(await api.get(`/v1/proxmox/nodes/${encodeURIComponent(node)}/backups`,{params:{cluster,storage}})).data
 export const createProxmoxBackup=async(cluster:string,node:string,kind:'qemu'|'lxc',vmid:number,storage:string,mode:string,compress:string)=>(await api.post(`/v1/proxmox/nodes/${encodeURIComponent(node)}/${kind}/${vmid}/backup`,{storage,mode,compress},{params:{cluster}})).data
+export interface DockerHealth{reachable:boolean;version?:string;api_version?:string;os_type?:string;arch?:string}
+export interface DockerPort{ip?:string;private_port:number;public_port?:number;type:string}
+export interface DockerContainer{id:string;names:string[];image:string;image_id:string;command:string;created:number;state:string;status:string;ports:DockerPort[];labels:Record<string,string>}
+export interface DockerImage{id:string;repo_tags:string[];repo_digests:string[];created:number;size:number;shared_size:number;containers:number}
+export interface DockerContainerStats{container_id:string;name:string;read_at:string;cpu_percent:number;memory_usage:number;memory_limit:number;memory_percent:number;network_rx:number;network_tx:number;block_read:number;block_write:number}
+export interface DockerInventory{captured_at:string;health:DockerHealth;containers:DockerContainer[];images:DockerImage[];stats:DockerContainerStats[];warnings:string[]}
+export const getDockerInventory=async():Promise<DockerInventory>=>(await api.get('/v1/docker/inventory')).data
+export const dockerContainerAction=async(id:string,action:'start'|'stop'|'restart')=>(await api.post(`/v1/docker/containers/${id}/${action}`)).data
+export const dockerContainerExec=async(id:string,command:string[])=>(await api.post(`/v1/docker/containers/${id}/exec`,{command})).data
 export const getJobs = async () => (await api.get<{items:Job[]}>('/v1/jobs')).data.items
 export const enqueueJob = async (kind:string) => (await api.post<Job>('/v1/jobs', {kind,payload:{},priority:100,max_attempts:5})).data
 export const getHostTelemetry = async () => (await api.get<{items:HostMetric[]}>('/v1/telemetry/hosts')).data.items

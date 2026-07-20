@@ -11,6 +11,7 @@ export default createRouter({
     { path: '/notifications', name: 'notifications', component: () => import('@/views/NotificationsView.vue') },
     { path: '/settings', name: 'settings', component: () => import('@/views/SettingsView.vue') },
     { path: '/proxmox', name: 'proxmox', component: () => import('@/views/ProxmoxView.vue') },
+    { path: '/docker', name: 'docker', component: () => import('@/views/DockerView.vue') },
     { path: '/telemetry', name: 'telemetry', component: () => import('@/views/TelemetryView.vue') },
     { path: '/jobs', name: 'jobs', component: () => import('@/views/JobsView.vue') },
     { path: '/operations', name: 'operations', component: () => import('@/views/OperationsView.vue') },
