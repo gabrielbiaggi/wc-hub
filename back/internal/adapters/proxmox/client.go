@@ -433,6 +433,51 @@ func (c *Client) GetNodeNetworkConfig(ctx context.Context, node string) ([]Netwo
 	}
 	return interfaces, nil
 }
+
+type FirewallRule struct {
+	Pos       int    `json:"pos"`
+	Type      string `json:"type"`
+	Action    string `json:"action"`
+	Enable    int    `json:"enable"`
+	Proto     string `json:"proto,omitempty"`
+	Source    string `json:"source,omitempty"`
+	Dest      string `json:"dest,omitempty"`
+	Dport     string `json:"dport,omitempty"`
+	Sport     string `json:"sport,omitempty"`
+	Comment   string `json:"comment,omitempty"`
+	IFace     string `json:"iface,omitempty"`
+}
+
+func (c *Client) GetGuestFirewallRules(ctx context.Context, node, kind string, vmid int) ([]FirewallRule, error) {
+	if !nodeNamePattern.MatchString(node) || (kind != "qemu" && kind != "lxc") || vmid < 1 {
+		return nil, fmt.Errorf("invalid firewall target")
+	}
+	var result struct {
+		Data []FirewallRule `json:"data"`
+	}
+	if err := c.request(ctx, http.MethodGet, fmt.Sprintf("/api2/json/nodes/%s/%s/%d/firewall/rules", url.PathEscape(node), kind, vmid), nil, &result); err != nil {
+		return nil, err
+	}
+	return result.Data, nil
+}
+
+func (c *Client) CreateGuestFirewallRule(ctx context.Context, node, kind string, vmid int, rule map[string]string) error {
+	if !nodeNamePattern.MatchString(node) || (kind != "qemu" && kind != "lxc") || vmid < 1 || len(rule) == 0 {
+		return fmt.Errorf("invalid firewall rule parameters")
+	}
+	values := url.Values{}
+	for key, value := range rule {
+		values.Set(key, value)
+	}
+	return c.requestForm(ctx, http.MethodPost, fmt.Sprintf("/api2/json/nodes/%s/%s/%d/firewall/rules", url.PathEscape(node), kind, vmid), values, nil)
+}
+
+func (c *Client) DeleteGuestFirewallRule(ctx context.Context, node, kind string, vmid, pos int) error {
+	if !nodeNamePattern.MatchString(node) || (kind != "qemu" && kind != "lxc") || vmid < 1 || pos < 0 {
+		return fmt.Errorf("invalid firewall rule delete parameters")
+	}
+	return c.request(ctx, http.MethodDelete, fmt.Sprintf("/api2/json/nodes/%s/%s/%d/firewall/rules/%d", url.PathEscape(node), kind, vmid, pos), nil, nil)
+}
 func (c *Client) Version(ctx context.Context) (map[string]any, error) {
 	var result map[string]any
 	err := c.get(ctx, "/api2/json/version", &result)

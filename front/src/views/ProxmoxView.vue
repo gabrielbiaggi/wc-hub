@@ -16,6 +16,7 @@ import {
   RotateCcw,
   Server,
   Settings,
+  Shield,
   ShieldCheck,
   Square,
   Trash2,
@@ -25,12 +26,15 @@ import Button from "@/components/ui/Button.vue";
 import StatusBadge from "@/components/ui/StatusBadge.vue";
 import {
   cloneProxmoxGuest,
+  createProxmoxFirewallRule,
   createProxmoxLXC,
   createProxmoxQEMU,
   createProxmoxSnapshot,
+  deleteProxmoxFirewallRule,
   deleteProxmoxGuest,
   deleteProxmoxSnapshot,
   getJobs,
+  getProxmoxGuestFirewallRules,
   getProxmoxInventory,
   getProxmoxNodeNetwork,
   getProxmoxSnapshots,
@@ -40,6 +44,7 @@ import {
   runProxmoxPowerAction,
   syncProxmox,
   updateProxmoxConfig,
+  type ProxmoxFirewallRule,
   type ProxmoxGuest,
   type ProxmoxLXCInput,
   type ProxmoxNetworkInterface,
@@ -51,6 +56,7 @@ import { apiErrorMessage } from "@/lib/api_error";
 type Tab = "qemu" | "lxc" | "storage" | "network" | "provision";
 const tab = ref<Tab>("qemu");
 const networkNode = ref<{cluster: string; node: string} | null>(null);
+const firewallGuest = ref<ProxmoxGuest | null>(null);
 const client = useQueryClient();
 const summary = useQuery({
   queryKey: ["proxmox-summary"],
@@ -267,6 +273,45 @@ const networkInterfaces = useQuery({
   enabled: computed(() => !!networkNode.value),
   refetchInterval: false,
 });
+const firewallRules = useQuery({
+  queryKey: computed(() => ["proxmox-firewall", firewallGuest.value?.cluster, firewallGuest.value?.node, firewallGuest.value?.type, firewallGuest.value?.vmid]),
+  queryFn: () => {
+    const g = firewallGuest.value;
+    if (!g) return Promise.resolve([]);
+    return getProxmoxGuestFirewallRules(g.cluster, g.node, g.type, g.vmid);
+  },
+  enabled: computed(() => !!firewallGuest.value),
+  refetchInterval: false,
+});
+const firewallRuleForm = ref({type: "in", action: "ACCEPT", proto: "tcp", dport: "", source: "", comment: ""});
+const createFirewallRule = useMutation({
+  mutationFn: () => {
+    const g = firewallGuest.value;
+    if (!g) throw new Error("No guest selected");
+    const rule: Record<string, string> = {
+      type: firewallRuleForm.value.type,
+      action: firewallRuleForm.value.action,
+      enable: "1",
+    };
+    if (firewallRuleForm.value.proto) rule.proto = firewallRuleForm.value.proto;
+    if (firewallRuleForm.value.dport) rule.dport = firewallRuleForm.value.dport;
+    if (firewallRuleForm.value.source) rule.source = firewallRuleForm.value.source;
+    if (firewallRuleForm.value.comment) rule.comment = firewallRuleForm.value.comment;
+    return createProxmoxFirewallRule(g.cluster, g.node, g.type, g.vmid, rule);
+  },
+  onSuccess: () => {
+    firewallRuleForm.value = {type: "in", action: "ACCEPT", proto: "tcp", dport: "", source: "", comment: ""};
+    setTimeout(() => client.invalidateQueries({ queryKey: ["proxmox-firewall"] }), 800);
+  },
+});
+const removeFirewallRule = useMutation({
+  mutationFn: (pos: number) => {
+    const g = firewallGuest.value;
+    if (!g) throw new Error("No guest selected");
+    return deleteProxmoxFirewallRule(g.cluster, g.node, g.type, g.vmid, pos);
+  },
+  onSuccess: () => setTimeout(() => client.invalidateQueries({ queryKey: ["proxmox-firewall"] }), 800),
+});
 const lastJob = computed(() =>
   jobs.data.value?.find((job) => job.kind === "proxmox.sync"),
 );
@@ -282,7 +327,9 @@ const providerError = computed(() =>
       removeSnapshot.error.value ??
       restoreSnapshot.error.value ??
       migrateGuest.error.value ??
-      updateConfig.error.value,
+      updateConfig.error.value ??
+      createFirewallRule.error.value ??
+      removeFirewallRule.error.value,
     "A operação Proxmox falhou.",
   ),
 );
@@ -481,6 +528,24 @@ const editResources = (guest: ProxmoxGuest) => {
 const viewNodeNetwork = (cluster: string, node: string) => {
   networkNode.value = { cluster, node };
   tab.value = "network";
+};
+const openFirewall = (guest: ProxmoxGuest) => {
+  firewallGuest.value = guest;
+};
+const closeFirewall = () => {
+  firewallGuest.value = null;
+  firewallRuleForm.value = {type: "in", action: "ACCEPT", proto: "tcp", dport: "", source: "", comment: ""};
+};
+const submitFirewallRule = () => {
+  if (window.confirm(
+    `Criar regra de firewall ${firewallRuleForm.value.action} para ${firewallGuest.value?.type.toUpperCase()} ${firewallGuest.value?.vmid}?`,
+  )) createFirewallRule.mutate();
+};
+const deleteFirewallRule = (pos: number) => {
+  const phrase = `EXCLUIR ${pos}`;
+  if (window.prompt(`Excluir regra de firewall na posição ${pos}. Digite exatamente: ${phrase}`) === phrase) {
+    removeFirewallRule.mutate(pos);
+  }
 };
 </script>
 
@@ -718,6 +783,8 @@ const viewNodeNetwork = (cluster: string, node: string) => {
               <div class="flex flex-wrap justify-end gap-2">
                 <Button variant="outline" @click="openSnapshots(guest)"
                   ><Camera class="h-3.5 w-3.5" />Snapshots</Button
+                ><Button variant="outline" @click="openFirewall(guest)"
+                  ><Shield class="h-3.5 w-3.5" />Firewall</Button
                 ><Button variant="outline" @click="migrate(guest)"
                   ><ArrowRightLeft class="h-3.5 w-3.5" />Migrar</Button
                 ><Button variant="outline" @click="cloneGuest(guest)"
@@ -1163,6 +1230,162 @@ const viewNodeNetwork = (cluster: string, node: string) => {
             :disabled="createSnapshot.isPending.value"
             class="mt-4"
             ><Camera class="h-4 w-4" />Criar Snapshot</Button
+          >
+        </form>
+      </article>
+    </div>
+    <div
+      v-if="firewallGuest"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+      @click.self="closeFirewall"
+    >
+      <article
+        class="w-full max-w-3xl overflow-hidden rounded-xl border border-line bg-panel shadow-2xl"
+      >
+        <header
+          class="flex items-center justify-between border-b border-line bg-slate-950/40 p-5"
+        >
+          <div>
+            <h2 class="text-lg font-medium">
+              Firewall · {{ firewallGuest.type.toUpperCase() }}
+              {{ firewallGuest.vmid }}
+            </h2>
+            <p class="mt-1 text-xs text-muted">
+              {{ firewallGuest.name || "sem nome" }} ·
+              {{ firewallGuest.cluster }} / {{ firewallGuest.node }}
+            </p>
+          </div>
+          <Button variant="outline" @click="closeFirewall">Fechar</Button>
+        </header>
+        <div
+          v-if="firewallRules.isError.value"
+          class="m-5 rounded-lg border border-danger/20 bg-danger/5 p-4 text-sm text-danger"
+        >
+          Erro ao carregar regras de firewall:
+          {{ firewallRules.error.value?.message }}
+        </div>
+        <div class="max-h-[50vh] divide-y divide-line/60 overflow-y-auto">
+          <div
+            v-for="rule in firewallRules.data.value"
+            :key="rule.pos"
+            class="flex items-center justify-between gap-4 p-4"
+          >
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2">
+                <span
+                  :class="[
+                    'rounded px-2 py-0.5 font-mono text-xs font-medium',
+                    rule.action === 'ACCEPT' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400',
+                  ]"
+                >
+                  {{ rule.action }}
+                </span>
+                <span class="font-mono text-xs text-muted">
+                  {{ rule.type.toUpperCase() }}
+                </span>
+                <span
+                  v-if="rule.enable === 0"
+                  class="rounded bg-warning/20 px-2 py-0.5 text-xs text-warning"
+                >
+                  DESABILITADA
+                </span>
+              </div>
+              <p class="mt-2 font-mono text-xs text-slate-300">
+                <template v-if="rule.proto">Proto: {{ rule.proto }}</template>
+                <template v-if="rule.dport"> · Porta: {{ rule.dport }}</template>
+                <template v-if="rule.source"> · Origem: {{ rule.source }}</template>
+                <template v-if="rule.dest"> · Destino: {{ rule.dest }}</template>
+                <template v-if="rule.sport"> · Sport: {{ rule.sport }}</template>
+                <template v-if="rule.iface"> · Interface: {{ rule.iface }}</template>
+              </p>
+              <p v-if="rule.comment" class="mt-1 text-xs text-muted">
+                {{ rule.comment }}
+              </p>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="font-mono text-xs text-muted">#{{ rule.pos }}</span>
+              <Button
+                variant="danger"
+                size="sm"
+                :disabled="removeFirewallRule.isPending.value"
+                @click="deleteFirewallRule(rule.pos)"
+                ><Trash2 class="h-3.5 w-3.5" />Excluir</Button
+              >
+            </div>
+          </div>
+          <p
+            v-if="
+              !firewallRules.isLoading.value &&
+              !firewallRules.data.value?.length
+            "
+            class="p-10 text-center text-sm text-muted"
+          >
+            Nenhuma regra de firewall configurada.
+          </p>
+        </div>
+        <form
+          class="border-t border-line bg-slate-950/20 p-5"
+          @submit.prevent="submitFirewallRule"
+        >
+          <h3 class="mb-4 text-sm font-medium">Criar nova regra</h3>
+          <div class="grid gap-3 md:grid-cols-3">
+            <label class="text-xs text-muted"
+              >Tipo<select
+                v-model="firewallRuleForm.type"
+                required
+                class="mt-1 w-full rounded-lg border border-line bg-slate-950 p-2"
+              >
+                <option value="in">IN (entrada)</option>
+                <option value="out">OUT (saída)</option>
+              </select></label
+            ><label class="text-xs text-muted"
+              >Ação<select
+                v-model="firewallRuleForm.action"
+                required
+                class="mt-1 w-full rounded-lg border border-line bg-slate-950 p-2"
+              >
+                <option value="ACCEPT">ACCEPT</option>
+                <option value="REJECT">REJECT</option>
+                <option value="DROP">DROP</option>
+              </select></label
+            ><label class="text-xs text-muted"
+              >Protocolo<select
+                v-model="firewallRuleForm.proto"
+                class="mt-1 w-full rounded-lg border border-line bg-slate-950 p-2"
+              >
+                <option value="">Todos</option>
+                <option value="tcp">TCP</option>
+                <option value="udp">UDP</option>
+                <option value="icmp">ICMP</option>
+              </select></label
+            ><label class="text-xs text-muted"
+              >Porta destino<input
+                v-model="firewallRuleForm.dport"
+                type="text"
+                placeholder="80, 443, 8080-8090"
+                class="mt-1 w-full rounded-lg border border-line bg-slate-950 p-2" /></label
+            ><label class="text-xs text-muted"
+              >Origem (CIDR)<input
+                v-model="firewallRuleForm.source"
+                type="text"
+                placeholder="0.0.0.0/0, 192.168.1.0/24"
+                class="mt-1 w-full rounded-lg border border-line bg-slate-950 p-2" /></label
+            ><label class="text-xs text-muted"
+              >Comentário<input
+                v-model="firewallRuleForm.comment"
+                type="text"
+                placeholder="Descrição da regra"
+                class="mt-1 w-full rounded-lg border border-line bg-slate-950 p-2"
+            /></label>
+          </div>
+          <p class="mt-3 text-[10px] text-muted">
+            Regras são aplicadas imediatamente. A ordem importa: regras são avaliadas sequencialmente.
+          </p>
+          <Button
+            type="submit"
+            :disabled="createFirewallRule.isPending.value"
+            class="mt-4"
+            ><Shield class="h-4 w-4" />Criar Regra</Button
           >
         </form>
       </article>

@@ -154,3 +154,59 @@ func (a *App) proxmoxNodeNetwork(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, interfaces)
 }
+
+func (a *App) proxmoxGuestFirewallRules(w http.ResponseWriter, r *http.Request) {
+	c, n, k, id, ok := a.snapshotTarget(r)
+	if !ok {
+		writeError(w, 400, "invalid_firewall_target", "Destino inválido.")
+		return
+	}
+	rules, e := c.GetGuestFirewallRules(r.Context(), n, k, id)
+	if e != nil {
+		writeError(w, 502, "proxmox_firewall_read_failed", e.Error())
+		return
+	}
+	writeJSON(w, 200, rules)
+}
+
+func (a *App) proxmoxCreateFirewallRule(w http.ResponseWriter, r *http.Request) {
+	c, n, k, id, ok := a.snapshotTarget(r)
+	if !ok {
+		writeError(w, 400, "invalid_firewall_target", "Destino inválido.")
+		return
+	}
+	var in struct {
+		Rule map[string]string `json:"rule"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if len(in.Rule) == 0 {
+		writeError(w, 400, "empty_rule", "Regra vazia.")
+		return
+	}
+	if e := c.CreateGuestFirewallRule(r.Context(), n, k, id, in.Rule); e != nil {
+		writeError(w, 502, "proxmox_firewall_create_failed", e.Error())
+		return
+	}
+	writeJSON(w, 201, map[string]string{"status": "created"})
+}
+
+func (a *App) proxmoxDeleteFirewallRule(w http.ResponseWriter, r *http.Request) {
+	c, n, k, id, ok := a.snapshotTarget(r)
+	if !ok {
+		writeError(w, 400, "invalid_firewall_target", "Destino inválido.")
+		return
+	}
+	posStr := r.PathValue("pos")
+	pos, err := strconv.Atoi(posStr)
+	if err != nil || pos < 0 {
+		writeError(w, 400, "invalid_position", "Posição inválida.")
+		return
+	}
+	if e := c.DeleteGuestFirewallRule(r.Context(), n, k, id, pos); e != nil {
+		writeError(w, 502, "proxmox_firewall_delete_failed", e.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "deleted"})
+}
