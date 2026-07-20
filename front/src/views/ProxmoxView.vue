@@ -8,6 +8,7 @@ import {
   Database,
   ArrowRightLeft,
   MemoryStick,
+  Network,
   Play,
   Plus,
   Power,
@@ -31,6 +32,7 @@ import {
   deleteProxmoxSnapshot,
   getJobs,
   getProxmoxInventory,
+  getProxmoxNodeNetwork,
   getProxmoxSnapshots,
   getProxmoxSummary,
   migrateProxmoxGuest,
@@ -40,13 +42,15 @@ import {
   updateProxmoxConfig,
   type ProxmoxGuest,
   type ProxmoxLXCInput,
+  type ProxmoxNetworkInterface,
   type ProxmoxQEMUInput,
   type ProxmoxSnapshot,
 } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api_error";
 
-type Tab = "qemu" | "lxc" | "storage" | "provision";
+type Tab = "qemu" | "lxc" | "storage" | "network" | "provision";
 const tab = ref<Tab>("qemu");
+const networkNode = ref<{cluster: string; node: string} | null>(null);
 const client = useQueryClient();
 const summary = useQuery({
   queryKey: ["proxmox-summary"],
@@ -252,6 +256,16 @@ const updateConfig = useMutation({
       () => client.invalidateQueries({ queryKey: ["proxmox-inventory"] }),
       1500,
     ),
+});
+const networkInterfaces = useQuery({
+  queryKey: computed(() => ["proxmox-network", networkNode.value?.cluster, networkNode.value?.node]),
+  queryFn: () => {
+    const n = networkNode.value;
+    if (!n) return Promise.resolve([]);
+    return getProxmoxNodeNetwork(n.cluster, n.node);
+  },
+  enabled: computed(() => !!networkNode.value),
+  refetchInterval: false,
 });
 const lastJob = computed(() =>
   jobs.data.value?.find((job) => job.kind === "proxmox.sync"),
@@ -464,6 +478,10 @@ const editResources = (guest: ProxmoxGuest) => {
     updateConfig.mutate({ guest, config });
   }
 };
+const viewNodeNetwork = (cluster: string, node: string) => {
+  networkNode.value = { cluster, node };
+  tab.value = "network";
+};
 </script>
 
 <template>
@@ -649,6 +667,7 @@ const editResources = (guest: ProxmoxGuest) => {
                   { id: 'qemu', label: 'QEMU' },
                   { id: 'lxc', label: 'LXC' },
                   { id: 'storage', label: 'Armazenamento' },
+                  { id: 'network', label: 'Rede' },
                   { id: 'provision', label: 'Criar' },
                 ]"
                 :key="item.id"
@@ -768,6 +787,70 @@ const editResources = (guest: ProxmoxGuest) => {
                     : 0
                 }}%)
               </p>
+            </div>
+          </div>
+          <div v-else-if="tab === 'network'" class="divide-y divide-line/60">
+            <div v-if="!networkNode" class="p-10 text-center">
+              <Network class="mx-auto h-12 w-12 text-muted" />
+              <p class="mt-4 text-sm text-muted">Selecione um nó para visualizar interfaces de rede</p>
+              <div class="mt-6 grid gap-2 md:grid-cols-2">
+                <Button
+                  v-for="node in inventory.data.value?.nodes ?? []"
+                  :key="`${node.cluster}-${node.node}`"
+                  variant="outline"
+                  @click="viewNodeNetwork(node.cluster, node.node)"
+                >
+                  <Server class="h-4 w-4" />{{ node.cluster }} / {{ node.node }}
+                </Button>
+              </div>
+            </div>
+            <div v-else>
+              <div class="bg-slate-950/20 p-4">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-sm font-medium">Interfaces de rede · {{ networkNode.node }}</p>
+                    <p class="mt-1 text-xs text-muted">{{ networkNode.cluster }}</p>
+                  </div>
+                  <Button variant="outline" size="sm" @click="networkNode = null">Voltar</Button>
+                </div>
+              </div>
+              <div
+                v-if="networkInterfaces.isError.value"
+                class="m-5 rounded-lg border border-danger/20 bg-danger/5 p-4 text-sm text-danger"
+              >
+                Erro ao carregar interfaces: {{ networkInterfaces.error.value?.message }}
+              </div>
+              <div v-else class="divide-y divide-line/60">
+                <div
+                  v-for="iface in networkInterfaces.data.value"
+                  :key="iface.id"
+                  class="grid gap-3 p-4 md:grid-cols-[1fr_120px_200px]"
+                >
+                  <div>
+                    <p class="font-mono text-sm text-white">{{ iface.name }}</p>
+                    <p class="mt-1 text-xs text-muted">
+                      Tipo: {{ iface.type }}
+                      <template v-if="iface.bridge">· Bridge: {{ iface.bridge }}</template>
+                    </p>
+                    <p v-if="iface.address" class="mt-1 font-mono text-[10px] text-muted">
+                      {{ iface.address }}{{ iface.netmask ? `/${iface.netmask}` : '' }}
+                      <template v-if="iface.gateway">· GW: {{ iface.gateway }}</template>
+                    </p>
+                  </div>
+                  <StatusBadge
+                    :status="iface.active ? 'healthy' : 'warning'"
+                    :label="iface.active ? 'ativa' : 'inativa'"
+                  />
+                  <div class="flex items-center gap-2 text-xs text-muted">
+                    <span :class="iface.autostart ? 'text-signal' : 'text-muted'">
+                      {{ iface.autostart ? '✓ Autostart' : '✗ Sem autostart' }}
+                    </span>
+                  </div>
+                </div>
+                <p v-if="!networkInterfaces.data.value?.length" class="p-10 text-center text-sm text-muted">
+                  Nenhuma interface encontrada.
+                </p>
+              </div>
             </div>
           </div>
           <div v-else class="grid gap-px bg-line/60 xl:grid-cols-2">

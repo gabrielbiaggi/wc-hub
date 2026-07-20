@@ -130,3 +130,27 @@ func (a *App) proxmoxUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]string{"status": "updated"})
 }
+
+func (a *App) proxmoxNodeNetwork(w http.ResponseWriter, r *http.Request) {
+	cluster := r.URL.Query().Get("cluster")
+	if cluster == "" {
+		writeError(w, 400, "missing_cluster", "Parâmetro cluster obrigatório.")
+		return
+	}
+	c := a.proxmoxClient(cluster)
+	if c == nil {
+		writeError(w, 404, "cluster_not_found", "Cluster não encontrado.")
+		return
+	}
+	node := r.PathValue("node")
+	if node == "" {
+		writeError(w, 400, "missing_node", "Node obrigatório.")
+		return
+	}
+	interfaces, e := c.GetNodeNetworkConfig(r.Context(), node)
+	if e != nil {
+		writeError(w, 502, "proxmox_network_failed", e.Error())
+		return
+	}
+	writeJSON(w, 200, interfaces)
+}

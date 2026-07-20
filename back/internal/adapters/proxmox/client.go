@@ -385,6 +385,54 @@ func (c *Client) UpdateGuestConfig(ctx context.Context, node, kind string, vmid 
 	}
 	return c.requestForm(ctx, http.MethodPut, fmt.Sprintf("/api2/json/nodes/%s/%s/%d/config", url.PathEscape(node), kind, vmid), values, nil)
 }
+
+type NetworkInterface struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Type    string `json:"type"`
+	Active  bool   `json:"active"`
+	Autostart bool `json:"autostart"`
+	Bridge  string `json:"bridge,omitempty"`
+	Address string `json:"address,omitempty"`
+	Netmask string `json:"netmask,omitempty"`
+	Gateway string `json:"gateway,omitempty"`
+}
+
+func (c *Client) GetNodeNetworkConfig(ctx context.Context, node string) ([]NetworkInterface, error) {
+	if !nodeNamePattern.MatchString(node) {
+		return nil, fmt.Errorf("invalid node name")
+	}
+	var result struct {
+		Data []struct {
+			Iface     string `json:"iface"`
+			Type      string `json:"type"`
+			Active    int    `json:"active"`
+			Autostart int    `json:"autostart"`
+			BridgePorts string `json:"bridge_ports,omitempty"`
+			Address   string `json:"address,omitempty"`
+			Netmask   string `json:"netmask,omitempty"`
+			Gateway   string `json:"gateway,omitempty"`
+		} `json:"data"`
+	}
+	if err := c.request(ctx, http.MethodGet, fmt.Sprintf("/api2/json/nodes/%s/network", url.PathEscape(node)), nil, &result); err != nil {
+		return nil, err
+	}
+	interfaces := make([]NetworkInterface, 0, len(result.Data))
+	for _, iface := range result.Data {
+		interfaces = append(interfaces, NetworkInterface{
+			ID:        iface.Iface,
+			Name:      iface.Iface,
+			Type:      iface.Type,
+			Active:    iface.Active == 1,
+			Autostart: iface.Autostart == 1,
+			Bridge:    iface.BridgePorts,
+			Address:   iface.Address,
+			Netmask:   iface.Netmask,
+			Gateway:   iface.Gateway,
+		})
+	}
+	return interfaces, nil
+}
 func (c *Client) Version(ctx context.Context) (map[string]any, error) {
 	var result map[string]any
 	err := c.get(ctx, "/api2/json/version", &result)
