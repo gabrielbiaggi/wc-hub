@@ -13,6 +13,7 @@ export default createRouter({
     { path: '/proxmox', name: 'proxmox', component: () => import('@/views/ProxmoxView.vue') },
     { path: '/docker', name: 'docker', component: () => import('@/views/DockerView.vue') },
     { path: '/kubernetes', name: 'kubernetes', component: () => import('@/views/KubernetesView.vue') },
+    { path: '/github', name: 'github', component: () => import('@/views/GitHubView.vue') },
     { path: '/telemetry', name: 'telemetry', component: () => import('@/views/TelemetryView.vue') },
     { path: '/jobs', name: 'jobs', component: () => import('@/views/JobsView.vue') },
     { path: '/operations', name: 'operations', component: () => import('@/views/OperationsView.vue') },

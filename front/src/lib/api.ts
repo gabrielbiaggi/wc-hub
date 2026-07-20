@@ -91,6 +91,17 @@ export const getKubernetesOverview=async():Promise<KubernetesOverview>=>(await a
 export const getKubernetesPodLogs=async(namespace:string,pod:string,container?:string,tail?:number)=>(await api.get(`/v1/kubernetes/namespaces/${encodeURIComponent(namespace)}/pods/${encodeURIComponent(pod)}/logs`,{params:{container,tail}})).data
 export const kubernetesPodExec=async(namespace:string,pod:string,container:string,command:string[])=>(await api.post(`/v1/kubernetes/namespaces/${encodeURIComponent(namespace)}/pods/${encodeURIComponent(pod)}/exec`,{container,command})).data
 export const kubernetesDeploymentAction=async(namespace:string,name:string,action:'scale'|'restart',replicas?:number)=>(await api.post(`/v1/kubernetes/namespaces/${encodeURIComponent(namespace)}/deployments/${encodeURIComponent(name)}/${action}`,{replicas})).data
+export interface GitHubCommit{sha:string;author:string;author_email:string;message:string;timestamp:string;url:string}
+export interface GitHubWorkflow{id:number;name:string;path:string;state:string;created_at:string;updated_at:string}
+export interface GitHubWorkflowRun{id:number;name:string;display_title:string;status:string;conclusion:string;workflow_id:number;event:string;head_branch:string;head_sha:string;run_number:number;run_attempt:number;created_at:string;updated_at:string;url:string}
+export interface GitHubRelease{id:number;tag_name:string;name:string;draft:boolean;prerelease:boolean;created_at:string;published_at:string;body:string;url:string}
+export interface GitHubProject{name:string;full_name:string;description:string;private:boolean;default_branch:string;language:string;stargazers_count:number;open_issues_count:number;commits:GitHubCommit[];workflows:GitHubWorkflow[];runs:GitHubWorkflowRun[];releases:GitHubRelease[];warnings:string[]}
+export interface GitHubOverview{captured_at:string;projects:GitHubProject[];warnings:string[]}
+export const getGitHubOverview=async():Promise<GitHubOverview>=>(await api.get('/v1/github/overview')).data
+export const getGitHubCommits=async(repo:string):Promise<GitHubCommit[]>=>(await api.get('/v1/github/commits',{params:{repo}})).data
+export const getGitHubWorkflows=async(repo:string):Promise<GitHubWorkflow[]>=>(await api.get('/v1/github/workflows',{params:{repo}})).data
+export const githubWorkflowAction=async(repo:string,workflowId:number,action:'dispatch',ref:string,inputs?:Record<string,string>)=>(await api.post('/v1/github/workflow/action',{repo,workflow_id:workflowId,action,ref,inputs})).data
+export const githubRunAction=async(repo:string,runId:number,action:'cancel'|'rerun')=>(await api.post('/v1/github/run/action',{repo,run_id:runId,action})).data
 export const getJobs = async () => (await api.get<{items:Job[]}>('/v1/jobs')).data.items
 export const enqueueJob = async (kind:string) => (await api.post<Job>('/v1/jobs', {kind,payload:{},priority:100,max_attempts:5})).data
 export const getHostTelemetry = async () => (await api.get<{items:HostMetric[]}>('/v1/telemetry/hosts')).data.items
