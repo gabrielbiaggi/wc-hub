@@ -65,6 +65,9 @@ export const getCloudflareTunnels = async (accountID: string) =>
 export const createCloudflareTunnel=async(accountID:string,name:string)=>(await api.post<CloudflareTunnel>(`/v1/cloudflare/accounts/${encodeURIComponent(accountID)}/tunnels`,{name})).data
 export const updateCloudflareTunnel=async(accountID:string,tunnelID:string,name:string)=>(await api.patch<CloudflareTunnel>(`/v1/cloudflare/accounts/${encodeURIComponent(accountID)}/tunnels/${encodeURIComponent(tunnelID)}`,{name})).data
 export const deleteCloudflareTunnel=async(accountID:string,tunnelID:string)=>api.delete(`/v1/cloudflare/accounts/${encodeURIComponent(accountID)}/tunnels/${encodeURIComponent(tunnelID)}`)
+export interface CloudflarePrivateRoute{id:string;network:string;tunnel_id:string;comment?:string}
+export const getCloudflarePrivateRoutes=async(accountID:string)=>(await api.get<{items:CloudflarePrivateRoute[]}>(`/v1/cloudflare/accounts/${encodeURIComponent(accountID)}/private-routes`)).data.items
+export const createCloudflarePrivateRoute=async(accountID:string,input:{network:string;tunnel_id:string;comment?:string})=>(await api.post<CloudflarePrivateRoute>(`/v1/cloudflare/accounts/${encodeURIComponent(accountID)}/private-routes`,input)).data
 
 export const getCloudflareDNSRecords = async (zoneID: string) =>
   (await api.get<{ items: CloudflareDNSRecord[] }>(`/v1/cloudflare/zones/${encodeURIComponent(zoneID)}/dns-records`)).data.items

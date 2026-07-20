@@ -26,7 +26,9 @@ import {
   updateCloudflareZoneSetting,
   createCloudflareDNSRecord,
   createCloudflareTunnel,
+  createCloudflarePrivateRoute,
   deleteCloudflareTunnel,
+  getCloudflarePrivateRoutes,
   deleteCloudflareDNSRecord,
   updateCloudflareDNSRecord,
   updateCloudflareTunnel,
@@ -71,6 +73,8 @@ const selectedAccount = ref("");
 const tunnelName = ref("");
 const accountIDs = computed(() => overview.value?.targets.filter((target) => target.kind === "account").map((target) => target.id) ?? []);
 const selectedAccountID = computed(() => selectedAccount.value || accountIDs.value[0] || "");
+const privateNetwork=ref(''); const privateTunnel=ref('');
+const privateRoutes=useQuery({queryKey:['cloudflare','private-routes',selectedAccountID],queryFn:()=>getCloudflarePrivateRoutes(selectedAccountID.value),enabled:computed(()=>!!selectedAccountID.value)});
 const selectedZoneID = computed(
   () => selectedZone.value || zoneIDs.value[0] || "",
 );
@@ -143,6 +147,8 @@ const tunnelMutation = useMutation({
   },
   onSuccess:()=>{tunnelName.value='';queryClient.invalidateQueries({queryKey:['cloudflare','overview']})},
 });
+const privateRouteMutation=useMutation({mutationFn:()=>createCloudflarePrivateRoute(selectedAccountID.value,{network:privateNetwork.value,tunnel_id:privateTunnel.value}),onSuccess:()=>{privateNetwork.value='';privateRoutes.refetch()}})
+const createPrivateRoute=()=>{if(selectedAccountID.value&&privateNetwork.value&&privateTunnel.value)privateRouteMutation.mutate()}
 const createTunnel=()=>{if(selectedAccountID.value&&tunnelName.value)tunnelMutation.mutate({operation:'create',name:tunnelName.value})}
 const renameTunnel=(id:string,name:string)=>{const updated=window.prompt('Novo nome do tunnel',name);if(updated&&updated!==name)tunnelMutation.mutate({operation:'update',id,name:updated})}
 const removeTunnel=(id:string,name:string)=>{if(window.prompt(`Excluir o tunnel ${name}. Digite EXCLUIR:`)==='EXCLUIR')tunnelMutation.mutate({operation:'delete',id})}
@@ -413,6 +419,7 @@ const shortID = (value: string) =>
               <input v-model.trim="tunnelName" required maxlength="100" placeholder="Nome do novo Tunnel" class="rounded-lg border border-line bg-slate-950 px-3 py-2 text-xs text-slate-200"/>
               <Button type="submit" :disabled="!selectedAccountID||tunnelMutation.isPending.value"><Plus class="h-4 w-4"/>Criar Tunnel</Button>
             </form>
+            <form class="grid gap-3 border-b border-line bg-slate-950/15 p-4 md:grid-cols-[180px_1fr_1fr_140px]" @submit.prevent="createPrivateRoute"><p class="self-center font-mono text-[10px] uppercase text-muted">Rota privada</p><input v-model.trim="privateNetwork" required placeholder="10.10.50.0/24" class="rounded-lg border border-line bg-slate-950 px-3 py-2 text-xs text-slate-200"/><select v-model="privateTunnel" required class="rounded-lg border border-line bg-slate-950 px-3 text-xs text-slate-200"><option value="">Selecione o Tunnel</option><option v-for="tunnel in overview.tunnels" :key="tunnel.id" :value="tunnel.id">{{tunnel.name}}</option></select><Button type="submit" variant="outline" :disabled="privateRouteMutation.isPending.value"><Route class="h-4 w-4"/>Adicionar rota</Button><p v-if="privateRoutes.data.value?.length" class="md:col-span-4 font-mono text-[10px] text-muted">{{privateRoutes.data.value.map(route=>route.network).join(' · ')}}</p></form>
             <article
               v-for="tunnel in overview.tunnels"
               :key="tunnel.id"
