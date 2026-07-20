@@ -1,0 +1,12 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "go build -o ./tmp/wc-hub ./cmd/api"
+  bin = "./tmp/wc-hub"
+  include_ext = ["go", "sql"]
+  exclude_dir = ["tmp", "vendor"]
+  delay = 400
+
+[log]
+  time = true

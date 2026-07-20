@@ -1,0 +1,43 @@
+# Desenvolvimento local: Vite e Air usam o código do workspace diretamente.
+# Inicie com: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+services:
+  back:
+    build:
+      context: ./back
+      dockerfile: Dockerfile.dev
+      target: dev
+    command: ["/go/bin/air", "-c", ".air.toml"]
+    volumes:
+      - ./back:/src
+      - go_module_cache:/go/pkg/mod
+      - go_build_cache:/root/.cache/go-build
+      - ./ops/secrets:/run/secrets:ro
+      - ${MERGERFS_HOST_ROOT:-./ops/storage}:/mnt/drive:rw
+    read_only: false
+    tmpfs: []
+    security_opt: []
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
+
+  front:
+    image: node:20-alpine3.20
+    build: !reset null
+    entrypoint: []
+    working_dir: /app
+    command: ["sh", "-c", "test -d node_modules/vite || npm ci && npm run dev"]
+    environment:
+      VITE_API_PROXY_TARGET: http://back:8080
+      CHOKIDAR_USEPOLLING: "true"
+    volumes:
+      - ./front:/app
+      - front_node_modules:/app/node_modules
+    ports: !reset
+      - "${WC_HUB_BIND_IP:-0.0.0.0}:${WC_HUB_PORT:-8088}:5173"
+    read_only: false
+    tmpfs: []
+    security_opt: []
+
+volumes:
+  go_module_cache:
+  go_build_cache:
+  front_node_modules:

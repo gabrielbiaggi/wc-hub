@@ -34,6 +34,12 @@ O executor local aceita somente binários presentes em `WC_HUB_LOCAL_COMMAND_ALL
 ```bash
 cp .env.example .env
 docker compose up --build
+
+Para desenvolvimento com atualização automática do Vue e do Go, use:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+```
 ```
 
 Acesse `http://localhost:8088`. A API fica disponível pelo mesmo origin em `/api/v1`; o backend expõe healthcheck em `/healthz`.
