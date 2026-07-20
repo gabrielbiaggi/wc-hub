@@ -182,6 +182,21 @@ type Tunnel struct {
 type TunnelInput struct {
 	Name string `json:"name"`
 }
+type TunnelIngressRule struct {
+	Hostname      string         `json:"hostname,omitempty"`
+	Service       string         `json:"service"`
+	Path          string         `json:"path,omitempty"`
+	OriginRequest map[string]any `json:"originRequest,omitempty"`
+}
+type TunnelConfiguration struct {
+	AccountID string `json:"account_id"`
+	TunnelID  string `json:"tunnel_id"`
+	Version   int    `json:"version"`
+	Config    struct {
+		Ingress       []TunnelIngressRule `json:"ingress"`
+		OriginRequest map[string]any      `json:"originRequest,omitempty"`
+	} `json:"config"`
+}
 
 type DNSRecord struct {
 	ID         string    `json:"id"`
@@ -395,6 +410,38 @@ func (c *Client) writeTunnel(ctx context.Context, method, accountID, tunnelID st
 		return Tunnel{}, err
 	}
 	return Tunnel{ID: wire.ID, AccountID: accountID, Name: wire.Name, Status: normalizeTunnelStatus(wire.Status), CreatedAt: wire.CreatedAt}, nil
+}
+func (c *Client) TunnelConfiguration(ctx context.Context, accountID, tunnelID string) (TunnelConfiguration, error) {
+	if !c.AccountAllowed(accountID) || !externalIDPattern.MatchString(tunnelID) {
+		return TunnelConfiguration{}, ErrAccountNotAllowed
+	}
+	var result TunnelConfiguration
+	_, err := c.do(ctx, http.MethodGet, "/accounts/"+url.PathEscape(accountID)+"/cfd_tunnel/"+url.PathEscape(tunnelID)+"/configurations", nil, nil, &result)
+	return result, err
+}
+func (c *Client) UpdateTunnelConfiguration(ctx context.Context, accountID, tunnelID string, rules []TunnelIngressRule) (TunnelConfiguration, error) {
+	if !c.AccountAllowed(accountID) || !externalIDPattern.MatchString(tunnelID) {
+		return TunnelConfiguration{}, ErrAccountNotAllowed
+	}
+	if len(rules) == 0 || len(rules) > 100 {
+		return TunnelConfiguration{}, errors.New("tunnel ingress rules are invalid")
+	}
+	last := rules[len(rules)-1]
+	if last.Hostname != "" || !strings.HasPrefix(last.Service, "http_status:") {
+		return TunnelConfiguration{}, errors.New("tunnel ingress requires a final http_status catch-all rule")
+	}
+	for _, rule := range rules {
+		if strings.TrimSpace(rule.Service) == "" || len(rule.Service) > 2048 {
+			return TunnelConfiguration{}, errors.New("tunnel ingress service is invalid")
+		}
+	}
+	body, err := json.Marshal(map[string]any{"config": map[string]any{"ingress": rules}})
+	if err != nil {
+		return TunnelConfiguration{}, err
+	}
+	var result TunnelConfiguration
+	_, err = c.do(ctx, http.MethodPut, "/accounts/"+url.PathEscape(accountID)+"/cfd_tunnel/"+url.PathEscape(tunnelID)+"/configurations", nil, body, &result)
+	return result, err
 }
 
 func (c *Client) ListDNSRecords(ctx context.Context, zoneID string) ([]DNSRecord, error) {

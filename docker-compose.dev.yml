@@ -14,7 +14,7 @@ services:
       - ./ops/secrets:/run/secrets:ro
       - ${MERGERFS_HOST_ROOT:-./ops/storage}:/mnt/drive:rw
     read_only: false
-    tmpfs: []
+    tmpfs: !reset []
     security_opt: []
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
@@ -34,7 +34,7 @@ services:
     ports: !reset
       - "${WC_HUB_BIND_IP:-0.0.0.0}:${WC_HUB_PORT:-8088}:5173"
     read_only: false
-    tmpfs: []
+    tmpfs: !reset []
     security_opt: []
 
 volumes:

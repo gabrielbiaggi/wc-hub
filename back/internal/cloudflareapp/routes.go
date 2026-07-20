@@ -27,6 +27,8 @@ func MountRoutes(mux *http.ServeMux, authMiddleware AuthMiddleware, handler *Han
 	mux.HandleFunc("POST /api/v1/cloudflare/accounts/{account_id}/tunnels", authMiddleware("cloudflare.manage", handler.CreateTunnel))
 	mux.HandleFunc("PATCH /api/v1/cloudflare/accounts/{account_id}/tunnels/{tunnel_id}", authMiddleware("cloudflare.manage", handler.UpdateTunnel))
 	mux.HandleFunc("DELETE /api/v1/cloudflare/accounts/{account_id}/tunnels/{tunnel_id}", authMiddleware("cloudflare.manage", handler.DeleteTunnel))
+	mux.HandleFunc("GET /api/v1/cloudflare/accounts/{account_id}/tunnels/{tunnel_id}/configuration", authMiddleware(permission, handler.TunnelConfiguration))
+	mux.HandleFunc("PUT /api/v1/cloudflare/accounts/{account_id}/tunnels/{tunnel_id}/configuration", authMiddleware("cloudflare.manage", handler.UpdateTunnelConfiguration))
 	mux.HandleFunc("GET /api/v1/cloudflare/zones/{zone_id}/dns-records", authMiddleware(permission, handler.DNSRecords))
 	mux.HandleFunc("POST /api/v1/cloudflare/zones/{zone_id}/dns-records", authMiddleware("cloudflare.manage", handler.CreateDNSRecord))
 	mux.HandleFunc("PUT /api/v1/cloudflare/zones/{zone_id}/dns-records/{record_id}", authMiddleware("cloudflare.manage", handler.UpdateDNSRecord))
