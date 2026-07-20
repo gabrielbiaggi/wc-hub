@@ -358,6 +358,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/snapshots/{name}/rollback", a.protect("proxmox.manage", a.proxmoxRollbackSnapshot))
 	mux.HandleFunc("DELETE /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/snapshots/{name}", a.protect("proxmox.manage", a.proxmoxDeleteSnapshot))
 	mux.HandleFunc("POST /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/migrate", a.protect("proxmox.manage", a.proxmoxMigrateGuest))
+	mux.HandleFunc("PUT /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/resize", a.protect("proxmox.manage", a.proxmoxResizeDisk))
 	mux.HandleFunc("GET /api/v1/jobs", a.protect("jobs.read", a.listJobs))
 	mux.HandleFunc("POST /api/v1/jobs", a.protect("jobs.manage", a.createJob))
 	mux.HandleFunc("POST /api/v1/agents/hosts/{host_id}/token", a.protect("agents.manage", a.provisionAgentToken))

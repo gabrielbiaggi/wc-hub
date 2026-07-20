@@ -89,3 +89,22 @@ func (a *App) proxmoxMigrateGuest(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 202, map[string]string{"status": "accepted"})
 }
+func (a *App) proxmoxResizeDisk(w http.ResponseWriter, r *http.Request) {
+	c, n, k, id, ok := a.snapshotTarget(r)
+	if !ok {
+		writeError(w, 400, "invalid_resize_target", "Destino inválido.")
+		return
+	}
+	var in struct {
+		Disk string `json:"disk"`
+		Size string `json:"size"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if e := c.ResizeDisk(r.Context(), n, k, id, in.Disk, in.Size); e != nil {
+		writeError(w, 502, "proxmox_resize_failed", e.Error())
+		return
+	}
+	writeJSON(w, 202, map[string]string{"status": "accepted"})
+}
