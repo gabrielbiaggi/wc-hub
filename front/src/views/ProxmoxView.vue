@@ -14,6 +14,7 @@ import {
   RefreshCw,
   RotateCcw,
   Server,
+  Settings,
   ShieldCheck,
   Square,
   Trash2,
@@ -36,6 +37,7 @@ import {
   rollbackProxmoxSnapshot,
   runProxmoxPowerAction,
   syncProxmox,
+  updateProxmoxConfig,
   type ProxmoxGuest,
   type ProxmoxLXCInput,
   type ProxmoxQEMUInput,
@@ -236,6 +238,21 @@ const migrateGuest = useMutation({
       2000,
     ),
 });
+const updateConfig = useMutation({
+  mutationFn: (input: { guest: ProxmoxGuest; config: Record<string, string> }) =>
+    updateProxmoxConfig(
+      input.guest.cluster,
+      input.guest.node,
+      input.guest.type,
+      input.guest.vmid,
+      input.config,
+    ),
+  onSuccess: () =>
+    setTimeout(
+      () => client.invalidateQueries({ queryKey: ["proxmox-inventory"] }),
+      1500,
+    ),
+});
 const lastJob = computed(() =>
   jobs.data.value?.find((job) => job.kind === "proxmox.sync"),
 );
@@ -250,7 +267,8 @@ const providerError = computed(() =>
       createSnapshot.error.value ??
       removeSnapshot.error.value ??
       restoreSnapshot.error.value ??
-      migrateGuest.error.value,
+      migrateGuest.error.value ??
+      updateConfig.error.value,
     "A operação Proxmox falhou.",
   ),
 );
@@ -394,6 +412,56 @@ const migrate = (guest: ProxmoxGuest) => {
     `Confirma migração ${online ? "ONLINE" : "OFFLINE"} de ${guest.type.toUpperCase()} ${guest.vmid} (${guest.name})\nDe: ${guest.node}\nPara: ${targetNode}?`,
   )) {
     migrateGuest.mutate({ guest, targetNode, online });
+  }
+};
+const editResources = (guest: ProxmoxGuest) => {
+  const currentCores = guest.cpus;
+  const currentMem = Math.floor(guest.maxmem / (1024 * 1024));
+
+  const coresInput = window.prompt(
+    `Editar recursos de ${guest.type.toUpperCase()} ${guest.vmid} (${guest.name})\n\nCPU atual: ${currentCores} cores\nNovo valor (ou deixe em branco para manter):`,
+    currentCores.toString(),
+  );
+
+  if (coresInput === null) return;
+
+  const memInput = window.prompt(
+    `RAM atual: ${currentMem} MB\nNovo valor em MB (ou deixe em branco para manter):`,
+    currentMem.toString(),
+  );
+
+  if (memInput === null) return;
+
+  const tagsInput = window.prompt(
+    `Tags (separadas por ;):\nExemplo: production;web;backup`,
+    "",
+  );
+
+  if (tagsInput === null) return;
+
+  const config: Record<string, string> = {};
+
+  if (coresInput && coresInput !== currentCores.toString()) {
+    config.cores = coresInput;
+  }
+
+  if (memInput && memInput !== currentMem.toString()) {
+    config.memory = memInput;
+  }
+
+  if (tagsInput.trim()) {
+    config.tags = tagsInput.trim();
+  }
+
+  if (Object.keys(config).length === 0) {
+    window.alert("Nenhuma alteração foi feita.");
+    return;
+  }
+
+  if (window.confirm(
+    `Confirma alteração de recursos?\n\n${Object.entries(config).map(([k, v]) => `${k}: ${v}`).join("\n")}`,
+  )) {
+    updateConfig.mutate({ guest, config });
   }
 };
 </script>
@@ -635,6 +703,8 @@ const migrate = (guest: ProxmoxGuest) => {
                   ><ArrowRightLeft class="h-3.5 w-3.5" />Migrar</Button
                 ><Button variant="outline" @click="cloneGuest(guest)"
                   ><Copy class="h-3.5 w-3.5" />Clonar</Button
+                ><Button variant="outline" @click="editResources(guest)"
+                  ><Settings class="h-3.5 w-3.5" />Config</Button
                 ><Button
                   v-if="guest.status !== 'running'"
                   variant="outline"

@@ -61,6 +61,8 @@ export const createProxmoxSnapshot=async(cluster:string,node:string,kind:'qemu'|
 export const rollbackProxmoxSnapshot=async(cluster:string,node:string,kind:'qemu'|'lxc',vmid:number,name:string)=>(await api.post(`/v1/proxmox/nodes/${encodeURIComponent(node)}/${kind}/${vmid}/snapshots/${encodeURIComponent(name)}/rollback`,{},{params:{cluster}})).data
 export const deleteProxmoxSnapshot=async(cluster:string,node:string,kind:'qemu'|'lxc',vmid:number,name:string)=>api.delete(`/v1/proxmox/nodes/${encodeURIComponent(node)}/${kind}/${vmid}/snapshots/${encodeURIComponent(name)}`,{params:{cluster}})
 export const migrateProxmoxGuest=async(cluster:string,node:string,kind:'qemu'|'lxc',vmid:number,targetNode:string,online:boolean)=>(await api.post(`/v1/proxmox/nodes/${encodeURIComponent(node)}/${kind}/${vmid}/migrate`,{target_node:targetNode,online},{params:{cluster}})).data
+export const resizeProxmoxDisk=async(cluster:string,node:string,kind:'qemu'|'lxc',vmid:number,disk:string,size:string)=>(await api.put(`/v1/proxmox/nodes/${encodeURIComponent(node)}/${kind}/${vmid}/resize`,{disk,size},{params:{cluster}})).data
+export const updateProxmoxConfig=async(cluster:string,node:string,kind:'qemu'|'lxc',vmid:number,config:Record<string,string>)=>(await api.put(`/v1/proxmox/nodes/${encodeURIComponent(node)}/${kind}/${vmid}/config`,{config},{params:{cluster}})).data
 export const getJobs = async () => (await api.get<{items:Job[]}>('/v1/jobs')).data.items
 export const enqueueJob = async (kind:string) => (await api.post<Job>('/v1/jobs', {kind,payload:{},priority:100,max_attempts:5})).data
 export const getHostTelemetry = async () => (await api.get<{items:HostMetric[]}>('/v1/telemetry/hosts')).data.items

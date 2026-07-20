@@ -108,3 +108,25 @@ func (a *App) proxmoxResizeDisk(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 202, map[string]string{"status": "accepted"})
 }
+func (a *App) proxmoxUpdateConfig(w http.ResponseWriter, r *http.Request) {
+	c, n, k, id, ok := a.snapshotTarget(r)
+	if !ok {
+		writeError(w, 400, "invalid_config_target", "Destino inválido.")
+		return
+	}
+	var in struct {
+		Config map[string]string `json:"config"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if len(in.Config) == 0 {
+		writeError(w, 400, "empty_config", "Configuração vazia.")
+		return
+	}
+	if e := c.UpdateGuestConfig(r.Context(), n, k, id, in.Config); e != nil {
+		writeError(w, 502, "proxmox_config_update_failed", e.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "updated"})
+}

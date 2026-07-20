@@ -375,6 +375,16 @@ func (c *Client) ResizeDisk(ctx context.Context, node, kind string, vmid int, di
 	values := url.Values{"disk": {disk}, "size": {size}}
 	return c.requestForm(ctx, http.MethodPut, fmt.Sprintf("/api2/json/nodes/%s/%s/%d/resize", url.PathEscape(node), kind, vmid), values, nil)
 }
+func (c *Client) UpdateGuestConfig(ctx context.Context, node, kind string, vmid int, config map[string]string) error {
+	if !nodeNamePattern.MatchString(node) || (kind != "qemu" && kind != "lxc") || vmid < 1 || len(config) == 0 {
+		return fmt.Errorf("invalid config update parameters")
+	}
+	values := url.Values{}
+	for key, value := range config {
+		values.Set(key, value)
+	}
+	return c.requestForm(ctx, http.MethodPut, fmt.Sprintf("/api2/json/nodes/%s/%s/%d/config", url.PathEscape(node), kind, vmid), values, nil)
+}
 func (c *Client) Version(ctx context.Context) (map[string]any, error) {
 	var result map[string]any
 	err := c.get(ctx, "/api2/json/version", &result)
