@@ -137,7 +137,7 @@ func (a *App) proxmoxNodeNetwork(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "missing_cluster", "Parâmetro cluster obrigatório.")
 		return
 	}
-	c := a.proxmoxClient(cluster)
+	c := a.proxmoxClientFor(cluster)
 	if c == nil {
 		writeError(w, 404, "cluster_not_found", "Cluster não encontrado.")
 		return
@@ -218,7 +218,7 @@ func (a *App) proxmoxNodeBackups(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "missing_parameters", "Parâmetros cluster e storage obrigatórios.")
 		return
 	}
-	c := a.proxmoxClient(cluster)
+	c := a.proxmoxClientFor(cluster)
 	if c == nil {
 		writeError(w, 404, "cluster_not_found", "Cluster não encontrado.")
 		return

@@ -414,7 +414,7 @@ func (c *Client) GetNodeNetworkConfig(ctx context.Context, node string) ([]Netwo
 			Gateway   string `json:"gateway,omitempty"`
 		} `json:"data"`
 	}
-	if err := c.request(ctx, http.MethodGet, fmt.Sprintf("/api2/json/nodes/%s/network", url.PathEscape(node)), nil, &result); err != nil {
+	if err := c.request(ctx, http.MethodGet, fmt.Sprintf("/api2/json/nodes/%s/network", url.PathEscape(node)), &result); err != nil {
 		return nil, err
 	}
 	interfaces := make([]NetworkInterface, 0, len(result.Data))
@@ -455,7 +455,7 @@ func (c *Client) GetGuestFirewallRules(ctx context.Context, node, kind string, v
 	var result struct {
 		Data []FirewallRule `json:"data"`
 	}
-	if err := c.request(ctx, http.MethodGet, fmt.Sprintf("/api2/json/nodes/%s/%s/%d/firewall/rules", url.PathEscape(node), kind, vmid), nil, &result); err != nil {
+	if err := c.request(ctx, http.MethodGet, fmt.Sprintf("/api2/json/nodes/%s/%s/%d/firewall/rules", url.PathEscape(node), kind, vmid), &result); err != nil {
 		return nil, err
 	}
 	return result.Data, nil
@@ -476,7 +476,7 @@ func (c *Client) DeleteGuestFirewallRule(ctx context.Context, node, kind string,
 	if !nodeNamePattern.MatchString(node) || (kind != "qemu" && kind != "lxc") || vmid < 1 || pos < 0 {
 		return fmt.Errorf("invalid firewall rule delete parameters")
 	}
-	return c.request(ctx, http.MethodDelete, fmt.Sprintf("/api2/json/nodes/%s/%s/%d/firewall/rules/%d", url.PathEscape(node), kind, vmid, pos), nil, nil)
+	return c.request(ctx, http.MethodDelete, fmt.Sprintf("/api2/json/nodes/%s/%s/%d/firewall/rules/%d", url.PathEscape(node), kind, vmid, pos), nil)
 }
 
 type BackupInfo struct {
@@ -496,7 +496,7 @@ func (c *Client) GetNodeBackups(ctx context.Context, node, storage string) ([]Ba
 	var result struct {
 		Data []BackupInfo `json:"data"`
 	}
-	if err := c.request(ctx, http.MethodGet, fmt.Sprintf("/api2/json/nodes/%s/storage/%s/content", url.PathEscape(node), url.PathEscape(storage)), nil, &result); err != nil {
+	if err := c.request(ctx, http.MethodGet, fmt.Sprintf("/api2/json/nodes/%s/storage/%s/content", url.PathEscape(node), url.PathEscape(storage)), &result); err != nil {
 		return nil, err
 	}
 	// Filter only backups
