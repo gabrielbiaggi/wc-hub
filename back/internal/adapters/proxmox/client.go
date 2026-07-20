@@ -79,6 +79,12 @@ type Snapshot struct {
 	Storage    []Storage `json:"storage"`
 	Warnings   []string  `json:"warnings"`
 }
+type GuestSnapshot struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Snaptime    int64  `json:"snaptime"`
+	VMState     string `json:"vmstate,omitempty"`
+}
 type CreateQEMUInput struct {
 	Cluster  string `json:"cluster"`
 	Node     string `json:"node"`
@@ -325,6 +331,26 @@ func (c *Client) DeleteGuest(ctx context.Context, node, kind string, vmid int, p
 		path += "?purge=1&destroy-unreferenced-disks=1"
 	}
 	return c.request(ctx, http.MethodDelete, path, nil)
+}
+func (c *Client) ListGuestSnapshots(ctx context.Context, node, kind string, vmid int) ([]GuestSnapshot, error) {
+	if !nodeNamePattern.MatchString(node) || (kind != "qemu" && kind != "lxc") || vmid < 1 {
+		return nil, fmt.Errorf("invalid guest")
+	}
+	var out []GuestSnapshot
+	err := c.get(ctx, fmt.Sprintf("/api2/json/nodes/%s/%s/%d/snapshot", url.PathEscape(node), kind, vmid), &out)
+	return out, err
+}
+func (c *Client) CreateGuestSnapshot(ctx context.Context, node, kind string, vmid int, name, description string) error {
+	if !nodeNamePattern.MatchString(node) || !nodeNamePattern.MatchString(name) || (kind != "qemu" && kind != "lxc") || vmid < 1 {
+		return fmt.Errorf("invalid snapshot")
+	}
+	return c.requestForm(ctx, http.MethodPost, fmt.Sprintf("/api2/json/nodes/%s/%s/%d/snapshot", url.PathEscape(node), kind, vmid), url.Values{"snapname": {name}, "description": {description}}, nil)
+}
+func (c *Client) DeleteGuestSnapshot(ctx context.Context, node, kind string, vmid int, name string) error {
+	if !nodeNamePattern.MatchString(node) || !nodeNamePattern.MatchString(name) || (kind != "qemu" && kind != "lxc") || vmid < 1 {
+		return fmt.Errorf("invalid snapshot")
+	}
+	return c.request(ctx, http.MethodDelete, fmt.Sprintf("/api2/json/nodes/%s/%s/%d/snapshot/%s", url.PathEscape(node), kind, vmid, url.PathEscape(name)), nil)
 }
 func (c *Client) Version(ctx context.Context) (map[string]any, error) {
 	var result map[string]any
