@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -196,6 +197,17 @@ type TunnelConfiguration struct {
 		Ingress       []TunnelIngressRule `json:"ingress"`
 		OriginRequest map[string]any      `json:"originRequest,omitempty"`
 	} `json:"config"`
+}
+type PrivateRoute struct {
+	ID       string `json:"id"`
+	Network  string `json:"network"`
+	TunnelID string `json:"tunnel_id"`
+	Comment  string `json:"comment,omitempty"`
+}
+type PrivateRouteInput struct {
+	Network  string `json:"network"`
+	TunnelID string `json:"tunnel_id"`
+	Comment  string `json:"comment,omitempty"`
 }
 
 type DNSRecord struct {
@@ -442,6 +454,29 @@ func (c *Client) UpdateTunnelConfiguration(ctx context.Context, accountID, tunne
 	var result TunnelConfiguration
 	_, err = c.do(ctx, http.MethodPut, "/accounts/"+url.PathEscape(accountID)+"/cfd_tunnel/"+url.PathEscape(tunnelID)+"/configurations", nil, body, &result)
 	return result, err
+}
+func (c *Client) ListPrivateRoutes(ctx context.Context, accountID string) ([]PrivateRoute, error) {
+	if !c.AccountAllowed(accountID) {
+		return nil, ErrAccountNotAllowed
+	}
+	var out []PrivateRoute
+	err := c.list(ctx, "/accounts/"+url.PathEscape(accountID)+"/teamnet/routes", url.Values{"per_page": {"1000"}}, &out)
+	return out, err
+}
+func (c *Client) CreatePrivateRoute(ctx context.Context, accountID string, input PrivateRouteInput) (PrivateRoute, error) {
+	if !c.AccountAllowed(accountID) || !externalIDPattern.MatchString(input.TunnelID) {
+		return PrivateRoute{}, ErrAccountNotAllowed
+	}
+	if _, _, err := net.ParseCIDR(input.Network); err != nil {
+		return PrivateRoute{}, errors.New("private route network must be CIDR")
+	}
+	body, err := json.Marshal(input)
+	if err != nil {
+		return PrivateRoute{}, err
+	}
+	var out PrivateRoute
+	_, err = c.do(ctx, http.MethodPost, "/accounts/"+url.PathEscape(accountID)+"/teamnet/routes", nil, body, &out)
+	return out, err
 }
 
 func (c *Client) ListDNSRecords(ctx context.Context, zoneID string) ([]DNSRecord, error) {
