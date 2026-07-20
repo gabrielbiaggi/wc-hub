@@ -358,6 +358,16 @@ func (c *Client) RollbackGuestSnapshot(ctx context.Context, node, kind string, v
 	}
 	return c.requestForm(ctx, http.MethodPost, fmt.Sprintf("/api2/json/nodes/%s/%s/%d/snapshot/%s/rollback", url.PathEscape(node), kind, vmid, url.PathEscape(name)), nil, nil)
 }
+func (c *Client) MigrateGuest(ctx context.Context, node, kind string, vmid int, targetNode string, online bool) error {
+	if !nodeNamePattern.MatchString(node) || !nodeNamePattern.MatchString(targetNode) || (kind != "qemu" && kind != "lxc") || vmid < 1 {
+		return fmt.Errorf("invalid migration parameters")
+	}
+	values := url.Values{"target": {targetNode}}
+	if online {
+		values.Set("online", "1")
+	}
+	return c.requestForm(ctx, http.MethodPost, fmt.Sprintf("/api2/json/nodes/%s/%s/%d/migrate", url.PathEscape(node), kind, vmid), values, nil)
+}
 func (c *Client) Version(ctx context.Context) (map[string]any, error) {
 	var result map[string]any
 	err := c.get(ctx, "/api2/json/version", &result)

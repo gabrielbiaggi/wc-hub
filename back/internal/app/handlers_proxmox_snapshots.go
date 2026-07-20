@@ -70,3 +70,22 @@ func (a *App) proxmoxRollbackSnapshot(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 202, map[string]string{"status": "accepted"})
 }
+func (a *App) proxmoxMigrateGuest(w http.ResponseWriter, r *http.Request) {
+	c, n, k, id, ok := a.snapshotTarget(r)
+	if !ok {
+		writeError(w, 400, "invalid_migration_target", "Destino inválido.")
+		return
+	}
+	var in struct {
+		TargetNode string `json:"target_node"`
+		Online     bool   `json:"online"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if e := c.MigrateGuest(r.Context(), n, k, id, in.TargetNode, in.Online); e != nil {
+		writeError(w, 502, "proxmox_migration_failed", e.Error())
+		return
+	}
+	writeJSON(w, 202, map[string]string{"status": "accepted"})
+}

@@ -6,6 +6,7 @@ import {
   Camera,
   Copy,
   Database,
+  ArrowRightLeft,
   MemoryStick,
   Play,
   Plus,
@@ -31,6 +32,7 @@ import {
   getProxmoxInventory,
   getProxmoxSnapshots,
   getProxmoxSummary,
+  migrateProxmoxGuest,
   rollbackProxmoxSnapshot,
   runProxmoxPowerAction,
   syncProxmox,
@@ -218,6 +220,22 @@ const restoreSnapshot = useMutation({
     }, 1500);
   },
 });
+const migrateGuest = useMutation({
+  mutationFn: (input: { guest: ProxmoxGuest; targetNode: string; online: boolean }) =>
+    migrateProxmoxGuest(
+      input.guest.cluster,
+      input.guest.node,
+      input.guest.type,
+      input.guest.vmid,
+      input.targetNode,
+      input.online,
+    ),
+  onSuccess: () =>
+    setTimeout(
+      () => client.invalidateQueries({ queryKey: ["proxmox-inventory"] }),
+      2000,
+    ),
+});
 const lastJob = computed(() =>
   jobs.data.value?.find((job) => job.kind === "proxmox.sync"),
 );
@@ -231,7 +249,8 @@ const providerError = computed(() =>
       destructive.error.value ??
       createSnapshot.error.value ??
       removeSnapshot.error.value ??
-      restoreSnapshot.error.value,
+      restoreSnapshot.error.value ??
+      migrateGuest.error.value,
     "A operação Proxmox falhou.",
   ),
 );
@@ -347,6 +366,35 @@ const rollbackSnapshot = (name: string) => {
     ) === phrase
   )
     restoreSnapshot.mutate(name);
+};
+const migrate = (guest: ProxmoxGuest) => {
+  const availableNodes = (inventory.data.value?.nodes ?? [])
+    .filter((n) => n.cluster === guest.cluster && n.node !== guest.node && n.status === "online")
+    .map((n) => n.node);
+
+  if (availableNodes.length === 0) {
+    window.alert("Não há nós disponíveis para migração neste cluster.");
+    return;
+  }
+
+  const targetNode = window.prompt(
+    `Migrar ${guest.type.toUpperCase()} ${guest.vmid} (${guest.name}) para qual nó?\n\nNós disponíveis: ${availableNodes.join(", ")}\n\nDigite o nome do nó:`,
+  );
+
+  if (!targetNode || !availableNodes.includes(targetNode)) {
+    if (targetNode) window.alert("Nó inválido ou indisponível.");
+    return;
+  }
+
+  const online = guest.status === "running" && window.confirm(
+    `VM está em execução. Deseja realizar migração online (live migration)?\n\nSim = migração online (sem downtime)\nNão = migração offline (VM será desligada)`,
+  );
+
+  if (window.confirm(
+    `Confirma migração ${online ? "ONLINE" : "OFFLINE"} de ${guest.type.toUpperCase()} ${guest.vmid} (${guest.name})\nDe: ${guest.node}\nPara: ${targetNode}?`,
+  )) {
+    migrateGuest.mutate({ guest, targetNode, online });
+  }
 };
 </script>
 
@@ -583,6 +631,8 @@ const rollbackSnapshot = (name: string) => {
               <div class="flex flex-wrap justify-end gap-2">
                 <Button variant="outline" @click="openSnapshots(guest)"
                   ><Camera class="h-3.5 w-3.5" />Snapshots</Button
+                ><Button variant="outline" @click="migrate(guest)"
+                  ><ArrowRightLeft class="h-3.5 w-3.5" />Migrar</Button
                 ><Button variant="outline" @click="cloneGuest(guest)"
                   ><Copy class="h-3.5 w-3.5" />Clonar</Button
                 ><Button
