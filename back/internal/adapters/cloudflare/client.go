@@ -179,6 +179,9 @@ type Tunnel struct {
 	CreatedAt   time.Time          `json:"created_at"`
 	Connections []TunnelConnection `json:"connections"`
 }
+type TunnelInput struct {
+	Name string `json:"name"`
+}
 
 type DNSRecord struct {
 	ID         string    `json:"id"`
@@ -347,6 +350,51 @@ func (c *Client) ListTunnels(ctx context.Context, accountID string) ([]Tunnel, e
 		})
 	}
 	return result, nil
+}
+
+// CreateTunnel creates a remotely-managed cloudflared tunnel. The connector
+// token is deliberately not returned through this method or the browser API;
+// it must be installed through the host-side enrollment workflow.
+func (c *Client) CreateTunnel(ctx context.Context, accountID string, input TunnelInput) (Tunnel, error) {
+	return c.writeTunnel(ctx, http.MethodPost, accountID, "", input)
+}
+func (c *Client) UpdateTunnel(ctx context.Context, accountID, tunnelID string, input TunnelInput) (Tunnel, error) {
+	if !externalIDPattern.MatchString(tunnelID) {
+		return Tunnel{}, errors.New("cloudflare tunnel ID is invalid")
+	}
+	return c.writeTunnel(ctx, http.MethodPatch, accountID, tunnelID, input)
+}
+func (c *Client) DeleteTunnel(ctx context.Context, accountID, tunnelID string) error {
+	if !c.AccountAllowed(accountID) {
+		return ErrAccountNotAllowed
+	}
+	if !externalIDPattern.MatchString(tunnelID) {
+		return errors.New("cloudflare tunnel ID is invalid")
+	}
+	_, err := c.do(ctx, http.MethodDelete, "/accounts/"+url.PathEscape(accountID)+"/cfd_tunnel/"+url.PathEscape(tunnelID), nil, nil, &struct{}{})
+	return err
+}
+func (c *Client) writeTunnel(ctx context.Context, method, accountID, tunnelID string, input TunnelInput) (Tunnel, error) {
+	if !c.AccountAllowed(accountID) {
+		return Tunnel{}, ErrAccountNotAllowed
+	}
+	input.Name = strings.TrimSpace(input.Name)
+	if input.Name == "" || len(input.Name) > 100 {
+		return Tunnel{}, errors.New("cloudflare tunnel name is invalid")
+	}
+	body, err := json.Marshal(input)
+	if err != nil {
+		return Tunnel{}, err
+	}
+	path := "/accounts/" + url.PathEscape(accountID) + "/cfd_tunnel"
+	if tunnelID != "" {
+		path += "/" + url.PathEscape(tunnelID)
+	}
+	var wire tunnelWire
+	if _, err = c.do(ctx, method, path, nil, body, &wire); err != nil {
+		return Tunnel{}, err
+	}
+	return Tunnel{ID: wire.ID, AccountID: accountID, Name: wire.Name, Status: normalizeTunnelStatus(wire.Status), CreatedAt: wire.CreatedAt}, nil
 }
 
 func (c *Client) ListDNSRecords(ctx context.Context, zoneID string) ([]DNSRecord, error) {

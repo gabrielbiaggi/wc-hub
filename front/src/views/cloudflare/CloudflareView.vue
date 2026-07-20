@@ -25,8 +25,11 @@ import {
   purgeCloudflareCache,
   updateCloudflareZoneSetting,
   createCloudflareDNSRecord,
+  createCloudflareTunnel,
+  deleteCloudflareTunnel,
   deleteCloudflareDNSRecord,
   updateCloudflareDNSRecord,
+  updateCloudflareTunnel,
   type CloudflareDNSRecord,
   type CloudflareProviderStatus,
   type CloudflareTunnelStatus,
@@ -64,6 +67,10 @@ const zoneIDs = computed(
       .map((target) => target.id) ?? [],
 );
 const selectedZone = ref("");
+const selectedAccount = ref("");
+const tunnelName = ref("");
+const accountIDs = computed(() => overview.value?.targets.filter((target) => target.kind === "account").map((target) => target.id) ?? []);
+const selectedAccountID = computed(() => selectedAccount.value || accountIDs.value[0] || "");
 const selectedZoneID = computed(
   () => selectedZone.value || zoneIDs.value[0] || "",
 );
@@ -127,6 +134,18 @@ const dnsMutation = useMutation({
     queryClient.invalidateQueries({ queryKey: ["cloudflare", "overview"] });
   },
 });
+const tunnelMutation = useMutation({
+  mutationFn: (input:{operation:'create'|'update'|'delete';id?:string;name?:string}) => {
+    const accountID=selectedAccountID.value;
+    if(input.operation==='delete') return deleteCloudflareTunnel(accountID,input.id!).then(() => undefined);
+    if(input.operation==='update') return updateCloudflareTunnel(accountID,input.id!,input.name!).then(() => undefined);
+    return createCloudflareTunnel(accountID,input.name!).then(() => undefined);
+  },
+  onSuccess:()=>{tunnelName.value='';queryClient.invalidateQueries({queryKey:['cloudflare','overview']})},
+});
+const createTunnel=()=>{if(selectedAccountID.value&&tunnelName.value)tunnelMutation.mutate({operation:'create',name:tunnelName.value})}
+const renameTunnel=(id:string,name:string)=>{const updated=window.prompt('Novo nome do tunnel',name);if(updated&&updated!==name)tunnelMutation.mutate({operation:'update',id,name:updated})}
+const removeTunnel=(id:string,name:string)=>{if(window.prompt(`Excluir o tunnel ${name}. Digite EXCLUIR:`)==='EXCLUIR')tunnelMutation.mutate({operation:'delete',id})}
 const zoneFor = (record?: CloudflareDNSRecord) =>
   record?.zone_id || selectedZone.value || zoneIDs.value[0] || "";
 const createRecord = () => {
@@ -389,6 +408,11 @@ const shortID = (value: string) =>
             class="divide-y divide-line/60"
             role="tabpanel"
           >
+            <form class="grid gap-3 border-b border-line bg-slate-950/25 p-4 md:grid-cols-[180px_1fr_140px]" @submit.prevent="createTunnel">
+              <select v-model="selectedAccount" class="rounded-lg border border-line bg-slate-950 px-3 text-xs text-slate-200"><option value="">Conta padrão</option><option v-for="account in accountIDs" :key="account" :value="account">{{shortID(account)}}</option></select>
+              <input v-model.trim="tunnelName" required maxlength="100" placeholder="Nome do novo Tunnel" class="rounded-lg border border-line bg-slate-950 px-3 py-2 text-xs text-slate-200"/>
+              <Button type="submit" :disabled="!selectedAccountID||tunnelMutation.isPending.value"><Plus class="h-4 w-4"/>Criar Tunnel</Button>
+            </form>
             <article
               v-for="tunnel in overview.tunnels"
               :key="tunnel.id"
@@ -422,6 +446,7 @@ const shortID = (value: string) =>
               <p class="font-mono text-[10px] text-muted md:text-right">
                 {{ tunnel.connections[0]?.colocation || "NO ACTIVE COLO" }}
               </p>
+              <div class="flex justify-end gap-1 md:col-span-3"><button class="rounded p-2 text-muted hover:bg-white/5 hover:text-white" title="Renomear" @click="renameTunnel(tunnel.id,tunnel.name)"><Pencil class="h-3.5 w-3.5"/></button><button class="rounded p-2 text-danger hover:bg-danger/10" title="Excluir" @click="removeTunnel(tunnel.id,tunnel.name)"><Trash2 class="h-3.5 w-3.5"/></button></div>
             </article>
             <div
               v-if="!overview.tunnels.length"

@@ -44,6 +44,7 @@ import (
 	kubernetesapp "github.com/webcreations/wc-hub/back/internal/kubernetesapp"
 	monitorapp "github.com/webcreations/wc-hub/back/internal/monitorapp"
 	ociapp "github.com/webcreations/wc-hub/back/internal/ociapp"
+	operationsapp "github.com/webcreations/wc-hub/back/internal/operationsapp"
 	overview "github.com/webcreations/wc-hub/back/internal/overview/application"
 	"github.com/webcreations/wc-hub/back/internal/platform/config"
 	powerapp "github.com/webcreations/wc-hub/back/internal/powerapp"
@@ -370,6 +371,7 @@ func (a *App) Handler() http.Handler {
 	cloudflareapp.MountRoutes(mux, a.protect, a.cloudflareHandler)
 	githubapp.MountRoutes(mux, a.protect, a.githubClient)
 	terraformapp.MountRoutes(mux, a.protect, a.terraformRunner)
+	operationsapp.MountRoutes(mux, a.protect)
 	storageapp.MountRoutes(mux, a.protect, a.storageClient)
 	ociapp.MountRoutes(mux, a.protect, a.ociHandler, a.adapterError("oci"))
 	vncapp.MountRoutes(mux, a.protect, a.vncGateway, a.proxmoxClients, func(r *http.Request, action, target string) {

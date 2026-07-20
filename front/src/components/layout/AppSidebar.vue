@@ -24,6 +24,7 @@ import {
   TerminalSquare,
   UserRoundCog,
   Waypoints,
+  Workflow,
   X,
 } from "lucide-vue-next";
 import { useUiStore } from "@/stores/ui";
@@ -57,6 +58,7 @@ const groups = [
       { to: "/cloudflare", label: "Cloudflare", icon: Network },
       { to: "/terraform", label: "Terraform", icon: GitBranch },
       { to: "/jobs", label: "Tarefas", icon: RadioTower },
+      { to: "/operations", label: "Operações", icon: Workflow },
     ],
   },
   {

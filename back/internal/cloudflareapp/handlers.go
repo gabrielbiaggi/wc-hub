@@ -27,6 +27,11 @@ type DNSWriter interface {
 	UpdateDNSRecord(context.Context, string, string, cloudflareadapter.DNSRecordInput) (cloudflareadapter.DNSRecord, error)
 	DeleteDNSRecord(context.Context, string, string) error
 }
+type TunnelWriter interface {
+	CreateTunnel(context.Context, string, cloudflareadapter.TunnelInput) (cloudflareadapter.Tunnel, error)
+	UpdateTunnel(context.Context, string, string, cloudflareadapter.TunnelInput) (cloudflareadapter.Tunnel, error)
+	DeleteTunnel(context.Context, string, string) error
+}
 type ZoneAdministrator interface {
 	ListZoneSettings(context.Context, string) ([]cloudflareadapter.ZoneSetting, error)
 	UpdateZoneSetting(context.Context, string, string, any) (cloudflareadapter.ZoneSetting, error)
@@ -222,6 +227,70 @@ func (h *Handler) Tunnels(w http.ResponseWriter, request *http.Request) {
 	}
 	h.emit(ctx, AuditEvent{Action: "cloudflare.tunnels.read", ResourceType: "cloudflare_account", TargetName: accountID, Decision: "allowed", Reason: "read-only allowlisted request", Payload: map[string]any{"item_count": len(tunnels)}})
 	writeJSON(w, http.StatusOK, map[string]any{"items": tunnels})
+}
+func (h *Handler) CreateTunnel(w http.ResponseWriter, request *http.Request) {
+	h.writeTunnel(w, request, false)
+}
+func (h *Handler) UpdateTunnel(w http.ResponseWriter, request *http.Request) {
+	h.writeTunnel(w, request, true)
+}
+func (h *Handler) writeTunnel(w http.ResponseWriter, request *http.Request, update bool) {
+	accountID := request.PathValue("account_id")
+	if _, allowed := h.allowedAccounts[accountID]; !allowed || !h.reader.AccountAllowed(accountID) {
+		writeError(w, 403, "account_not_allowed", "A conta Cloudflare solicitada não está autorizada.")
+		return
+	}
+	writer, ok := h.reader.(TunnelWriter)
+	if !ok {
+		writeError(w, 503, "cloudflare_tunnel_write_unavailable", "A permissão de escrita para tunnels não está configurada.")
+		return
+	}
+	var input cloudflareadapter.TunnelInput
+	decoder := json.NewDecoder(http.MaxBytesReader(w, request.Body, 4096))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeError(w, 400, "invalid_request", "O payload do tunnel é inválido.")
+		return
+	}
+	ctx, cancel := context.WithTimeout(request.Context(), h.timeout)
+	defer cancel()
+	action := "cloudflare.tunnel.create"
+	var tunnel cloudflareadapter.Tunnel
+	var err error
+	if update {
+		action = "cloudflare.tunnel.update"
+		tunnel, err = writer.UpdateTunnel(ctx, accountID, request.PathValue("tunnel_id"), input)
+	} else {
+		tunnel, err = writer.CreateTunnel(ctx, accountID, input)
+	}
+	if err != nil {
+		h.emit(ctx, AuditEvent{Action: action, ResourceType: "cloudflare_tunnel", TargetName: input.Name, Decision: "failed", Reason: "provider rejected mutation"})
+		writeError(w, 502, "cloudflare_tunnel_write_failed", "A Cloudflare rejeitou a alteração do tunnel: "+err.Error())
+		return
+	}
+	h.emit(ctx, AuditEvent{Action: action, ResourceType: "cloudflare_tunnel", TargetName: tunnel.Name, Decision: "allowed", Reason: "allowlisted account mutation", Payload: map[string]any{"account_id": accountID, "tunnel_id": tunnel.ID}})
+	writeJSON(w, map[bool]int{false: 201, true: 200}[update], tunnel)
+}
+func (h *Handler) DeleteTunnel(w http.ResponseWriter, request *http.Request) {
+	accountID, tunnelID := request.PathValue("account_id"), request.PathValue("tunnel_id")
+	if _, allowed := h.allowedAccounts[accountID]; !allowed || !h.reader.AccountAllowed(accountID) {
+		writeError(w, 403, "account_not_allowed", "A conta Cloudflare solicitada não está autorizada.")
+		return
+	}
+	writer, ok := h.reader.(TunnelWriter)
+	if !ok {
+		writeError(w, 503, "cloudflare_tunnel_write_unavailable", "A permissão de escrita para tunnels não está configurada.")
+		return
+	}
+	ctx, cancel := context.WithTimeout(request.Context(), h.timeout)
+	defer cancel()
+	if err := writer.DeleteTunnel(ctx, accountID, tunnelID); err != nil {
+		h.emit(ctx, AuditEvent{Action: "cloudflare.tunnel.delete", ResourceType: "cloudflare_tunnel", TargetName: tunnelID, Decision: "failed", Reason: "provider rejected mutation"})
+		writeError(w, 502, "cloudflare_tunnel_delete_failed", "A Cloudflare rejeitou a exclusão do tunnel: "+err.Error())
+		return
+	}
+	h.emit(ctx, AuditEvent{Action: "cloudflare.tunnel.delete", ResourceType: "cloudflare_tunnel", TargetName: tunnelID, Decision: "allowed", Reason: "allowlisted account mutation", Payload: map[string]any{"account_id": accountID}})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) DNSRecords(w http.ResponseWriter, request *http.Request) {
