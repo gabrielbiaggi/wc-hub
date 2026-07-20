@@ -58,6 +58,7 @@ export const deleteProxmoxGuest=async(guest:ProxmoxGuest,purge=true)=>api.delete
 export interface ProxmoxSnapshot {name:string;description:string;snaptime:number;parent?:string;vmstate?:number}
 export const getProxmoxSnapshots=async(cluster:string,node:string,kind:'qemu'|'lxc',vmid:number)=>(await api.get<{items:ProxmoxSnapshot[]}>(`/v1/proxmox/nodes/${encodeURIComponent(node)}/${kind}/${vmid}/snapshots`,{params:{cluster}})).data.items
 export const createProxmoxSnapshot=async(cluster:string,node:string,kind:'qemu'|'lxc',vmid:number,name:string,description:string)=>(await api.post(`/v1/proxmox/nodes/${encodeURIComponent(node)}/${kind}/${vmid}/snapshots`,{name,description},{params:{cluster}})).data
+export const rollbackProxmoxSnapshot=async(cluster:string,node:string,kind:'qemu'|'lxc',vmid:number,name:string)=>(await api.post(`/v1/proxmox/nodes/${encodeURIComponent(node)}/${kind}/${vmid}/snapshots/${encodeURIComponent(name)}/rollback`,{},{params:{cluster}})).data
 export const deleteProxmoxSnapshot=async(cluster:string,node:string,kind:'qemu'|'lxc',vmid:number,name:string)=>api.delete(`/v1/proxmox/nodes/${encodeURIComponent(node)}/${kind}/${vmid}/snapshots/${encodeURIComponent(name)}`,{params:{cluster}})
 export const getJobs = async () => (await api.get<{items:Job[]}>('/v1/jobs')).data.items
 export const enqueueJob = async (kind:string) => (await api.post<Job>('/v1/jobs', {kind,payload:{},priority:100,max_attempts:5})).data

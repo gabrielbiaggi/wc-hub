@@ -28,15 +28,15 @@ services:
     build: !reset null
     entrypoint: []
     working_dir: /app
-    command: ["sh", "-c", "test -d node_modules/vite || npm ci && npm run dev"]
+    command: ["sh", "-c", "test -d node_modules/vite || npm ci && npm run dev -- --host 0.0.0.0"]
     environment:
       VITE_API_PROXY_TARGET: http://back:8080
       CHOKIDAR_USEPOLLING: "true"
     volumes:
       - ./front:/app
       - front_node_modules:/app/node_modules
-    ports: !reset
-      - "${WC_HUB_BIND_IP:-0.0.0.0}:${WC_HUB_PORT:-8088}:5173"
+    ports:
+      - "0.0.0.0:8089:5173"
     read_only: false
     tmpfs: !reset []
     security_opt: []

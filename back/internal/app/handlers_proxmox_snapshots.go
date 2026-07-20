@@ -58,3 +58,15 @@ func (a *App) proxmoxDeleteSnapshot(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(204)
 }
+func (a *App) proxmoxRollbackSnapshot(w http.ResponseWriter, r *http.Request) {
+	c, n, k, id, ok := a.snapshotTarget(r)
+	if !ok {
+		writeError(w, 400, "invalid_snapshot_target", "Destino inválido.")
+		return
+	}
+	if e := c.RollbackGuestSnapshot(r.Context(), n, k, id, r.PathValue("name")); e != nil {
+		writeError(w, 502, "proxmox_snapshot_rollback_failed", e.Error())
+		return
+	}
+	writeJSON(w, 202, map[string]string{"status": "accepted"})
+}

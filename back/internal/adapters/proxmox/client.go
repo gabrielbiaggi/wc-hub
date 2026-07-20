@@ -352,6 +352,12 @@ func (c *Client) DeleteGuestSnapshot(ctx context.Context, node, kind string, vmi
 	}
 	return c.request(ctx, http.MethodDelete, fmt.Sprintf("/api2/json/nodes/%s/%s/%d/snapshot/%s", url.PathEscape(node), kind, vmid, url.PathEscape(name)), nil)
 }
+func (c *Client) RollbackGuestSnapshot(ctx context.Context, node, kind string, vmid int, name string) error {
+	if !nodeNamePattern.MatchString(node) || !nodeNamePattern.MatchString(name) || (kind != "qemu" && kind != "lxc") || vmid < 1 {
+		return fmt.Errorf("invalid snapshot")
+	}
+	return c.requestForm(ctx, http.MethodPost, fmt.Sprintf("/api2/json/nodes/%s/%s/%d/snapshot/%s/rollback", url.PathEscape(node), kind, vmid, url.PathEscape(name)), nil, nil)
+}
 func (c *Client) Version(ctx context.Context) (map[string]any, error) {
 	var result map[string]any
 	err := c.get(ctx, "/api2/json/version", &result)

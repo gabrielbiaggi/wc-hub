@@ -16,6 +16,7 @@ import {
   ShieldCheck,
   Square,
   Trash2,
+  Undo2,
 } from "lucide-vue-next";
 import Button from "@/components/ui/Button.vue";
 import StatusBadge from "@/components/ui/StatusBadge.vue";
@@ -30,6 +31,7 @@ import {
   getProxmoxInventory,
   getProxmoxSnapshots,
   getProxmoxSummary,
+  rollbackProxmoxSnapshot,
   runProxmoxPowerAction,
   syncProxmox,
   type ProxmoxGuest,
@@ -203,6 +205,19 @@ const removeSnapshot = useMutation({
       1000,
     ),
 });
+const restoreSnapshot = useMutation({
+  mutationFn: (name: string) => {
+    const g = snapshotGuest.value;
+    if (!g) throw new Error("No guest selected");
+    return rollbackProxmoxSnapshot(g.cluster, g.node, g.type, g.vmid, name);
+  },
+  onSuccess: () => {
+    setTimeout(() => {
+      client.invalidateQueries({ queryKey: ["proxmox-snapshots"] });
+      client.invalidateQueries({ queryKey: ["proxmox-inventory"] });
+    }, 1500);
+  },
+});
 const lastJob = computed(() =>
   jobs.data.value?.find((job) => job.kind === "proxmox.sync"),
 );
@@ -215,7 +230,8 @@ const providerError = computed(() =>
       cloning.error.value ??
       destructive.error.value ??
       createSnapshot.error.value ??
-      removeSnapshot.error.value,
+      removeSnapshot.error.value ??
+      restoreSnapshot.error.value,
     "A operação Proxmox falhou.",
   ),
 );
@@ -320,6 +336,17 @@ const deleteSnapshot = (name: string) => {
     ) === phrase
   )
     removeSnapshot.mutate(name);
+};
+const rollbackSnapshot = (name: string) => {
+  const g = snapshotGuest.value;
+  if (!g) return;
+  const phrase = `RESTAURAR ${name}`;
+  if (
+    window.prompt(
+      `Restaurar ${g.type.toUpperCase()} ${g.vmid} para snapshot ${name}. Isso reverterá o estado atual. Digite exatamente: ${phrase}`,
+    ) === phrase
+  )
+    restoreSnapshot.mutate(name);
 };
 </script>
 
@@ -877,13 +904,21 @@ const deleteSnapshot = (name: string) => {
                 <template v-if="snap.vmstate">· COM estado de RAM</template>
               </p>
             </div>
-            <Button
-              variant="danger"
-              size="sm"
-              :disabled="removeSnapshot.isPending.value"
-              @click="deleteSnapshot(snap.name)"
-              ><Trash2 class="h-3.5 w-3.5" />Excluir</Button
-            >
+            <div class="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                :disabled="restoreSnapshot.isPending.value"
+                @click="rollbackSnapshot(snap.name)"
+                ><Undo2 class="h-3.5 w-3.5" />Restaurar</Button
+              ><Button
+                variant="danger"
+                size="sm"
+                :disabled="removeSnapshot.isPending.value"
+                @click="deleteSnapshot(snap.name)"
+                ><Trash2 class="h-3.5 w-3.5" />Excluir</Button
+              >
+            </div>
           </div>
           <p
             v-if="
