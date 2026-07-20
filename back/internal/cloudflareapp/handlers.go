@@ -36,6 +36,10 @@ type TunnelConfigurator interface {
 	TunnelConfiguration(context.Context, string, string) (cloudflareadapter.TunnelConfiguration, error)
 	UpdateTunnelConfiguration(context.Context, string, string, []cloudflareadapter.TunnelIngressRule) (cloudflareadapter.TunnelConfiguration, error)
 }
+type PrivateRouteManager interface {
+	ListPrivateRoutes(context.Context, string) ([]cloudflareadapter.PrivateRoute, error)
+	CreatePrivateRoute(context.Context, string, cloudflareadapter.PrivateRouteInput) (cloudflareadapter.PrivateRoute, error)
+}
 type ZoneAdministrator interface {
 	ListZoneSettings(context.Context, string) ([]cloudflareadapter.ZoneSetting, error)
 	UpdateZoneSetting(context.Context, string, string, any) (cloudflareadapter.ZoneSetting, error)
@@ -331,6 +335,40 @@ func (h *Handler) UpdateTunnelConfiguration(w http.ResponseWriter, r *http.Reque
 	}
 	h.emit(r.Context(), AuditEvent{Action: "cloudflare.tunnel.configuration.update", ResourceType: "cloudflare_tunnel", TargetName: id, Decision: "allowed", Payload: map[string]any{"account_id": a, "rules": len(in.Ingress)}})
 	writeJSON(w, 200, v)
+}
+func (h *Handler) PrivateRoutes(w http.ResponseWriter, r *http.Request) {
+	a := r.PathValue("account_id")
+	m, ok := h.reader.(PrivateRouteManager)
+	if !ok || !h.reader.AccountAllowed(a) {
+		writeError(w, 503, "cloudflare_private_routes_unavailable", "Rotas privadas não estão disponíveis.")
+		return
+	}
+	items, err := m.ListPrivateRoutes(r.Context(), a)
+	if err != nil {
+		writeError(w, 502, "cloudflare_private_routes_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"items": items})
+}
+func (h *Handler) CreatePrivateRoute(w http.ResponseWriter, r *http.Request) {
+	a := r.PathValue("account_id")
+	m, ok := h.reader.(PrivateRouteManager)
+	if !ok || !h.reader.AccountAllowed(a) {
+		writeError(w, 503, "cloudflare_private_routes_unavailable", "Rotas privadas não estão disponíveis.")
+		return
+	}
+	var in cloudflareadapter.PrivateRouteInput
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in); err != nil {
+		writeError(w, 400, "invalid_request", "Rota privada inválida.")
+		return
+	}
+	item, err := m.CreatePrivateRoute(r.Context(), a, in)
+	if err != nil {
+		writeError(w, 502, "cloudflare_private_route_failed", err.Error())
+		return
+	}
+	h.emit(r.Context(), AuditEvent{Action: "cloudflare.private_route.create", ResourceType: "cloudflare_private_route", TargetName: item.Network, Decision: "allowed"})
+	writeJSON(w, 201, item)
 }
 
 func (h *Handler) DNSRecords(w http.ResponseWriter, request *http.Request) {
