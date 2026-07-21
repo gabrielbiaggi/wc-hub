@@ -252,6 +252,11 @@ func (c *Client) DeploymentAction(ctx context.Context, namespace, name, action s
 			return fmt.Errorf("encode Kubernetes restart request: %w", err)
 		}
 		payload = value
+	case "delete":
+		if err := c.clientset.AppsV1().Deployments(namespace).Delete(ctx, name, metav1.DeleteOptions{}); err != nil {
+			return fmt.Errorf("delete Kubernetes deployment: %w", err)
+		}
+		return nil
 	default:
 		return errors.New("Kubernetes deployment action is unsupported")
 	}

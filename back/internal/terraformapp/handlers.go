@@ -43,10 +43,10 @@ func (h *Handler) start(w http.ResponseWriter, r *http.Request, operation string
 		return
 	}
 
-	// Self-protection: validate terraform destroy
-	if h.policyEnforcer != nil && operation == "destroy" {
+	// Self-protection: validate terraform destroy and apply
+	if h.policyEnforcer != nil && (operation == "destroy" || operation == "apply") {
 		if !h.policyEnforcer(w, r, PolicyRequest{
-			Action:       "terraform_destroy",
+			Action:       "terraform_" + operation,
 			Scope:        "remote",
 			TargetName:   "terraform/workspace/" + req.Workspace,
 			Confirmation: r.Header.Get("X-Confirmation"),

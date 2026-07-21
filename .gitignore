@@ -6,6 +6,8 @@ front/*.tsbuildinfo
 front/vite.config.js
 front/vite.config.d.ts
 back/bin/
+back/api
+api
 back/tmp/
 back/coverage.out
 *.log

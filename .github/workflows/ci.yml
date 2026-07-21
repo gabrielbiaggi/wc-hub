@@ -1,0 +1,84 @@
+name: WC Hub CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  backend-ci:
+    name: Backend Build, Test & Vet
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+          cache-dependency-path: back/go.sum
+
+      - name: Check Binary Artifacts
+        run: |
+          if [ -f back/api ]; then
+            echo "ERROR: back/api binary is committed to repository!"
+            exit 1
+          fi
+
+      - name: Run Go Vet
+        run: |
+          cd back
+          go vet ./...
+
+      - name: Run Backend Tests
+        run: |
+          cd back
+          go test -v -race ./...
+
+      - name: Build Backend Binaries
+        run: |
+          cd back
+          go build -v ./...
+
+  frontend-ci:
+    name: Frontend Type Check & Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: front/package-lock.json
+
+      - name: Install Frontend Dependencies
+        run: |
+          cd front
+          npm ci
+
+      - name: Run Type Check
+        run: |
+          cd front
+          npm run type-check || npx vue-tsc --noEmit
+
+      - name: Build Frontend Production Assets
+        run: |
+          cd front
+          npm run build
+
+  openapi-ci:
+    name: OpenAPI Specification Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Validate OpenAPI Schema
+        run: |
+          npx @redocly/cli lint openapi.yaml

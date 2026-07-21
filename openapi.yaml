@@ -671,11 +671,389 @@ paths:
               properties:
                 workspace:
                   type: string
+  /api/v1/terraform/apply:
+    post:
+      summary: Terraform apply
+      operationId: terraformApply
+      tags: [terraform]
+      parameters:
+        - name: X-Confirmation
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-TOTP-Code
+          in: header
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workspace]
+              properties:
+                workspace:
+                  type: string
       responses:
         '202':
-          description: Destroy aceito
+          description: Apply aceito
         '403':
           description: Ação bloqueada por policy
+
+  /api/v1/terraform/plan:
+    post:
+      summary: Terraform plan
+      operationId: terraformPlan
+      tags: [terraform]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workspace]
+              properties:
+                workspace:
+                  type: string
+      responses:
+        '202':
+          description: Plan aceito
+
+  /api/v1/terraform/validate:
+    post:
+      summary: Terraform validate
+      operationId: terraformValidate
+      tags: [terraform]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workspace]
+              properties:
+                workspace:
+                  type: string
+      responses:
+        '202':
+          description: Validate aceito
+
+  /api/v1/docker/health:
+    get:
+      summary: Health check Docker
+      operationId: dockerHealth
+      tags: [docker]
+      responses:
+        '200':
+          description: Docker status OK
+
+  /api/v1/docker/inventory:
+    get:
+      summary: Inventário Docker completo
+      operationId: dockerInventory
+      tags: [docker]
+      responses:
+        '200':
+          description: Inventário retornado
+
+  /api/v1/docker/images:
+    get:
+      summary: Listar imagens Docker
+      operationId: dockerImages
+      tags: [docker]
+      responses:
+        '200':
+          description: Lista de imagens
+
+  /api/v1/docker/stats:
+    get:
+      summary: Estatísticas de containers Docker
+      operationId: dockerStats
+      tags: [docker]
+      responses:
+        '200':
+          description: Estatísticas em tempo real
+
+  /api/v1/kubernetes/namespaces/{namespace}/pods/{pod}/logs:
+    get:
+      summary: Logs de pod Kubernetes
+      operationId: kubernetesPodLogs
+      tags: [kubernetes]
+      parameters:
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: pod
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: container
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: tail
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Logs do pod
+
+  /api/v1/kubernetes/namespaces/{namespace}/deployments/{name}/{action}:
+    post:
+      summary: Ação em deployment Kubernetes (scale, restart, delete)
+      operationId: kubernetesDeploymentAction
+      tags: [kubernetes]
+      parameters:
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: action
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [scale, restart, delete]
+        - name: X-Confirmation
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: X-TOTP-Code
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Ação aceita
+        '403':
+          description: Ação bloqueada por policy
+
+  /api/v1/proxmox/summary:
+    get:
+      summary: Resumo do Proxmox
+      operationId: proxmoxSummary
+      tags: [proxmox]
+      responses:
+        '200':
+          description: Resumo do cluster Proxmox
+
+  /api/v1/proxmox/sync:
+    post:
+      summary: Sincronizar inventário Proxmox
+      operationId: proxmoxSync
+      tags: [proxmox]
+      responses:
+        '202':
+          description: Sincronização enfileirada
+
+  /api/v1/proxmox/inventory:
+    get:
+      summary: Inventário Proxmox
+      operationId: proxmoxInventory
+      tags: [proxmox]
+      responses:
+        '200':
+          description: Inventário de nós, VMs, LXC e storage
+
+  /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/{action}:
+    post:
+      summary: Ação de energia em guest Proxmox (start, stop, shutdown, reboot)
+      operationId: proxmoxPowerAction
+      tags: [proxmox]
+      parameters:
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [qemu, lxc]
+        - name: vmid
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: action
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [start, stop, shutdown, reboot, reset]
+        - name: X-Confirmation
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: X-TOTP-Code
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Ação aceita
+        '403':
+          description: Ação bloqueada por policy
+
+  /api/v1/proxmox/nodes/{node}/{kind}/{vmid}:
+    delete:
+      summary: Excluir VM ou LXC Proxmox
+      operationId: proxmoxDeleteGuest
+      tags: [proxmox]
+      parameters:
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [qemu, lxc]
+        - name: vmid
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: X-Confirmation
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-TOTP-Code
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Guest excluído
+        '403':
+          description: Ação bloqueada por policy
+
+  /api/v1/proxmox/qemu:
+    post:
+      summary: Criar VM QEMU Proxmox
+      operationId: createProxmoxQEMU
+      tags: [proxmox]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '202':
+          description: VM criada
+
+  /api/v1/proxmox/lxc:
+    post:
+      summary: Criar Container LXC Proxmox
+      operationId: createProxmoxLXC
+      tags: [proxmox]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '202':
+          description: LXC criado
+
+  /api/v1/proxmox/clone:
+    post:
+      summary: Clonar guest Proxmox
+      operationId: cloneProxmoxGuest
+      tags: [proxmox]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '202':
+          description: Clonagem iniciada
+
+  /api/v1/jobs:
+    get:
+      summary: Listar jobs
+      operationId: listJobs
+      tags: [jobs]
+      responses:
+        '200':
+          description: Lista de jobs
+    post:
+      summary: Criar/Enfileirar job
+      operationId: createJob
+      tags: [jobs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '202':
+          description: Job enfileirado
+
+  /api/v1/telemetry/hosts:
+    get:
+      summary: Telemetria de hosts
+      operationId: hostTelemetry
+      tags: [telemetry]
+      responses:
+        '200':
+          description: Telemetria recente
+
+  /api/v1/terminal/tickets:
+    post:
+      summary: Criar ticket de sessão SSH Terminal
+      operationId: createTerminalTicket
+      tags: [terminal]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [host_id, confirmation, totp_code]
+              properties:
+                host_id:
+                  type: string
+                confirmation:
+                  type: string
+                totp_code:
+                  type: string
+      responses:
+        '201':
+          description: Ticket gerado
+        '403':
+          description: Acesso bloqueado por policy
 
 components:
   securitySchemes:

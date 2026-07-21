@@ -10,6 +10,24 @@ func TestSelfProtectedHostCannotBeDestroyed(t *testing.T) {
 	}
 }
 
+func TestRemoteSelfProtectedTargetIsBlocked(t *testing.T) {
+	engine := NewEngine(nil)
+	actions := []string{"docker_stop", "docker_kill", "docker_remove", "delete_vm", "shutdown", "reboot", "terraform_destroy", "k8s_deployment_delete"}
+	for _, action := range actions {
+		decision := engine.Evaluate(ActionRequest{
+			Action:              action,
+			Scope:               ScopeRemote,
+			TargetName:          "wc-hub",
+			TargetSelfProtected: true,
+			Confirmation:        "wc-hub",
+			TOTPVerified:        true,
+		})
+		if decision.Allowed {
+			t.Fatalf("remote self-protected action %s must be blocked even with TOTP and confirmation", action)
+		}
+	}
+}
+
 func TestLocalExecutorUsesAllowlist(t *testing.T) {
 	engine := NewEngine([]string{"uptime"})
 	if engine.Evaluate(ActionRequest{Action: "execute", Command: "curl example.com", Scope: ScopeLocal}).Allowed {

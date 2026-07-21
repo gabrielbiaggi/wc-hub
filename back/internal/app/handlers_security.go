@@ -60,32 +60,47 @@ func (a *App) enforcePolicy(w http.ResponseWriter, r *http.Request, req security
 
 // policyEnforcerForPlugin adapts enforcePolicy for use in plugins
 func (a *App) policyEnforcerForPlugin(w http.ResponseWriter, r *http.Request, req dockerapp.PolicyRequest) bool {
+	isSelf := false
+	if a.targetResolver != nil {
+		isSelf = a.targetResolver.IsSelfProtectedContainer(req.TargetName)
+	}
 	return a.enforcePolicy(w, r, security.ActionRequest{
-		Action:       req.Action,
-		Scope:        security.Scope(req.Scope),
-		TargetName:   req.TargetName,
-		Confirmation: req.Confirmation,
-		TOTPCode:     req.TOTPCode,
+		Action:              req.Action,
+		Scope:               security.Scope(req.Scope),
+		TargetName:          req.TargetName,
+		TargetSelfProtected: isSelf,
+		Confirmation:        req.Confirmation,
+		TOTPCode:            req.TOTPCode,
 	})
 }
 
 func (a *App) policyEnforcerForK8s(w http.ResponseWriter, r *http.Request, req kubernetesapp.PolicyRequest) bool {
+	isSelf := false
+	if a.targetResolver != nil {
+		isSelf = a.targetResolver.IsSelfProtectedPod(req.TargetName)
+	}
 	return a.enforcePolicy(w, r, security.ActionRequest{
-		Action:       req.Action,
-		Scope:        security.Scope(req.Scope),
-		TargetName:   req.TargetName,
-		Confirmation: req.Confirmation,
-		TOTPCode:     req.TOTPCode,
+		Action:              req.Action,
+		Scope:               security.Scope(req.Scope),
+		TargetName:          req.TargetName,
+		TargetSelfProtected: isSelf,
+		Confirmation:        req.Confirmation,
+		TOTPCode:            req.TOTPCode,
 	})
 }
 
 func (a *App) policyEnforcerForTerraform(w http.ResponseWriter, r *http.Request, req terraformapp.PolicyRequest) bool {
+	isSelf := false
+	if a.targetResolver != nil {
+		isSelf = a.targetResolver.IsSelfProtectedWorkspace(req.TargetName)
+	}
 	return a.enforcePolicy(w, r, security.ActionRequest{
-		Action:       req.Action,
-		Scope:        security.Scope(req.Scope),
-		TargetName:   req.TargetName,
-		Confirmation: req.Confirmation,
-		TOTPCode:     req.TOTPCode,
+		Action:              req.Action,
+		Scope:               security.Scope(req.Scope),
+		TargetName:          req.TargetName,
+		TargetSelfProtected: isSelf,
+		Confirmation:        req.Confirmation,
+		TOTPCode:            req.TOTPCode,
 	})
 }
 

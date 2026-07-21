@@ -61,7 +61,7 @@ func TestMountRoutesAppliesExistingReadPermission(t *testing.T) {
 }
 
 func TestHandlerReturnsServiceUnavailableWithoutReader(t *testing.T) {
-	handler := NewHandler(nil)
+	handler := NewHandler(nil, nil)
 	response := httptest.NewRecorder()
 	handler.Inventory(response, httptest.NewRequest(http.MethodGet, "/api/v1/docker/inventory", nil))
 	if response.Code != http.StatusServiceUnavailable {

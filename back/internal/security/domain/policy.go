@@ -53,7 +53,7 @@ func NewEngine(commands []string) *Engine {
 var destructiveActions = map[string]struct{}{
 	"terminate": {}, "shutdown": {}, "destroy": {}, "reboot": {}, "poweroff": {}, "stop": {},
 	"delete_host": {}, "delete_vm": {}, "delete_snapshot": {}, "rollback_snapshot": {},
-	"terraform_destroy": {}, "wipe_disk": {},
+	"terraform_destroy": {}, "terraform_apply": {}, "wipe_disk": {},
 	"docker_stop": {}, "docker_kill": {}, "docker_remove": {}, "docker_restart": {}, "docker_exec": {},
 	"k8s_exec": {}, "k8s_deployment_restart": {}, "k8s_deployment_delete": {},
 }
@@ -68,9 +68,12 @@ func (e *Engine) Evaluate(req ActionRequest) Decision {
 	command := filepath.Base(firstToken(req.Command))
 	_, destructiveCommand := destructiveCommands[command]
 
+	if req.TargetSelfProtected && (destructiveAction || destructiveCommand) {
+		return Decision{Allowed: false, Risk: RiskCritical, Reason: "blocked: destructive operations can never target self-protected resources"}
+	}
 	if req.Scope == ScopeLocal && (req.TargetSelfProtected || destructiveAction || destructiveCommand) {
 		if destructiveAction || destructiveCommand {
-			return Decision{Risk: RiskCritical, Reason: "blocked: destructive operations can never target the local self-protected host"}
+			return Decision{Allowed: false, Risk: RiskCritical, Reason: "blocked: destructive operations can never target the local self-protected host"}
 		}
 	}
 	if req.Scope == ScopeLocal && command != "" {

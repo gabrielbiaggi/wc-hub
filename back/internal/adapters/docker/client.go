@@ -310,14 +310,20 @@ func (c *Client) ContainerAction(ctx context.Context, id, action string) error {
 	if !containerIDPattern.MatchString(id) {
 		return errors.New("Docker container ID is invalid")
 	}
-	if action != "start" && action != "stop" && action != "restart" {
+	method := http.MethodPost
+	path := "/containers/" + id + "/" + action
+	switch action {
+	case "start":
+	case "stop", "restart":
+		path += "?t=15"
+	case "kill":
+	case "remove", "delete":
+		method = http.MethodDelete
+		path = "/containers/" + id + "?v=true&force=true"
+	default:
 		return errors.New("Docker container action is unsupported")
 	}
-	path := "/containers/" + id + "/" + action
-	if action == "stop" || action == "restart" {
-		path += "?t=15"
-	}
-	response, err := c.do(ctx, http.MethodPost, path, nil, http.Header{"Accept": []string{"application/json"}})
+	response, err := c.do(ctx, method, path, nil, http.Header{"Accept": []string{"application/json"}})
 	if err != nil {
 		return fmt.Errorf("Docker action request: %w", err)
 	}
@@ -326,7 +332,7 @@ func (c *Client) ContainerAction(ctx context.Context, id, action string) error {
 	if err != nil {
 		return err
 	}
-	if response.StatusCode != http.StatusNoContent && response.StatusCode != http.StatusNotModified {
+	if response.StatusCode != http.StatusNoContent && response.StatusCode != http.StatusNotModified && response.StatusCode != http.StatusOK {
 		return fmt.Errorf("Docker API returned %d: %s", response.StatusCode, sanitize(body))
 	}
 	return nil

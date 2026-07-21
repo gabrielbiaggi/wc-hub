@@ -1,0 +1,32 @@
+package target
+
+import (
+	"testing"
+)
+
+func TestTargetResolver(t *testing.T) {
+	resolver := NewResolver()
+
+	tests := []struct {
+		name     string
+		check    func() bool
+		expected bool
+	}{
+		{"container wc-hub", func() bool { return resolver.IsSelfProtectedContainer("wc-hub") }, true},
+		{"container my-app", func() bool { return resolver.IsSelfProtectedContainer("my-app") }, false},
+		{"pod wc-hub-api", func() bool { return resolver.IsSelfProtectedPod("wc-hub-api-79d8f") }, true},
+		{"pod nginx", func() bool { return resolver.IsSelfProtectedPod("nginx-deployment") }, false},
+		{"workspace hub-infrastructure", func() bool { return resolver.IsSelfProtectedWorkspace("hub-infrastructure") }, true},
+		{"workspace staging-app", func() bool { return resolver.IsSelfProtectedWorkspace("staging-app") }, false},
+		{"host 127.0.0.1", func() bool { return resolver.IsSelfProtectedHost("127.0.0.1") }, true},
+		{"host 10.99.99.99", func() bool { return resolver.IsSelfProtectedHost("10.99.99.99") }, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.check(); got != tt.expected {
+				t.Errorf("%s: expected %v, got %v", tt.name, tt.expected, got)
+			}
+		})
+	}
+}

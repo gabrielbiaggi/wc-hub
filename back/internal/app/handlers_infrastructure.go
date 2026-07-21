@@ -102,12 +102,14 @@ func (a *App) proxmoxPowerAction(w http.ResponseWriter, r *http.Request) {
 	actionLower := strings.ToLower(action)
 	if actionLower == "shutdown" || actionLower == "reboot" || actionLower == "stop" {
 		targetName := target.ID() + "/" + node + "/" + kind + "/" + strconv.Itoa(vmid)
+		isSelf := a.targetResolver != nil && a.targetResolver.IsSelfProtectedVM(vmid, targetName)
 		if !a.enforcePolicy(w, r, security.ActionRequest{
-			Action:       actionLower,
-			Scope:        security.ScopeRemote,
-			TargetName:   targetName,
-			Confirmation: r.Header.Get("X-Confirmation"),
-			TOTPCode:     r.Header.Get("X-TOTP-Code"),
+			Action:              actionLower,
+			Scope:               security.ScopeRemote,
+			TargetName:          targetName,
+			TargetSelfProtected: isSelf,
+			Confirmation:        r.Header.Get("X-Confirmation"),
+			TOTPCode:            r.Header.Get("X-TOTP-Code"),
 		}) {
 			return
 		}
@@ -205,12 +207,14 @@ func (a *App) proxmoxDeleteGuest(w http.ResponseWriter, r *http.Request) {
 
 	// Self-protection: avaliar ação antes de executar
 	targetName := cluster + "/" + node + "/" + kind + "/" + strconv.Itoa(vmid)
+	isSelf := a.targetResolver != nil && a.targetResolver.IsSelfProtectedVM(vmid, targetName)
 	if !a.enforcePolicy(w, r, security.ActionRequest{
-		Action:       "delete_vm",
-		Scope:        security.ScopeRemote,
-		TargetName:   targetName,
-		Confirmation: r.Header.Get("X-Confirmation"),
-		TOTPCode:     r.Header.Get("X-TOTP-Code"),
+		Action:              "delete_vm",
+		Scope:               security.ScopeRemote,
+		TargetName:          targetName,
+		TargetSelfProtected: isSelf,
+		Confirmation:        r.Header.Get("X-Confirmation"),
+		TOTPCode:            r.Header.Get("X-TOTP-Code"),
 	}) {
 		return
 	}

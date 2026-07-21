@@ -52,6 +52,7 @@ import (
 	proxmoxrepo "github.com/webcreations/wc-hub/back/internal/proxmox/repository"
 	schedulerrepo "github.com/webcreations/wc-hub/back/internal/scheduler/repository"
 	security "github.com/webcreations/wc-hub/back/internal/security/domain"
+	target "github.com/webcreations/wc-hub/back/internal/security/target"
 	storageapp "github.com/webcreations/wc-hub/back/internal/storageapp"
 	telemetryapp "github.com/webcreations/wc-hub/back/internal/telemetry/application"
 	telemetryrepo "github.com/webcreations/wc-hub/back/internal/telemetry/repository"
@@ -71,6 +72,7 @@ type App struct {
 	logger                    *slog.Logger
 	overview                  *overview.Service
 	policy                    *security.Engine
+	targetResolver            *target.Resolver
 	db                        *pgxpool.Pool
 	auth                      *authapp.Service
 	audit                     *auditrepo.Postgres
@@ -122,7 +124,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, fun
 		pool.Close()
 		return nil, nil, err
 	}
-	application := &App{cfg: cfg, logger: logger, overview: overview.New(pool, cfg.Environment, cfg.SelfProtected), policy: security.NewEngine(cfg.LocalAllowlist), db: pool, loginLimiter: newLoginLimiter(), adapterErrors: map[string]string{}}
+	application := &App{cfg: cfg, logger: logger, overview: overview.New(pool, cfg.Environment, cfg.SelfProtected), policy: security.NewEngine(cfg.LocalAllowlist), targetResolver: target.NewResolver(), db: pool, loginLimiter: newLoginLimiter(), adapterErrors: map[string]string{}}
 	authRepository := authrepo.NewPostgres(pool)
 	application.auth = authapp.New(authRepository, cfg.SessionTTL)
 	if cfg.DevelopmentMasterLogin {

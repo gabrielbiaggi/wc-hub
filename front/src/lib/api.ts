@@ -47,14 +47,21 @@ export const confirmTOTP = async (code:string) => (await api.post<{totp_enabled:
 export const getProxmoxSummary = async () => (await api.get<ProxmoxSummary>('/v1/proxmox/summary')).data
 export const syncProxmox = async () => (await api.post<Job>('/v1/proxmox/sync', {})).data
 export const getProxmoxInventory = async () => (await api.get<ProxmoxInventory>('/v1/proxmox/inventory')).data
-export const runProxmoxPowerAction = async(cluster:string,node:string,kind:'qemu'|'lxc',vmid:number,action:'start'|'stop'|'shutdown'|'reboot'|'reset')=>(await api.post<{status:string}>(`/v1/proxmox/nodes/${encodeURIComponent(node)}/${kind}/${vmid}/${action}`,{},{params:{cluster}})).data
+export function buildActionHeaders(confirmation?: string, totpCode?: string): Record<string, string> {
+  const headers: Record<string, string> = {}
+  if (confirmation) headers['X-Confirmation'] = confirmation
+  if (totpCode) headers['X-TOTP-Code'] = totpCode
+  return headers
+}
+
+export const runProxmoxPowerAction = async(cluster:string,node:string,kind:'qemu'|'lxc',vmid:number,action:'start'|'stop'|'shutdown'|'reboot'|'reset', extraHeaders?: Record<string, string>)=>(await api.post<{status:string}>(`/v1/proxmox/nodes/${encodeURIComponent(node)}/${kind}/${vmid}/${action}`,{},{params:{cluster}, headers: extraHeaders})).data
 export interface ProxmoxQEMUInput {cluster:string;node:string;vmid:number;name:string;cores:number;memory_mb:number;storage:string;disk_gb:number;iso:string;bridge:string;start:boolean}
 export interface ProxmoxLXCInput {cluster:string;node:string;vmid:number;hostname:string;cores:number;memory_mb:number;storage:string;rootfs_gb:number;template:string;bridge:string;password:string;ssh_public_keys:string;unprivileged:boolean;start:boolean}
 export interface ProxmoxCloneInput {cluster:string;node:string;kind:'qemu'|'lxc';source_vmid:number;new_vmid:number;name:string;target_node:string;storage:string;full:boolean}
 export const createProxmoxQEMU=async(input:ProxmoxQEMUInput)=>(await api.post('/v1/proxmox/qemu',input)).data
 export const createProxmoxLXC=async(input:ProxmoxLXCInput)=>(await api.post('/v1/proxmox/lxc',input)).data
 export const cloneProxmoxGuest=async(input:ProxmoxCloneInput)=>(await api.post('/v1/proxmox/clone',input)).data
-export const deleteProxmoxGuest=async(guest:ProxmoxGuest,purge=true)=>api.delete(`/v1/proxmox/nodes/${encodeURIComponent(guest.node)}/${guest.type}/${guest.vmid}`,{params:{cluster:guest.cluster,purge}})
+export const deleteProxmoxGuest=async(guest:ProxmoxGuest,purge=true, extraHeaders?: Record<string, string>)=>api.delete(`/v1/proxmox/nodes/${encodeURIComponent(guest.node)}/${guest.type}/${guest.vmid}`,{params:{cluster:guest.cluster,purge}, headers: extraHeaders})
 export interface ProxmoxSnapshot {name:string;description:string;snaptime:number;parent?:string;vmstate?:number}
 export const getProxmoxSnapshots=async(cluster:string,node:string,kind:'qemu'|'lxc',vmid:number)=>(await api.get<{items:ProxmoxSnapshot[]}>(`/v1/proxmox/nodes/${encodeURIComponent(node)}/${kind}/${vmid}/snapshots`,{params:{cluster}})).data.items
 export const createProxmoxSnapshot=async(cluster:string,node:string,kind:'qemu'|'lxc',vmid:number,name:string,description:string)=>(await api.post(`/v1/proxmox/nodes/${encodeURIComponent(node)}/${kind}/${vmid}/snapshots`,{name,description},{params:{cluster}})).data
@@ -79,8 +86,8 @@ export interface DockerImage{id:string;repo_tags:string[];repo_digests:string[];
 export interface DockerContainerStats{container_id:string;name:string;read_at:string;cpu_percent:number;memory_usage:number;memory_limit:number;memory_percent:number;network_rx:number;network_tx:number;block_read:number;block_write:number}
 export interface DockerInventory{captured_at:string;health:DockerHealth;containers:DockerContainer[];images:DockerImage[];stats:DockerContainerStats[];warnings:string[]}
 export const getDockerInventory=async():Promise<DockerInventory>=>(await api.get('/v1/docker/inventory')).data
-export const dockerContainerAction=async(id:string,action:'start'|'stop'|'restart')=>(await api.post(`/v1/docker/containers/${id}/${action}`)).data
-export const dockerContainerExec=async(id:string,command:string[])=>(await api.post(`/v1/docker/containers/${id}/exec`,{command})).data
+export const dockerContainerAction=async(id:string,action:'start'|'stop'|'restart'|'kill'|'remove', extraHeaders?: Record<string, string>)=>(await api.post(`/v1/docker/containers/${id}/${action}`, {}, { headers: extraHeaders })).data
+export const dockerContainerExec=async(id:string,command:string[], extraHeaders?: Record<string, string>)=>(await api.post(`/v1/docker/containers/${id}/exec`,{command}, { headers: extraHeaders })).data
 export interface KubernetesMetadata{name:string;namespace:string;uid:string;created_at:string;labels:Record<string,string>}
 export interface KubernetesNode{metadata:KubernetesMetadata;status:string;roles:string[];capacity:{cpu:string;memory:string;pods:string};allocatable:{cpu:string;memory:string;pods:string};kubelet_version:string;os_image:string}
 export interface KubernetesDeployment{metadata:KubernetesMetadata;replicas:number;ready_replicas:number;available_replicas:number;updated_replicas:number}
@@ -89,8 +96,8 @@ export interface KubernetesEvent{metadata:KubernetesMetadata;involved_object:{ki
 export interface KubernetesOverview{captured_at:string;source:string;nodes:KubernetesNode[];deployments:KubernetesDeployment[];pods:KubernetesPod[];events:KubernetesEvent[];warnings:string[]}
 export const getKubernetesOverview=async():Promise<KubernetesOverview>=>(await api.get('/v1/kubernetes/overview')).data
 export const getKubernetesPodLogs=async(namespace:string,pod:string,container?:string,tail?:number)=>(await api.get(`/v1/kubernetes/namespaces/${encodeURIComponent(namespace)}/pods/${encodeURIComponent(pod)}/logs`,{params:{container,tail}})).data
-export const kubernetesPodExec=async(namespace:string,pod:string,container:string,command:string[])=>(await api.post(`/v1/kubernetes/namespaces/${encodeURIComponent(namespace)}/pods/${encodeURIComponent(pod)}/exec`,{container,command})).data
-export const kubernetesDeploymentAction=async(namespace:string,name:string,action:'scale'|'restart',replicas?:number)=>(await api.post(`/v1/kubernetes/namespaces/${encodeURIComponent(namespace)}/deployments/${encodeURIComponent(name)}/${action}`,{replicas})).data
+export const kubernetesPodExec=async(namespace:string,pod:string,container:string,command:string[], extraHeaders?: Record<string, string>)=>(await api.post(`/v1/kubernetes/namespaces/${encodeURIComponent(namespace)}/pods/${encodeURIComponent(pod)}/exec`,{container,command}, { headers: extraHeaders })).data
+export const kubernetesDeploymentAction=async(namespace:string,name:string,action:'scale'|'restart'|'delete',replicas?:number, extraHeaders?: Record<string, string>)=>(await api.post(`/v1/kubernetes/namespaces/${encodeURIComponent(namespace)}/deployments/${encodeURIComponent(name)}/${action}`,{replicas}, { headers: extraHeaders })).data
 export interface GitHubCommit{sha:string;author:string;author_email:string;message:string;timestamp:string;url:string}
 export interface GitHubWorkflow{id:number;name:string;path:string;state:string;created_at:string;updated_at:string}
 export interface GitHubWorkflowRun{id:number;name:string;display_title:string;status:string;conclusion:string;workflow_id:number;event:string;head_branch:string;head_sha:string;run_number:number;run_attempt:number;created_at:string;updated_at:string;url:string}
