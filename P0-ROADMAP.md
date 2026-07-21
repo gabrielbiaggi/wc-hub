@@ -22,11 +22,11 @@ Backend agora compila: `go build ./...` passa sem erros.
 
 Plugins oferecem mais funcionalidade que handlers legados.
 
-### ✅ P0.3 - Self-protection não está sendo usado server-side
-**Corrigido em commit 207ad12**
+### ✅ P0.3 - Self-protection integrado server-side (Proxmox)
+**Corrigido em commits 207ad12, e7a89cb**
 
-**Problema resolvido:**
-- ✅ Criado método `App.enforcePolicy()` helper
+**Implementado:**
+- ✅ Método `App.enforcePolicy()` helper
 - ✅ Integrado em handlers Proxmox críticos:
   - proxmoxDeleteGuest (delete_vm)
   - proxmoxPowerAction (shutdown/reboot/stop)
@@ -35,13 +35,28 @@ Plugins oferecem mais funcionalidade que handlers legados.
 - ✅ Expandidas ações destrutivas no policy.go
 - ✅ Audit log registra decisões (allowed/denied)
 
-**Operações agora protegidas:**
-- Require X-Confirmation header (must match target name)
-- Require X-TOTP-Code header (if TOTP enabled)
+**Como funciona:**
+- Operações destrutivas requerem X-Confirmation header (must match target name)
+- Operações destrutivas requerem X-TOTP-Code header (if TOTP enabled)
 - Policy engine valida ANTES da execução
 - Usuário malicioso não pode bypass browser
 
-**Ainda pendente:**
+### ✅ P0.4 - Audit logs completos (Proxmox)
+**Corrigido em commit e7a89cb**
+
+- ✅ Todas operações Proxmox críticas registram audit
+- ✅ Campos: ActorID, Action, Scope, ResourceType, ResourceID
+- ✅ TargetName, Risk, Decision, RequestID, SourceIP
+- ✅ Payload com detalhes específicos quando relevante
+
+**Operações auditadas:**
+- Create/Delete/Rollback snapshots
+- Migrate guest
+- Resize disk
+- Delete guest
+- Power actions (shutdown/reboot/stop)
+
+### ⚠️ P0.3b/P0.4b - Plugins (Docker, K8s, Terraform) pendentes
 - ⚠️ **Docker** (dockerapp plugin): ContainerAction stop/kill, Exec
 - ⚠️ **Kubernetes** (kubernetesapp plugin): DeploymentAction, PodExec
 - ⚠️ **Terraform** (terraformapp plugin): Apply/Destroy operations
