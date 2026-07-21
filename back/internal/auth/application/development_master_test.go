@@ -14,8 +14,7 @@ func TestDevelopmentMasterPasswordAndExpiryUseConfiguredTimezone(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, time.July, 19, 16, 42, 10, 0, location)
-	secret := []byte("01234567890123456789012345678901")
-	if got := DevelopmentMasterPassword(secret, now, location); got != "Hub-YdTaR0HPC19maDr1" {
+	if got := DevelopmentMasterPassword(now, location); got != "Hub1907202616" {
 		t.Fatalf("unexpected hourly password: %s", got)
 	}
 	expires := developmentMasterExpiry(now, location)
@@ -63,11 +62,10 @@ func TestDevelopmentMasterLoginIssuesOnlyAnHourlySession(t *testing.T) {
 	now := time.Date(2026, time.July, 19, 16, 42, 10, 0, location)
 	repository := &developmentMasterRepository{}
 	service := New(repository, 12*time.Hour)
-	secret := []byte("01234567890123456789012345678901")
-	if err = service.ConfigureDevelopmentMaster("gabrielbiaggi3@gmail.com", "MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE="); err != nil {
+	if err = service.ConfigureDevelopmentMaster("gabrielbiaggi3@gmail.com"); err != nil {
 		t.Fatal(err)
 	}
-	password := DevelopmentMasterPassword(secret, now, location)
+	password := DevelopmentMasterPassword(now, location)
 	tokens, err := service.LoginDevelopmentMaster(context.Background(), "allmight", password, "", "test", "127.0.0.1", now, location)
 	if err != nil {
 		t.Fatal(err)

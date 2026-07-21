@@ -32,11 +32,7 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		_, secret, err := authapp.ValidateDevelopmentMasterConfig(cfg.DevelopmentMasterEmail, cfg.DevelopmentMasterSecret)
-		if err != nil {
-			panic(err)
-		}
-		fmt.Println(authapp.DevelopmentMasterPassword(secret, time.Now(), location))
+		fmt.Println(authapp.DevelopmentMasterPassword(time.Now(), location))
 		return
 	}
 	if len(os.Args) == 3 && os.Args[1] == "provision-agent-token" {

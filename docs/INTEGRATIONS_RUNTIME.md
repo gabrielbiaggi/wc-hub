@@ -82,10 +82,9 @@ After configuring a module, restart the `back` service and sign in with a role c
 ## Development-only master login
 
 For the single-user operator mode, set `WC_HUB_DEV_MASTER_LOGIN=true`,
-`WC_HUB_MASTER_EMAIL`, and mount independent base64 secrets through
-`WC_HUB_MASTER_SECRET_FILE` and `WC_HUB_ENCRYPTION_KEY_FILE`. The username is
-`allmight`; run `/app/wc-hub master-password` inside the trusted backend host to
-obtain the current HMAC-derived hourly password. No password or password hash is
+`WC_HUB_MASTER_EMAIL`, and mount the encryption key through
+`WC_HUB_ENCRYPTION_KEY_FILE`. The username is `allmight`; the hourly password is
+`HubDDMMYYYYHH` in `WC_HUB_DEV_MASTER_TIMEZONE`. No password or password hash is
 stored. Sessions expire at the next hour boundary. The first session enrolls
 TOTP; subsequent logins require the authenticator code as a second factor.
 

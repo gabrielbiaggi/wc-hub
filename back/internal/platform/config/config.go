@@ -57,7 +57,6 @@ type Config struct {
 	DevelopmentMasterLogin    bool
 	DevelopmentMasterTimezone string
 	DevelopmentMasterEmail    string
-	DevelopmentMasterSecret   string
 	VNCTargets                []string
 	PBSURL                    string
 	PBSTokenID                string
@@ -120,7 +119,6 @@ func Load() Config {
 		DevelopmentMasterLogin:    envBool("WC_HUB_DEV_MASTER_LOGIN", false),
 		DevelopmentMasterTimezone: env("WC_HUB_DEV_MASTER_TIMEZONE", "America/Sao_Paulo"),
 		DevelopmentMasterEmail:    strings.ToLower(strings.TrimSpace(env("WC_HUB_MASTER_EMAIL", "gabrielbiaggi3@gmail.com"))),
-		DevelopmentMasterSecret:   secretEnv("WC_HUB_MASTER_SECRET", "WC_HUB_MASTER_SECRET_FILE"),
 		VNCTargets:                split(env("VNC_ALLOWED_TARGETS", "")),
 		PBSURL:                    strings.TrimRight(env("PBS_API_URL", ""), "/"),
 		PBSTokenID:                env("PBS_API_TOKEN_ID", ""),

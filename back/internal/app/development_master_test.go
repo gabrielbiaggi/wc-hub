@@ -22,15 +22,15 @@ func TestDevelopmentMasterEnvironmentGuard(t *testing.T) {
 	}
 }
 
-func TestApplicationRejectsDevelopmentMasterWithoutStrongSecret(t *testing.T) {
+func TestApplicationRejectsDevelopmentMasterWithoutValidEmail(t *testing.T) {
 	_, _, err := New(context.Background(), config.Config{
 		DatabaseURL:               "postgres://not-used",
 		Environment:               "production",
 		DevelopmentMasterLogin:    true,
 		DevelopmentMasterTimezone: "America/Sao_Paulo",
-		DevelopmentMasterEmail:    "gabrielbiaggi3@gmail.com",
+		DevelopmentMasterEmail:    "invalid",
 	}, slog.Default())
-	if err == nil || !strings.Contains(err.Error(), "MASTER_SECRET") {
-		t.Fatalf("expected secret guard, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "MASTER_EMAIL") {
+		t.Fatalf("expected email guard, got %v", err)
 	}
 }

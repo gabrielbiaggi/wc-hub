@@ -108,7 +108,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, fun
 	}
 	var developmentMasterLocation *time.Location
 	if cfg.DevelopmentMasterLogin {
-		if _, _, configErr := authapp.ValidateDevelopmentMasterConfig(cfg.DevelopmentMasterEmail, cfg.DevelopmentMasterSecret); configErr != nil {
+		if _, configErr := authapp.ValidateDevelopmentMasterConfig(cfg.DevelopmentMasterEmail); configErr != nil {
 			return nil, nil, configErr
 		}
 		location, locationErr := time.LoadLocation(cfg.DevelopmentMasterTimezone)
@@ -129,7 +129,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, fun
 	authRepository := authrepo.NewPostgres(pool)
 	application.auth = authapp.New(authRepository, cfg.SessionTTL)
 	if cfg.DevelopmentMasterLogin {
-		if masterErr := application.auth.ConfigureDevelopmentMaster(cfg.DevelopmentMasterEmail, cfg.DevelopmentMasterSecret); masterErr != nil {
+		if masterErr := application.auth.ConfigureDevelopmentMaster(cfg.DevelopmentMasterEmail); masterErr != nil {
 			pool.Close()
 			return nil, nil, masterErr
 		}

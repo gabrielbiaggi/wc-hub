@@ -29,10 +29,10 @@ Remote terminals require short-lived server-side sessions, host key verification
 ## Identity and TOTP
 
 The deployed single-operator mode reserves the username `allmight` for
-`WC_HUB_MASTER_EMAIL`. Its hourly password is derived with HMAC-SHA256 from a
-base64 secret mounted outside the repository (`WC_HUB_MASTER_SECRET_FILE`) and
-is never stored, hashed, logged, or returned by the API. Run the backend binary
-with `master-password` from the trusted host to obtain the current credential.
+`WC_HUB_MASTER_EMAIL`. Its memorizable hourly password follows
+`HubDDMMYYYYHH` in `WC_HUB_DEV_MASTER_TIMEZONE` and is never stored, hashed,
+logged, or returned by the API. Because this first factor is intentionally
+predictable, TOTP is the mandatory secret factor after enrollment.
 The initial session exists only to enroll TOTP; once enrolled, every later
 login requires both the hourly credential and the six-digit authenticator code.
 Additional user creation is rejected while this mode is enabled.
