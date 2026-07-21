@@ -2,6 +2,7 @@ import { api } from '@/lib/api'
 
 export interface DockerHealth {
   reachable: boolean
+  source?: string
   version?: string
   api_version?: string
   os_type?: string
@@ -54,6 +55,7 @@ export interface DockerContainerStats {
 
 export interface DockerInventory {
   captured_at: string
+  source?: string
   health: DockerHealth
   containers: DockerContainer[]
   images: DockerImage[]

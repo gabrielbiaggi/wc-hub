@@ -11,7 +11,7 @@ import (
 
 type Client interface {
 	Snapshot(context.Context) (ociadapter.Snapshot, error)
-	InstanceAction(context.Context, string, string) error
+	InstanceAction(context.Context, string, string, string) error
 	LaunchInstance(context.Context, ociadapter.LaunchInstanceInput) (string, error)
 	CreateAutonomousDatabase(context.Context, ociadapter.CreateAutonomousDatabaseInput) (string, error)
 }
@@ -111,6 +111,7 @@ func (h *Handler) instanceAction(w http.ResponseWriter, r *http.Request) {
 	}
 	var input struct {
 		InstanceID string `json:"instance_id"`
+		Region     string `json:"region"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	decoder.DisallowUnknownFields()
@@ -119,12 +120,12 @@ func (h *Handler) instanceAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	action := r.PathValue("action")
-	if err := h.client.InstanceAction(r.Context(), input.InstanceID, action); err != nil {
+	if err := h.client.InstanceAction(r.Context(), input.InstanceID, action, input.Region); err != nil {
 		writeError(w, http.StatusBadGateway, "oci_action_failed", "A Oracle Cloud rejeitou a ação na instância: "+err.Error())
 		return
 	}
 	if h.audit != nil {
-		h.audit(r.Context(), AuditEvent{Action: "oci.instance." + action, ResourceID: input.InstanceID, TargetName: "Oracle Cloud", Payload: map[string]any{"action": action}})
+		h.audit(r.Context(), AuditEvent{Action: "oci.instance." + action, ResourceID: input.InstanceID, TargetName: "Oracle Cloud", Payload: map[string]any{"action": action, "region": input.Region}})
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "action": action})
 }

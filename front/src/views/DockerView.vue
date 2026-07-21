@@ -11,6 +11,8 @@ import {
   ShieldCheck,
   Square,
   Terminal,
+  Trash2,
+  Zap,
 } from "lucide-vue-next";
 import Button from "@/components/ui/Button.vue";
 import StatusBadge from "@/components/ui/StatusBadge.vue";
@@ -28,7 +30,7 @@ import { apiErrorMessage } from "@/lib/api_error";
 const client = useQueryClient();
 const { hasPermission } = usePermissions();
 const canManage = computed(() => hasPermission("docker.manage"));
-type GuardedDockerAction = { kind: "action"; id: string; action: "stop" | "restart" } | { kind: "exec"; id: string; command: string[] };
+type GuardedDockerAction = { kind: "action"; id: string; action: "stop" | "restart" | "kill" | "remove" } | { kind: "exec"; id: string; command: string[] };
 const guardedAction = ref<GuardedDockerAction | null>(null);
 const guardedTarget = computed(() => guardedAction.value ? `docker/container/${guardedAction.value.id}` : "");
 const inventory = useQuery({
@@ -38,7 +40,7 @@ const inventory = useQuery({
 });
 
 const containerAction = useMutation({
-  mutationFn: (input: { id: string; action: "start" | "stop" | "restart"; headers?: Record<string,string> }) =>
+  mutationFn: (input: { id: string; action: "start" | "stop" | "restart" | "kill" | "remove"; headers?: Record<string,string> }) =>
     dockerContainerAction(input.id, input.action, input.headers),
   onSuccess: () =>
     setTimeout(
@@ -75,10 +77,14 @@ const formatBytes = (value = 0) => {
 
 const formatDate = (timestamp: number) =>
   new Date(timestamp * 1000).toLocaleString("pt-BR");
+const composeProject = (container: DockerContainer) =>
+  container.labels["com.docker.compose.project"] || "serviço avulso";
+const composeService = (container: DockerContainer) =>
+  container.labels["com.docker.compose.service"] || "sem serviço Compose";
 
 const execute = (
   container: DockerContainer,
-  action: "start" | "stop" | "restart",
+  action: "start" | "stop" | "restart" | "kill" | "remove",
 ) => {
   if (!canManage.value) return;
   if (action === "start") { containerAction.mutate({ id: container.id, action }); return; }
@@ -149,7 +155,7 @@ const selectedContainer = computed(() =>
         </div>
         <h1 class="mt-4 text-3xl font-semibold">Docker Engine</h1>
         <p class="mt-2 text-sm text-muted">
-          Containers, imagens, estatísticas e controle via Docker API.
+          Origem: <span class="font-mono text-slate-300">{{ inventory.data.value?.source || inventory.data.value?.health.source || "aguardando endpoint" }}</span>. Containers classificados por projeto Compose e serviço.
         </p>
       </div>
       <Button
@@ -259,6 +265,7 @@ const selectedContainer = computed(() =>
                 )
               : "—"
           }}
+          · Origem {{ inventory.data.value?.source || inventory.data.value?.health.source || "endpoint" }}
         </p>
       </header>
       <div class="divide-y divide-line/60">
@@ -274,6 +281,9 @@ const selectedContainer = computed(() =>
             <p class="mt-1 font-mono text-[9px] text-muted">
               {{ container.image }} · Criado
               {{ formatDate(container.created) }}
+            </p>
+            <p class="mt-1 font-mono text-[9px] text-signal">
+              {{ composeProject(container) }} / {{ composeService(container) }}
             </p>
             <p
               v-if="container.ports.length > 0"
@@ -326,7 +336,19 @@ const selectedContainer = computed(() =>
                 @click="execute(container, 'stop')"
                 ><Square class="h-3.5 w-3.5" />Parar</Button
               >
+              <Button
+                variant="danger"
+                :disabled="!canManage || containerAction.isPending.value"
+                @click="execute(container, 'kill')"
+                ><Zap class="h-3.5 w-3.5" />Forçar parada</Button
+              >
             </template>
+            <Button
+              variant="danger"
+              :disabled="!canManage || containerAction.isPending.value"
+              @click="execute(container, 'remove')"
+              ><Trash2 class="h-3.5 w-3.5" />Remover</Button
+            >
           </div>
         </div>
         <p

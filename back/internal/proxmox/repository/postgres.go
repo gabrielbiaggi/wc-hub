@@ -62,14 +62,14 @@ func (r *Postgres) Sync(ctx context.Context, snapshot adapter.Snapshot, clusterN
 	nodeIDs := map[string]string{}
 	resources := 0
 	for _, node := range snapshot.Nodes {
-		facts, _ := json.Marshal(map[string]any{"max_cpu": node.MaxCPU, "max_memory": node.MaxMemory, "uptime": node.Uptime, "subscription_level": node.Level})
+		facts, _ := json.Marshal(map[string]any{"max_cpu": node.MaxCPU, "max_memory": node.MaxMemory, "uptime": node.Uptime, "subscription_level": node.Level, "telemetry_source": "proxmox_rrd", "metrics": node.Metrics})
 		var hostID, nodeID string
 		hostName := "proxmox:" + clusterName + ":" + node.Node
 		err = tx.QueryRow(ctx, `INSERT INTO hosts(integration_id,name,hostname,scope,status,self_protected,facts,last_seen_at) VALUES($1,$2,$3,'remote',$4,false,$5,$6) ON CONFLICT(name) DO UPDATE SET integration_id=EXCLUDED.integration_id,status=EXCLUDED.status,facts=EXCLUDED.facts,last_seen_at=EXCLUDED.last_seen_at RETURNING id::text`, integrationID, hostName, node.Node, resourceStatus(node.Status), facts, snapshot.CapturedAt).Scan(&hostID)
 		if err != nil {
 			return 0, err
 		}
-		metadata, _ := json.Marshal(map[string]any{"cpu_ratio": node.CPU, "memory_used": node.Memory, "uptime": node.Uptime})
+		metadata, _ := json.Marshal(map[string]any{"cpu_ratio": node.CPU, "memory_used": node.Memory, "uptime": node.Uptime, "metrics": node.Metrics})
 		err = tx.QueryRow(ctx, `INSERT INTO nodes(cluster_id,host_id,external_id,name,status,cpu_cores,memory_bytes,metadata,last_seen_at) VALUES($1,$2,$3,$3,$4,$5,$6,$7,$8) ON CONFLICT(cluster_id,name) DO UPDATE SET host_id=EXCLUDED.host_id,status=EXCLUDED.status,cpu_cores=EXCLUDED.cpu_cores,memory_bytes=EXCLUDED.memory_bytes,metadata=EXCLUDED.metadata,last_seen_at=EXCLUDED.last_seen_at RETURNING id::text`, clusterID, hostID, node.Node, resourceStatus(node.Status), node.MaxCPU, node.MaxMemory, metadata, snapshot.CapturedAt).Scan(&nodeID)
 		if err != nil {
 			return 0, err
@@ -81,6 +81,28 @@ func (r *Postgres) Sync(ctx context.Context, snapshot adapter.Snapshot, clusterN
 		}
 		if err = insertMetric(ctx, tx, snapshot.CapturedAt, "node", nodeID, "memory_used_bytes", float64(node.Memory), "bytes"); err != nil {
 			return 0, err
+		}
+		// Mirror the Proxmox RRD point onto the managed host. This makes remote
+		// hypervisors first-class telemetry targets without installing an agent
+		// with command execution privileges on them.
+		for _, metric := range []struct {
+			name  string
+			value float64
+			unit  string
+		}{
+			{"proxmox_cpu_usage_ratio", node.Metrics.CPU, "ratio"},
+			{"proxmox_load1", node.Metrics.Load1, "load"},
+			{"proxmox_memory_total_bytes", float64(node.Metrics.MemoryTotal), "bytes"},
+			{"proxmox_memory_available_bytes", float64(node.Metrics.MemoryAvailable), "bytes"},
+			{"proxmox_root_total_bytes", float64(node.Metrics.RootTotal), "bytes"},
+			{"proxmox_root_used_bytes", float64(node.Metrics.RootUsed), "bytes"},
+			{"proxmox_network_receive_bytes_per_second", node.Metrics.NetworkInBPS, "bytes_per_second"},
+			{"proxmox_network_transmit_bytes_per_second", node.Metrics.NetworkOutBPS, "bytes_per_second"},
+			{"proxmox_io_wait_ratio", node.Metrics.IOWaitRatio, "ratio"},
+		} {
+			if err = insertMetric(ctx, tx, snapshot.CapturedAt, "host", hostID, metric.name, metric.value, metric.unit); err != nil {
+				return 0, err
+			}
 		}
 	}
 	for _, vm := range snapshot.VMs {

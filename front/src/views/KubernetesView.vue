@@ -13,6 +13,7 @@ import {
   Server,
   ShieldCheck,
   Terminal,
+  Trash2,
 } from "lucide-vue-next";
 import Button from "@/components/ui/Button.vue";
 import StatusBadge from "@/components/ui/StatusBadge.vue";
@@ -34,7 +35,7 @@ const tab = ref<Tab>("deployments");
 const client = useQueryClient();
 const { hasPermission } = usePermissions();
 const canManage = computed(() => hasPermission("kubernetes.manage"));
-type GuardedK8sAction = { kind:"deployment"; namespace:string; name:string; action:"scale"|"restart"; replicas?:number } | { kind:"exec"; namespace:string; pod:string; container:string; command:string[] };
+type GuardedK8sAction = { kind:"deployment"; namespace:string; name:string; action:"scale"|"restart"|"delete"; replicas?:number } | { kind:"exec"; namespace:string; pod:string; container:string; command:string[] };
 const guardedAction = ref<GuardedK8sAction | null>(null);
 const guardedTarget = computed(() => {
   const action = guardedAction.value;
@@ -51,7 +52,7 @@ const deploymentAction = useMutation({
   mutationFn: (input: {
     namespace: string;
     name: string;
-    action: "scale" | "restart";
+    action: "scale" | "restart" | "delete";
     replicas?: number;
     headers?: Record<string,string>;
   }) =>
@@ -143,6 +144,11 @@ const scaleDeployment = (deployment: KubernetesDeployment) => {
 const restartDeployment = (deployment: KubernetesDeployment) => {
   if (!canManage.value) return;
   guardedAction.value = { kind:"deployment", namespace:deployment.metadata.namespace, name:deployment.metadata.name, action:"restart" };
+};
+
+const deleteDeployment = (deployment: KubernetesDeployment) => {
+  if (!canManage.value) return;
+  guardedAction.value = { kind:"deployment", namespace:deployment.metadata.namespace, name:deployment.metadata.name, action:"delete" };
 };
 
 const openLogs = (pod: KubernetesPod) => {
@@ -371,6 +377,12 @@ const selectedExecPod = computed(() =>
               :disabled="!canManage || deploymentAction.isPending.value"
               @click="restartDeployment(deployment)"
               ><RotateCcw class="h-3.5 w-3.5" />Restart</Button
+            >
+            <Button
+              variant="danger"
+              :disabled="!canManage || deploymentAction.isPending.value"
+              @click="deleteDeployment(deployment)"
+              ><Trash2 class="h-3.5 w-3.5" />Excluir</Button
             >
           </div>
         </div>

@@ -87,6 +87,8 @@ export interface OCIBlockVolume {
 }
 export interface OCIOverview {
   captured_at: string;
+  tenancy_id: string;
+  tenancy_name: string;
   home_region: string;
   regions: OCIRegion[];
   availability_domains: OCIAvailabilityDomain[];
@@ -106,15 +108,17 @@ export const getOCIOverview = async () =>
 export const runOCIInstanceAction = async (
   instanceId: string,
   action: OCIInstanceAction,
+  region?: string,
 ) =>
   (
     await api.post<{ status: string; action: string }>(
       `/v1/oci/instances/${action}`,
-      { instance_id: instanceId },
+      { instance_id: instanceId, region },
       { timeout: 60_000 },
     )
   ).data;
 export interface OCILaunchInstanceInput {
+  region: string;
   compartment_id: string;
   availability_domain: string;
   display_name: string;
@@ -127,6 +131,7 @@ export interface OCILaunchInstanceInput {
   ssh_authorized_key: string;
 }
 export interface OCICreateAutonomousDatabaseInput {
+  region: string;
   compartment_id: string;
   display_name: string;
   db_name: string;

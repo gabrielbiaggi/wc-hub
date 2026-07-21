@@ -175,7 +175,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, fun
 		application.proxmoxClients = append(application.proxmoxClients, client)
 	}
 	if cfg.DockerEndpoint != "" || cfg.DockerFallbackSocket != "" {
-		client, clientErr := dockeradapter.NewWithConfig(dockeradapter.Config{Endpoint: cfg.DockerEndpoint, FallbackSocketPath: cfg.DockerFallbackSocket, CACertificatePath: cfg.DockerTLSCA, ClientCertPath: cfg.DockerClientCert, ClientKeyPath: cfg.DockerClientKey})
+		client, clientErr := dockeradapter.NewWithConfig(dockeradapter.Config{Endpoint: cfg.DockerEndpoint, SourceName: cfg.DockerSourceName, FallbackSocketPath: cfg.DockerFallbackSocket, CACertificatePath: cfg.DockerTLSCA, ClientCertPath: cfg.DockerClientCert, ClientKeyPath: cfg.DockerClientKey})
 		if clientErr != nil {
 			logger.Error("Docker adapter disabled", "error", clientErr)
 			application.setAdapterError("docker", clientErr)

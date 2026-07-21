@@ -24,11 +24,23 @@ const percent = (part = 0, total = 0) => total > 0 ? Math.max(0, Math.min(100, (
 const ageSeconds = (at: string) => Math.max(0, (Date.now() - new Date(at).getTime()) / 1000);
 const hostStatus = (host: HostSnapshot) => ageSeconds(host.at) <= 45 ? "healthy" : ageSeconds(host.at) <= 120 ? "warning" : "critical";
 const statusLabel = (host: HostSnapshot) => hostStatus(host) === "healthy" ? "transmitindo" : hostStatus(host) === "warning" ? "atrasado" : "offline";
+const proxmoxRRD = (host: HostSnapshot) => host.metrics.proxmox_cpu_usage_ratio !== undefined;
+const sourceLabel = (host: HostSnapshot) => proxmoxRRD(host) ? "Proxmox RRD" : "node_exporter / agente";
+const cpuRatio = (host: HostSnapshot) => proxmoxRRD(host) ? host.metrics.proxmox_cpu_usage_ratio : undefined;
+const load1 = (host: HostSnapshot) => proxmoxRRD(host) ? host.metrics.proxmox_load1 : host.metrics.node_load1;
+const memoryTotal = (host: HostSnapshot) => proxmoxRRD(host) ? host.metrics.proxmox_memory_total_bytes : host.metrics.node_memory_MemTotal_bytes;
+const memoryAvailable = (host: HostSnapshot) => proxmoxRRD(host) ? host.metrics.proxmox_memory_available_bytes : host.metrics.node_memory_MemAvailable_bytes;
 const filesystemUsed = (host: HostSnapshot) => {
+  if (proxmoxRRD(host)) return host.metrics.proxmox_root_used_bytes ?? 0;
   const total = host.metrics.node_filesystem_size_bytes ?? 0;
   return Math.max(0, total - (host.metrics.node_filesystem_avail_bytes ?? 0));
 };
-const energyWatts = (host: HostSnapshot) => host.metrics.node_rapl_package_joules_total ?? host.metrics.node_hwmon_power_average_watt ?? host.metrics.node_hwmon_power_input_watt;
+const filesystemTotal = (host: HostSnapshot) => proxmoxRRD(host) ? host.metrics.proxmox_root_total_bytes : host.metrics.node_filesystem_size_bytes;
+const networkText = (host: HostSnapshot) => proxmoxRRD(host)
+  ? `↓ ${number((host.metrics.proxmox_network_receive_bytes_per_second ?? 0) / 1048576, 1)} · ↑ ${number((host.metrics.proxmox_network_transmit_bytes_per_second ?? 0) / 1048576, 1)} MiB/s`
+  : `↓ ${number(gib(host.metrics.node_network_receive_bytes_total))} · ↑ ${number(gib(host.metrics.node_network_transmit_bytes_total))} GiB`;
+const powerWatts = (host: HostSnapshot) => host.metrics.node_hwmon_power_average_watt ?? host.metrics.node_hwmon_power_input_watt;
+const raplJoules = (host: HostSnapshot) => host.metrics.node_rapl_package_joules_total;
 </script>
 
 <template>
@@ -48,16 +60,18 @@ const energyWatts = (host: HostSnapshot) => host.metrics.node_rapl_package_joule
       <article v-for="host in hosts" :key="host.id" class="overflow-hidden rounded-xl border border-line bg-panel/65">
         <header class="flex items-start gap-3 border-b border-line p-5">
           <div class="grid h-10 w-10 place-items-center rounded-lg bg-signal/10 text-signal"><Cpu class="h-5 w-5" /></div>
-          <div class="min-w-0"><h2 class="truncate text-base font-medium">{{ host.name }}</h2><p class="mt-1 font-mono text-[10px] text-muted">{{ new Date(host.at).toLocaleString("pt-BR") }} · há {{ number(ageSeconds(host.at), 0) }} s</p></div>
+          <div class="min-w-0"><h2 class="truncate text-base font-medium">{{ host.name }}</h2><p class="mt-1 font-mono text-[10px] text-muted">{{ sourceLabel(host) }} · {{ new Date(host.at).toLocaleString("pt-BR") }} · há {{ number(ageSeconds(host.at), 0) }} s</p></div>
           <StatusBadge class="ml-auto" :status="hostStatus(host)" :label="statusLabel(host)" />
         </header>
         <div class="grid grid-cols-2 gap-px bg-line">
-          <div class="bg-panel p-4"><Activity class="h-3.5 w-3.5 text-muted" /><p class="mt-3 text-lg text-white">{{ number(host.metrics.node_load1, 2) }}</p><p class="mt-1 text-[10px] text-muted">Carga de 1 min</p></div>
-          <div class="bg-panel p-4"><MemoryStick class="h-3.5 w-3.5 text-muted" /><p class="mt-3 text-lg text-white">{{ number(gib(host.metrics.node_memory_MemAvailable_bytes)) }} / {{ number(gib(host.metrics.node_memory_MemTotal_bytes)) }} GiB</p><p class="mt-1 text-[10px] text-muted">Memória disponível / total</p></div>
-          <div class="bg-panel p-4"><HardDrive class="h-3.5 w-3.5 text-muted" /><p class="mt-3 text-lg text-white">{{ number(percent(filesystemUsed(host), host.metrics.node_filesystem_size_bytes), 0) }}%</p><p class="mt-1 text-[10px] text-muted">Uso do sistema de arquivos</p></div>
-          <div class="bg-panel p-4"><Network class="h-3.5 w-3.5 text-muted" /><p class="mt-3 text-lg text-white">↓ {{ number(gib(host.metrics.node_network_receive_bytes_total)) }} · ↑ {{ number(gib(host.metrics.node_network_transmit_bytes_total)) }} GiB</p><p class="mt-1 text-[10px] text-muted">Tráfego acumulado</p></div>
+          <div class="bg-panel p-4"><Cpu class="h-3.5 w-3.5 text-muted" /><p class="mt-3 text-lg text-white">{{ cpuRatio(host) === undefined ? "—" : number(cpuRatio(host)! * 100, 1) + " %" }}</p><p class="mt-1 text-[10px] text-muted">Uso de CPU</p></div>
+          <div class="bg-panel p-4"><Activity class="h-3.5 w-3.5 text-muted" /><p class="mt-3 text-lg text-white">{{ number(load1(host), 2) }}</p><p class="mt-1 text-[10px] text-muted">Carga de 1 min</p></div>
+          <div class="bg-panel p-4"><MemoryStick class="h-3.5 w-3.5 text-muted" /><p class="mt-3 text-lg text-white">{{ number(gib(memoryAvailable(host))) }} / {{ number(gib(memoryTotal(host))) }} GiB</p><p class="mt-1 text-[10px] text-muted">Memória disponível / total</p></div>
+          <div class="bg-panel p-4"><HardDrive class="h-3.5 w-3.5 text-muted" /><p class="mt-3 text-lg text-white">{{ number(percent(filesystemUsed(host), filesystemTotal(host)), 0) }}%</p><p class="mt-1 text-[10px] text-muted">Uso do sistema de arquivos</p></div>
+          <div class="bg-panel p-4"><Network class="h-3.5 w-3.5 text-muted" /><p class="mt-3 text-lg text-white">{{ networkText(host) }}</p><p class="mt-1 text-[10px] text-muted">{{ proxmoxRRD(host) ? "Tráfego instantâneo" : "Tráfego acumulado" }}</p></div>
           <div class="bg-panel p-4"><Thermometer class="h-3.5 w-3.5 text-muted" /><p class="mt-3 text-lg text-white">{{ host.metrics.DCGM_FI_DEV_GPU_TEMP === undefined ? "—" : number(host.metrics.DCGM_FI_DEV_GPU_TEMP, 0) + " °C" }}</p><p class="mt-1 text-[10px] text-muted">Temperatura GPU</p></div>
-          <div class="bg-panel p-4"><Zap class="h-3.5 w-3.5 text-muted" /><p class="mt-3 text-lg text-white">{{ energyWatts(host) === undefined ? "sensor indisponível" : number(energyWatts(host), 1) }}</p><p class="mt-1 text-[10px] text-muted">Energia / contador RAPL</p></div>
+          <div class="bg-panel p-4"><Zap class="h-3.5 w-3.5 text-muted" /><p class="mt-3 text-lg text-white">{{ powerWatts(host) !== undefined ? number(powerWatts(host), 1) + " W" : raplJoules(host) !== undefined ? number(raplJoules(host), 0) + " J" : "sensor indisponível" }}</p><p class="mt-1 text-[10px] text-muted">Potência / contador RAPL</p></div>
+          <div v-if="proxmoxRRD(host)" class="bg-panel p-4"><Activity class="h-3.5 w-3.5 text-muted" /><p class="mt-3 text-lg text-white">{{ number((host.metrics.proxmox_io_wait_ratio ?? 0) * 100, 2) }}%</p><p class="mt-1 text-[10px] text-muted">Espera de I/O</p></div>
         </div>
       </article>
     </section>

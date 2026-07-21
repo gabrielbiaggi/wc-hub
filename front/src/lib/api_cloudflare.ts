@@ -65,6 +65,10 @@ export const getCloudflareTunnels = async (accountID: string) =>
 export const createCloudflareTunnel=async(accountID:string,name:string)=>(await api.post<CloudflareTunnel>(`/v1/cloudflare/accounts/${encodeURIComponent(accountID)}/tunnels`,{name})).data
 export const updateCloudflareTunnel=async(accountID:string,tunnelID:string,name:string)=>(await api.patch<CloudflareTunnel>(`/v1/cloudflare/accounts/${encodeURIComponent(accountID)}/tunnels/${encodeURIComponent(tunnelID)}`,{name})).data
 export const deleteCloudflareTunnel=async(accountID:string,tunnelID:string)=>api.delete(`/v1/cloudflare/accounts/${encodeURIComponent(accountID)}/tunnels/${encodeURIComponent(tunnelID)}`)
+export interface CloudflareTunnelIngressRule { hostname?: string; service: string; path?: string; originRequest?: Record<string, unknown> }
+export interface CloudflareTunnelConfiguration { account_id:string; tunnel_id:string; version:number; config:{ ingress:CloudflareTunnelIngressRule[]; originRequest?:Record<string,unknown> } }
+export const getCloudflareTunnelConfiguration=async(accountID:string,tunnelID:string)=>(await api.get<CloudflareTunnelConfiguration>(`/v1/cloudflare/accounts/${encodeURIComponent(accountID)}/tunnels/${encodeURIComponent(tunnelID)}/configuration`)).data
+export const updateCloudflareTunnelConfiguration=async(accountID:string,tunnelID:string,ingress:CloudflareTunnelIngressRule[])=>(await api.put<CloudflareTunnelConfiguration>(`/v1/cloudflare/accounts/${encodeURIComponent(accountID)}/tunnels/${encodeURIComponent(tunnelID)}/configuration`,{ingress})).data
 export interface CloudflarePrivateRoute{id:string;network:string;tunnel_id:string;comment?:string}
 export const getCloudflarePrivateRoutes=async(accountID:string)=>(await api.get<{items:CloudflarePrivateRoute[]}>(`/v1/cloudflare/accounts/${encodeURIComponent(accountID)}/private-routes`)).data.items
 export const createCloudflarePrivateRoute=async(accountID:string,input:{network:string;tunnel_id:string;comment?:string})=>(await api.post<CloudflarePrivateRoute>(`/v1/cloudflare/accounts/${encodeURIComponent(accountID)}/private-routes`,input)).data

@@ -29,6 +29,7 @@ type Config struct {
 	ProxmoxTLSInsecure        bool
 	ProxmoxAdditionalConfigs  []string
 	DockerEndpoint            string
+	DockerSourceName          string
 	DockerTLSCA               string
 	DockerClientCert          string
 	DockerClientKey           string
@@ -94,6 +95,7 @@ func Load() Config {
 		ProxmoxTLSInsecure:        envBool("PROXMOX_TLS_INSECURE_SKIP_VERIFY", false),
 		ProxmoxAdditionalConfigs:  split(env("PROXMOX_ADDITIONAL_CONFIG_PATHS", "")),
 		DockerEndpoint:            strings.TrimRight(env("DOCKER_PROXY_URL", ""), "/"),
+		DockerSourceName:          env("DOCKER_SOURCE_NAME", ""),
 		DockerTLSCA:               env("DOCKER_TLS_CA_PATH", ""),
 		DockerClientCert:          env("DOCKER_CLIENT_CERT_PATH", ""),
 		DockerClientKey:           env("DOCKER_CLIENT_KEY_PATH", ""),

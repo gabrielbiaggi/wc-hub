@@ -79,7 +79,7 @@ func (r *Postgres) Maintenance(ctx context.Context) error {
 }
 func allowed(name string) bool {
 	switch name {
-	case "node_load1", "node_load5", "node_load15", "node_memory_MemTotal_bytes", "node_memory_MemAvailable_bytes", "node_filesystem_size_bytes", "node_filesystem_avail_bytes", "node_network_receive_bytes_total", "node_network_transmit_bytes_total", "node_cpu_seconds_total", "DCGM_FI_DEV_GPU_UTIL", "DCGM_FI_DEV_FB_USED", "DCGM_FI_DEV_FB_FREE", "DCGM_FI_DEV_GPU_TEMP":
+	case "node_load1", "node_load5", "node_load15", "node_memory_MemTotal_bytes", "node_memory_MemAvailable_bytes", "node_filesystem_size_bytes", "node_filesystem_avail_bytes", "node_network_receive_bytes_total", "node_network_transmit_bytes_total", "node_cpu_seconds_total", "node_rapl_package_joules_total", "node_hwmon_power_average_watt", "node_hwmon_power_input_watt", "DCGM_FI_DEV_GPU_UTIL", "DCGM_FI_DEV_FB_USED", "DCGM_FI_DEV_FB_FREE", "DCGM_FI_DEV_GPU_TEMP":
 		return true
 	}
 	return false

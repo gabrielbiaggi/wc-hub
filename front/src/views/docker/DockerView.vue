@@ -90,6 +90,8 @@ const formatBytes = (value = 0) => {
 };
 const shortID = (value: string) => value.replace(/^sha256:/, "").slice(0, 12);
 const nameOf = (names: string[]) => names[0]?.replace(/^\//, "") || "sem nome";
+const projectOf = (container: DockerContainer) => container.labels["com.docker.compose.project"] || "infraestrutura sem projeto Compose";
+const serviceOf = (container: DockerContainer) => container.labels["com.docker.compose.service"] || "serviço avulso";
 const statsOf = (id: string): DockerContainerStats | undefined =>
   statsByContainer.value.get(id);
 const execute = (id: string, operation: "start" | "stop" | "restart") => {
@@ -135,8 +137,7 @@ const runCommand = () => {
           Ambiente Docker
         </h1>
         <p class="mt-2 text-sm text-muted">
-          Containers, imagens e sinais vitais coletados pela API restrita, sem
-          montar o socket no plano de controle.
+          Origem ativa: <span class="font-mono text-slate-300">{{ query.data.value?.source ?? query.data.value?.health.source ?? "aguardando endpoint" }}</span>. Containers são classificados por projeto Compose e serviço.
         </p>
       </div>
       <Button
@@ -210,7 +211,7 @@ const runCommand = () => {
         class="flex flex-col gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:justify-between"
       >
         <div>
-          <h2 class="text-sm font-medium">Inventário do ambiente</h2>
+          <h2 class="text-sm font-medium">Inventário do ambiente · {{ query.data.value?.source ?? query.data.value?.health.source ?? "endpoint" }}</h2>
           <p class="mt-1 text-[11px] text-muted">
             Captura
             {{
@@ -269,6 +270,9 @@ const runCommand = () => {
               </p>
               <p class="mt-1 truncate font-mono text-[10px] text-muted">
                 {{ shortID(container.id) }} · {{ container.image }}
+              </p>
+              <p class="mt-1 truncate font-mono text-[9px] text-signal">
+                {{ projectOf(container) }} / {{ serviceOf(container) }}
               </p>
             </div>
           </div>

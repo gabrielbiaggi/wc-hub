@@ -26,6 +26,7 @@ var containerIDPattern = regexp.MustCompile(`^[a-f0-9]{12,64}$`)
 
 type Config struct {
 	Endpoint           string
+	SourceName         string
 	FallbackSocketPath string
 	CACertificatePath  string
 	ClientCertPath     string
@@ -36,6 +37,7 @@ type Config struct {
 type Client struct {
 	primary  endpoint
 	fallback *endpoint
+	source   string
 }
 type endpoint struct {
 	name, baseURL string
@@ -44,6 +46,7 @@ type endpoint struct {
 
 type Health struct {
 	Reachable  bool   `json:"reachable"`
+	Source     string `json:"source,omitempty"`
 	Version    string `json:"version,omitempty"`
 	APIVersion string `json:"api_version,omitempty"`
 	OSType     string `json:"os_type,omitempty"`
@@ -96,6 +99,7 @@ type ContainerStats struct {
 
 type Inventory struct {
 	CapturedAt time.Time        `json:"captured_at"`
+	Source     string           `json:"source,omitempty"`
 	Health     Health           `json:"health"`
 	Containers []Container      `json:"containers"`
 	Images     []Image          `json:"images"`
@@ -213,7 +217,7 @@ func NewWithConfig(config Config) (*Client, error) {
 		IdleConnTimeout:    60 * time.Second,
 		DisableCompression: false,
 	}
-	client := &Client{}
+	client := &Client{source: strings.TrimSpace(config.SourceName)}
 	if rawEndpoint := strings.TrimSpace(config.Endpoint); rawEndpoint != "" {
 		parsed, err := url.Parse(rawEndpoint)
 		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
@@ -232,6 +236,13 @@ func NewWithConfig(config Config) (*Client, error) {
 	}
 	if client.primary.http == nil && client.fallback == nil {
 		return nil, errors.New("Docker endpoint or Unix socket path is required")
+	}
+	if client.source == "" {
+		if client.primary.name != "" {
+			client.source = client.primary.name
+		} else if client.fallback != nil {
+			client.source = client.fallback.name
+		}
 	}
 	return client, nil
 }
@@ -260,7 +271,7 @@ func (c *Client) Health(ctx context.Context) (Health, error) {
 	if err = c.get(ctx, "/version", &version); err != nil {
 		return Health{}, err
 	}
-	return Health{Reachable: true, Version: version.Version, APIVersion: version.APIVersion, OSType: version.OSType, Arch: version.Arch}, nil
+	return Health{Reachable: true, Source: c.source, Version: version.Version, APIVersion: version.APIVersion, OSType: version.OSType, Arch: version.Arch}, nil
 }
 
 func (c *Client) ListContainers(ctx context.Context) ([]Container, error) {
@@ -468,7 +479,7 @@ func (c *Client) Stats(ctx context.Context, containers []Container) ([]Container
 }
 
 func (c *Client) Inventory(ctx context.Context) (Inventory, error) {
-	result := Inventory{CapturedAt: time.Now().UTC(), Warnings: []string{}}
+	result := Inventory{CapturedAt: time.Now().UTC(), Source: c.source, Warnings: []string{}}
 	health, err := c.Health(ctx)
 	if err != nil {
 		return result, err

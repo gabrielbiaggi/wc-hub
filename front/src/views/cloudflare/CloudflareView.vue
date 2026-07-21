@@ -22,6 +22,7 @@ import {
   getCloudflareOverview,
   getCloudflareRulesets,
   getCloudflareZoneSettings,
+  getCloudflareTunnelConfiguration,
   purgeCloudflareCache,
   updateCloudflareZoneSetting,
   createCloudflareDNSRecord,
@@ -32,6 +33,7 @@ import {
   deleteCloudflareDNSRecord,
   updateCloudflareDNSRecord,
   updateCloudflareTunnel,
+  updateCloudflareTunnelConfiguration,
   type CloudflareDNSRecord,
   type CloudflareProviderStatus,
   type CloudflareTunnelStatus,
@@ -75,6 +77,21 @@ const accountIDs = computed(() => overview.value?.targets.filter((target) => tar
 const selectedAccountID = computed(() => selectedAccount.value || accountIDs.value[0] || "");
 const privateNetwork=ref(''); const privateTunnel=ref('');
 const privateRoutes=useQuery({queryKey:['cloudflare','private-routes',selectedAccountID],queryFn:()=>getCloudflarePrivateRoutes(selectedAccountID.value),enabled:computed(()=>!!selectedAccountID.value)});
+const configuredTunnel = ref<{accountID:string;id:string;name:string}|null>(null);
+const tunnelIngress = ref('[]');
+const tunnelConfiguration = useQuery({
+  queryKey:['cloudflare','tunnel-configuration',configuredTunnel],
+  queryFn:()=>getCloudflareTunnelConfiguration(configuredTunnel.value!.accountID,configuredTunnel.value!.id),
+  enabled:computed(()=>!!configuredTunnel.value),
+});
+const tunnelConfigurationMutation=useMutation({
+  mutationFn:()=>{
+    const ingress=JSON.parse(tunnelIngress.value);
+    if(!Array.isArray(ingress)) throw new Error('Ingress deve ser uma lista JSON.');
+    return updateCloudflareTunnelConfiguration(configuredTunnel.value!.accountID,configuredTunnel.value!.id,ingress);
+  },
+  onSuccess:(value)=>{tunnelIngress.value=JSON.stringify(value.config.ingress,null,2);tunnelConfiguration.refetch()},
+});
 const selectedZoneID = computed(
   () => selectedZone.value || zoneIDs.value[0] || "",
 );
@@ -152,6 +169,9 @@ const createPrivateRoute=()=>{if(selectedAccountID.value&&privateNetwork.value&&
 const createTunnel=()=>{if(selectedAccountID.value&&tunnelName.value)tunnelMutation.mutate({operation:'create',name:tunnelName.value})}
 const renameTunnel=(id:string,name:string)=>{const updated=window.prompt('Novo nome do tunnel',name);if(updated&&updated!==name)tunnelMutation.mutate({operation:'update',id,name:updated})}
 const removeTunnel=(id:string,name:string)=>{if(window.prompt(`Excluir o tunnel ${name}. Digite EXCLUIR:`)==='EXCLUIR')tunnelMutation.mutate({operation:'delete',id})}
+const configureTunnel=(accountID:string,id:string,name:string)=>{configuredTunnel.value={accountID,id,name};tunnelIngress.value='[]';}
+const loadTunnelConfiguration=()=>{if(tunnelConfiguration.data.value)tunnelIngress.value=JSON.stringify(tunnelConfiguration.data.value.config.ingress,null,2)}
+const saveTunnelConfiguration=()=>{if(window.prompt(`Atualizar ingress de ${configuredTunnel.value?.name}. Digite ATUALIZAR:`)==='ATUALIZAR')tunnelConfigurationMutation.mutate()}
 const zoneFor = (record?: CloudflareDNSRecord) =>
   record?.zone_id || selectedZone.value || zoneIDs.value[0] || "";
 const createRecord = () => {
@@ -420,6 +440,12 @@ const shortID = (value: string) =>
               <Button type="submit" :disabled="!selectedAccountID||tunnelMutation.isPending.value"><Plus class="h-4 w-4"/>Criar Tunnel</Button>
             </form>
             <form class="grid gap-3 border-b border-line bg-slate-950/15 p-4 md:grid-cols-[180px_1fr_1fr_140px]" @submit.prevent="createPrivateRoute"><p class="self-center font-mono text-[10px] uppercase text-muted">Rota privada</p><input v-model.trim="privateNetwork" required placeholder="10.10.50.0/24" class="rounded-lg border border-line bg-slate-950 px-3 py-2 text-xs text-slate-200"/><select v-model="privateTunnel" required class="rounded-lg border border-line bg-slate-950 px-3 text-xs text-slate-200"><option value="">Selecione o Tunnel</option><option v-for="tunnel in overview.tunnels" :key="tunnel.id" :value="tunnel.id">{{tunnel.name}}</option></select><Button type="submit" variant="outline" :disabled="privateRouteMutation.isPending.value"><Route class="h-4 w-4"/>Adicionar rota</Button><p v-if="privateRoutes.data.value?.length" class="md:col-span-4 font-mono text-[10px] text-muted">{{privateRoutes.data.value.map(route=>route.network).join(' · ')}}</p></form>
+            <section v-if="configuredTunnel" class="border-b border-line bg-slate-950/25 p-4">
+              <div class="flex flex-wrap items-center justify-between gap-3"><div><p class="text-sm text-slate-100">Ingress do tunnel · {{ configuredTunnel.name }}</p><p class="mt-1 font-mono text-[10px] text-muted">A última regra precisa ser o catch-all http_status exigido pela Cloudflare.</p></div><div class="flex gap-2"><Button variant="outline" :disabled="tunnelConfiguration.isFetching.value" @click="tunnelConfiguration.refetch().then(loadTunnelConfiguration)"><RefreshCw class="h-3.5 w-3.5"/>Ler</Button><Button variant="outline" @click="configuredTunnel=null">Fechar</Button></div></div>
+              <p v-if="tunnelConfiguration.isError.value || tunnelConfigurationMutation.isError.value" class="mt-3 text-xs text-danger">A configuração ingress foi rejeitada. Revise a sintaxe JSON e a regra final de fallback.</p>
+              <textarea v-model="tunnelIngress" class="mt-3 h-48 w-full rounded-lg border border-line bg-slate-950 p-3 font-mono text-xs text-slate-200" spellcheck="false" aria-label="Regras ingress JSON"/>
+              <Button class="mt-3" :disabled="tunnelConfigurationMutation.isPending.value" @click="saveTunnelConfiguration"><Settings class="h-4 w-4"/>Salvar ingress</Button>
+            </section>
             <article
               v-for="tunnel in overview.tunnels"
               :key="tunnel.id"
@@ -453,7 +479,7 @@ const shortID = (value: string) =>
               <p class="font-mono text-[10px] text-muted md:text-right">
                 {{ tunnel.connections[0]?.colocation || "NO ACTIVE COLO" }}
               </p>
-              <div class="flex justify-end gap-1 md:col-span-3"><button class="rounded p-2 text-muted hover:bg-white/5 hover:text-white" title="Renomear" @click="renameTunnel(tunnel.id,tunnel.name)"><Pencil class="h-3.5 w-3.5"/></button><button class="rounded p-2 text-danger hover:bg-danger/10" title="Excluir" @click="removeTunnel(tunnel.id,tunnel.name)"><Trash2 class="h-3.5 w-3.5"/></button></div>
+              <div class="flex justify-end gap-1 md:col-span-3"><button class="rounded p-2 text-muted hover:bg-white/5 hover:text-white" title="Ingress" @click="configureTunnel(tunnel.account_id,tunnel.id,tunnel.name)"><Settings class="h-3.5 w-3.5"/></button><button class="rounded p-2 text-muted hover:bg-white/5 hover:text-white" title="Renomear" @click="renameTunnel(tunnel.id,tunnel.name)"><Pencil class="h-3.5 w-3.5"/></button><button class="rounded p-2 text-danger hover:bg-danger/10" title="Excluir" @click="removeTunnel(tunnel.id,tunnel.name)"><Trash2 class="h-3.5 w-3.5"/></button></div>
             </article>
             <div
               v-if="!overview.tunnels.length"

@@ -64,6 +64,7 @@ services:
       PROXMOX_TLS_INSECURE_SKIP_VERIFY: ${PROXMOX_TLS_INSECURE_SKIP_VERIFY:-false}
       PROXMOX_ADDITIONAL_CONFIG_PATHS: ${PROXMOX_ADDITIONAL_CONFIG_PATHS:-}
       DOCKER_PROXY_URL: ${DOCKER_PROXY_URL:-}
+      DOCKER_SOURCE_NAME: ${DOCKER_SOURCE_NAME:-}
       DOCKER_TLS_CA_PATH: /run/secrets/docker_ca.pem
       DOCKER_CLIENT_CERT_PATH: /run/secrets/docker_client.pem
       DOCKER_CLIENT_KEY_PATH: /run/secrets/docker_client_key.pem

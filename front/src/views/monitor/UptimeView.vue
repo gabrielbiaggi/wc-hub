@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
-import { Activity, Link, Plus, RefreshCw, Trash2 } from "lucide-vue-next";
+import { Activity, Link, Pencil, Plus, RefreshCw, Trash2 } from "lucide-vue-next";
 import Button from "@/components/ui/Button.vue";
 import StatusBadge from "@/components/ui/StatusBadge.vue";
 import {
@@ -10,6 +10,7 @@ import {
   getMonitorTargets,
   getMonitorWebhook,
   setMonitorWebhook,
+  updateMonitorTarget,
   type MonitorTarget,
 } from "@/lib/api_monitor";
 const client = useQueryClient();
@@ -47,6 +48,10 @@ const remove = useMutation({
   mutationFn: deleteMonitorTarget,
   onSuccess: () => client.invalidateQueries({ queryKey: ["monitor-targets"] }),
 });
+const update = useMutation({
+  mutationFn: (input: { id:string; target: Omit<MonitorTarget, "id" | "lastStatus" | "lastLatencyMS" | "lastError" | "lastCheckedAt"> }) => updateMonitorTarget(input.id, input.target),
+  onSuccess: () => client.invalidateQueries({ queryKey: ["monitor-targets"] }),
+});
 const saveHook = useMutation({
   mutationFn: () => setMonitorWebhook(hook.value),
   onSuccess: () => {
@@ -58,6 +63,14 @@ const submitCreate = () => create.mutate();
 const submitWebhook = () => saveHook.mutate();
 const removeTarget = (item: MonitorTarget) => {
   if (window.confirm(`Excluir monitor ${item.name}?`)) remove.mutate(item.id);
+};
+const editTarget = (item: MonitorTarget) => {
+  const name = window.prompt("Nome do monitor", item.name); if (name === null) return;
+  const target = window.prompt("Alvo (URL ou host:porta)", item.target); if (target === null) return;
+  const interval = window.prompt("Intervalo em segundos", String(item.intervalSeconds)); if (interval === null) return;
+  const intervalSeconds = Number(interval);
+  if (!name.trim() || !target.trim() || !Number.isInteger(intervalSeconds) || intervalSeconds < 15 || intervalSeconds > 3600) { window.alert("Dados inválidos. Intervalo entre 15 e 3600 segundos."); return; }
+  update.mutate({ id:item.id, target:{ name:name.trim(), target:target.trim(), kind:item.kind, intervalSeconds, enabled:item.enabled } });
 };
 </script>
 <template>
@@ -118,9 +131,11 @@ const removeTarget = (item: MonitorTarget) => {
             <p class="text-xs text-muted">
               {{ item.lastLatencyMS ? `${item.lastLatencyMS} ms` : "—" }}
             </p>
-            <Button size="sm" variant="danger" @click="removeTarget(item)"
+            <div class="flex gap-2"><Button size="sm" variant="outline" @click="editTarget(item)"
+              ><Pencil class="h-3.5 w-3.5"
+            /></Button><Button size="sm" variant="danger" @click="removeTarget(item)"
               ><Trash2 class="h-3.5 w-3.5"
-            /></Button>
+            /></Button></div>
           </article>
           <p
             v-if="!targets.data.value?.length"

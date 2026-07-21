@@ -21,6 +21,10 @@ export const createMonitorTarget = async (
 ) => (await api.post<MonitorTarget>("/v1/monitor/targets", input)).data;
 export const deleteMonitorTarget = async (id: string) =>
   api.delete(`/v1/monitor/targets/${id}`);
+export const updateMonitorTarget = async (
+  id: string,
+  input: Omit<MonitorTarget, "id" | "lastStatus" | "lastLatencyMS" | "lastError" | "lastCheckedAt">,
+) => (await api.patch<MonitorTarget>(`/v1/monitor/targets/${id}`, input)).data;
 export const getMonitorWebhook = async () =>
   (await api.get<{ configured: boolean }>("/v1/monitor/webhook")).data;
 export const setMonitorWebhook = async (url: string) =>

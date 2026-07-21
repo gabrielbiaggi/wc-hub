@@ -36,15 +36,31 @@ type Config struct {
 	InsecureSkipVerify bool
 }
 type Node struct {
-	Cluster   string  `json:"cluster"`
-	Node      string  `json:"node"`
-	Status    string  `json:"status"`
-	CPU       float64 `json:"cpu"`
-	MaxCPU    int     `json:"maxcpu"`
-	Memory    int64   `json:"mem"`
-	MaxMemory int64   `json:"maxmem"`
-	Uptime    int64   `json:"uptime"`
-	Level     string  `json:"level"`
+	Cluster   string      `json:"cluster"`
+	Node      string      `json:"node"`
+	Status    string      `json:"status"`
+	CPU       float64     `json:"cpu"`
+	MaxCPU    int         `json:"maxcpu"`
+	Memory    int64       `json:"mem"`
+	MaxMemory int64       `json:"maxmem"`
+	Uptime    int64       `json:"uptime"`
+	Level     string      `json:"level"`
+	Metrics   NodeMetrics `json:"metrics"`
+}
+
+// NodeMetrics is the latest point from Proxmox RRD. The regular /nodes
+// endpoint intentionally omits live utilisation for restricted API tokens;
+// the RRD endpoint remains read-only and gives a stable operational sample.
+type NodeMetrics struct {
+	CPU             float64 `json:"cpu_ratio"`
+	Load1           float64 `json:"load1"`
+	MemoryTotal     int64   `json:"memory_total_bytes"`
+	MemoryAvailable int64   `json:"memory_available_bytes"`
+	RootTotal       int64   `json:"root_total_bytes"`
+	RootUsed        int64   `json:"root_used_bytes"`
+	NetworkInBPS    float64 `json:"network_in_bytes_per_second"`
+	NetworkOutBPS   float64 `json:"network_out_bytes_per_second"`
+	IOWaitRatio     float64 `json:"io_wait_ratio"`
 }
 type VM struct {
 	Cluster   string      `json:"cluster"`
@@ -235,6 +251,25 @@ func (c *Client) Snapshot(ctx context.Context) (Snapshot, error) {
 		result.Nodes[i].Cluster = c.ID()
 	}
 	for _, node := range result.Nodes {
+		if metrics, metricsErr := c.nodeMetrics(ctx, node.Node); metricsErr != nil {
+			result.Warnings = append(result.Warnings, "Proxmox "+node.Node+" RRD: "+metricsErr.Error())
+		} else {
+			for index := range result.Nodes {
+				if result.Nodes[index].Node == node.Node {
+					result.Nodes[index].Metrics = metrics
+					if metrics.CPU > 0 || result.Nodes[index].CPU == 0 {
+						result.Nodes[index].CPU = metrics.CPU
+					}
+					if metrics.MemoryTotal > 0 {
+						result.Nodes[index].MaxMemory = metrics.MemoryTotal
+					}
+					if metrics.MemoryTotal > 0 && metrics.MemoryAvailable >= 0 {
+						result.Nodes[index].Memory = metrics.MemoryTotal - metrics.MemoryAvailable
+					}
+					break
+				}
+			}
+		}
 		var qemu, lxc []VM
 		if err := c.get(ctx, "/api2/json/nodes/"+url.PathEscape(node.Node)+"/qemu", &qemu); err != nil {
 			return result, err
@@ -265,6 +300,36 @@ func (c *Client) Snapshot(ctx context.Context) (Snapshot, error) {
 		result.Storage = append(result.Storage, stores...)
 	}
 	return result, nil
+}
+
+type rrdPoint struct {
+	Time         int64   `json:"time"`
+	CPU          float64 `json:"cpu"`
+	LoadAvg      float64 `json:"loadavg"`
+	MemTotal     int64   `json:"memtotal"`
+	MemAvailable int64   `json:"memavailable"`
+	RootTotal    int64   `json:"roottotal"`
+	RootUsed     int64   `json:"rootused"`
+	NetIn        float64 `json:"netin"`
+	NetOut       float64 `json:"netout"`
+	IOWait       float64 `json:"iowait"`
+}
+
+func (c *Client) nodeMetrics(ctx context.Context, node string) (NodeMetrics, error) {
+	points := []rrdPoint{}
+	if err := c.get(ctx, "/api2/json/nodes/"+url.PathEscape(node)+"/rrddata?timeframe=hour", &points); err != nil {
+		return NodeMetrics{}, err
+	}
+	if len(points) == 0 {
+		return NodeMetrics{}, fmt.Errorf("no RRD points returned")
+	}
+	latest := points[0]
+	for _, point := range points[1:] {
+		if point.Time > latest.Time {
+			latest = point
+		}
+	}
+	return NodeMetrics{CPU: latest.CPU, Load1: latest.LoadAvg, MemoryTotal: latest.MemTotal, MemoryAvailable: latest.MemAvailable, RootTotal: latest.RootTotal, RootUsed: latest.RootUsed, NetworkInBPS: latest.NetIn, NetworkOutBPS: latest.NetOut, IOWaitRatio: latest.IOWait}, nil
 }
 
 func (c *Client) CreateQEMU(ctx context.Context, input CreateQEMUInput) error {

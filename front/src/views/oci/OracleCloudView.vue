@@ -35,6 +35,7 @@ import { apiErrorMessage } from "@/lib/api_error";
 
 type Tab = "instances" | "databases" | "provision" | "network" | "identity";
 const tab = ref<Tab>("instances");
+const regionFilter = ref("all");
 const client = useQueryClient();
 const overview = useQuery({
   queryKey: ["oci-overview"],
@@ -44,7 +45,7 @@ const overview = useQuery({
 });
 const action = useMutation({
   mutationFn: (input: { instance: OCIInstance; action: OCIInstanceAction }) =>
-    runOCIInstanceAction(input.instance.id, input.action),
+    runOCIInstanceAction(input.instance.id, input.action, input.instance.region),
   onSuccess: () =>
     setTimeout(
       () => client.invalidateQueries({ queryKey: ["oci-overview"] }),
@@ -52,6 +53,7 @@ const action = useMutation({
     ),
 });
 const launchForm = ref<OCILaunchInstanceInput>({
+  region: "",
   compartment_id: "",
   availability_domain: "",
   display_name: "",
@@ -64,6 +66,7 @@ const launchForm = ref<OCILaunchInstanceInput>({
   ssh_authorized_key: "",
 });
 const databaseForm = ref<OCICreateAutonomousDatabaseInput>({
+  region: "",
   compartment_id: "",
   display_name: "",
   db_name: "",
@@ -101,6 +104,7 @@ const running = computed(
       (item) => item.lifecycle_state === "RUNNING",
     ).length ?? 0,
 );
+const visibleInstances = computed(() => (overview.data.value?.instances ?? []).filter((item) => regionFilter.value === "all" || item.region === regionFilter.value));
 const ociError = computed(() =>
   apiErrorMessage(
     overview.error.value ??
@@ -167,8 +171,7 @@ const provisionDatabase = () => {
         </div>
         <h1 class="mt-4 text-3xl font-semibold">Oracle Cloud Infrastructure</h1>
         <p class="mt-2 text-sm text-muted">
-          Computação, regiões, compartimentos e topologia de rede carregados
-          diretamente da tenancy OCI.
+          Tenancy <span class="font-medium text-slate-300">{{ overview.data.value?.tenancy_name || "configurada" }}</span> · recursos organizados por região, compartimento e domínio de disponibilidade.
         </p>
       </div>
       <Button
@@ -241,7 +244,7 @@ const provisionDatabase = () => {
             Inventário e administração da tenancy
           </h2>
           <p class="mt-1 font-mono text-[9px] text-muted">
-            Principal {{ overview.data.value?.home_region || "—" }} · captura
+            {{ overview.data.value?.tenancy_name || "Tenancy configurada" }} · principal {{ overview.data.value?.home_region || "—" }} · captura
             {{
               overview.data.value
                 ? new Date(overview.data.value.captured_at).toLocaleString(
@@ -272,9 +275,14 @@ const provisionDatabase = () => {
         </nav>
       </header>
 
+      <div class="flex flex-wrap gap-2 border-b border-line px-4 py-3" aria-label="Filtro de região OCI">
+        <button :class="['rounded-full border px-3 py-1 font-mono text-[10px]', regionFilter === 'all' ? 'border-signal/40 bg-signal/10 text-signal' : 'border-line text-muted']" @click="regionFilter = 'all'">Todas as regiões</button>
+        <button v-for="region in overview.data.value?.regions" :key="region.name" :class="['rounded-full border px-3 py-1 font-mono text-[10px]', regionFilter === region.name ? 'border-signal/40 bg-signal/10 text-signal' : 'border-line text-muted']" @click="regionFilter = region.name">{{ region.name }}{{ region.home ? ' · principal' : '' }}</button>
+      </div>
+
       <div v-if="tab === 'instances'" class="divide-y divide-line/60">
         <div
-          v-for="instance in overview.data.value?.instances"
+          v-for="instance in visibleInstances"
           :key="instance.id"
           class="grid gap-4 p-4 xl:grid-cols-[1fr_260px_320px] xl:items-center"
         >
@@ -295,7 +303,7 @@ const provisionDatabase = () => {
               />
             </div>
             <p class="mt-2 font-mono text-[9px] text-muted">
-              {{ instance.shape }} · {{ instance.availability_domain }} ·
+              {{ instance.region || "região não informada" }} · {{ instance.shape }} · {{ instance.availability_domain }} ·
               {{ instance.fault_domain || "sem domínio de falha" }}
             </p>
             <p
@@ -473,6 +481,15 @@ const provisionDatabase = () => {
                 </option>
               </select></label
             ><label class="text-xs text-muted"
+              >Região<select
+                v-model="launchForm.region"
+                required
+                class="mt-1 w-full rounded-lg border border-line bg-slate-950 p-2"
+              >
+                <option value="" disabled>Selecione</option>
+                <option v-for="item in overview.data.value?.regions" :key="item.name" :value="item.name">{{ item.name }}{{ item.home ? " · principal" : "" }}</option>
+              </select></label
+            ><label class="text-xs text-muted"
               >Domínio de disponibilidade<select
                 v-model="launchForm.availability_domain"
                 required
@@ -565,6 +582,15 @@ const provisionDatabase = () => {
                 >
                   {{ item.name }}
                 </option>
+              </select></label
+            ><label class="text-xs text-muted"
+              >Região<select
+                v-model="databaseForm.region"
+                required
+                class="mt-1 w-full rounded-lg border border-line bg-slate-950 p-2"
+              >
+                <option value="" disabled>Selecione</option>
+                <option v-for="item in overview.data.value?.regions" :key="item.name" :value="item.name">{{ item.name }}{{ item.home ? " · principal" : "" }}</option>
               </select></label
             ><label class="text-xs text-muted"
               >Carga<select

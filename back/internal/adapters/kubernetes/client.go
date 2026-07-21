@@ -38,20 +38,29 @@ type Client struct {
 }
 
 type Metadata struct {
-	Name, Namespace, UID string
-	CreationTimestamp    time.Time         `json:"creationTimestamp"`
-	Labels               map[string]string `json:"labels"`
+	Name              string            `json:"name"`
+	Namespace         string            `json:"namespace"`
+	UID               string            `json:"uid"`
+	CreationTimestamp time.Time         `json:"creationTimestamp"`
+	Labels            map[string]string `json:"labels"`
 }
 type Condition struct {
-	Type, Status, Reason, Message string
-	LastTransitionTime            time.Time `json:"lastTransitionTime"`
+	Type               string    `json:"type"`
+	Status             string    `json:"status"`
+	Reason             string    `json:"reason"`
+	Message            string    `json:"message"`
+	LastTransitionTime time.Time `json:"lastTransitionTime"`
 }
 type Node struct {
 	Metadata Metadata `json:"metadata"`
 	Status   struct {
-		Conditions []Condition                                            `json:"conditions"`
-		NodeInfo   struct{ KubeletVersion, OSImage, Architecture string } `json:"nodeInfo"`
-		Capacity   map[string]string                                      `json:"capacity"`
+		Conditions []Condition `json:"conditions"`
+		NodeInfo   struct {
+			KubeletVersion string `json:"kubeletVersion"`
+			OSImage        string `json:"osImage"`
+			Architecture   string `json:"architecture"`
+		} `json:"nodeInfo"`
+		Capacity map[string]string `json:"capacity"`
 	} `json:"status"`
 }
 type Deployment struct {
@@ -59,27 +68,49 @@ type Deployment struct {
 	Spec     struct {
 		Replicas int `json:"replicas"`
 	} `json:"spec"`
-	Status struct{ Replicas, ReadyReplicas, AvailableReplicas, UnavailableReplicas int } `json:"status"`
+	Status struct {
+		Replicas            int `json:"replicas"`
+		ReadyReplicas       int `json:"readyReplicas"`
+		AvailableReplicas   int `json:"availableReplicas"`
+		UnavailableReplicas int `json:"unavailableReplicas"`
+	} `json:"status"`
 }
 type Pod struct {
 	Metadata Metadata `json:"metadata"`
 	Status   struct {
-		Phase, Reason, Message, PodIP, HostIP string
-		ContainerStatuses                     []struct {
-			Name         string
-			Ready        bool
-			RestartCount int
+		Phase             string `json:"phase"`
+		Reason            string `json:"reason"`
+		Message           string `json:"message"`
+		PodIP             string `json:"podIP"`
+		HostIP            string `json:"hostIP"`
+		ContainerStatuses []struct {
+			Name         string `json:"name"`
+			Ready        bool   `json:"ready"`
+			RestartCount int    `json:"restartCount"`
 		} `json:"containerStatuses"`
 		Conditions []Condition `json:"conditions"`
 	} `json:"status"`
 }
 type Event struct {
-	Metadata                      Metadata `json:"metadata"`
-	Type, Reason, Message         string
-	Count                         int
-	FirstTimestamp, LastTimestamp time.Time
-	Regarding                     struct{ Kind, Namespace, Name, UID string } `json:"regarding"`
-	InvolvedObject                struct{ Kind, Namespace, Name, UID string } `json:"involvedObject"`
+	Metadata       Metadata  `json:"metadata"`
+	Type           string    `json:"type"`
+	Reason         string    `json:"reason"`
+	Message        string    `json:"message"`
+	Count          int       `json:"count"`
+	FirstTimestamp time.Time `json:"firstTimestamp"`
+	LastTimestamp  time.Time `json:"lastTimestamp"`
+	Regarding      struct {
+		Kind      string `json:"kind"`
+		Namespace string `json:"namespace"`
+		Name      string `json:"name"`
+		UID       string `json:"uid"`
+	} `json:"regarding"`
+	InvolvedObject struct {
+		Kind      string `json:"kind"`
+		Namespace string `json:"namespace"`
+		Name      string `json:"name"`
+		UID       string `json:"uid"`
+	} `json:"involvedObject"`
 }
 type Overview struct {
 	GeneratedAt time.Time    `json:"generated_at"`
@@ -365,9 +396,9 @@ func mapPod(item corev1.Pod) Pod {
 	}
 	for _, status := range item.Status.ContainerStatuses {
 		mapped.Status.ContainerStatuses = append(mapped.Status.ContainerStatuses, struct {
-			Name         string
-			Ready        bool
-			RestartCount int
+			Name         string `json:"name"`
+			Ready        bool   `json:"ready"`
+			RestartCount int    `json:"restartCount"`
 		}{Name: status.Name, Ready: status.Ready, RestartCount: int(status.RestartCount)})
 	}
 	return mapped
