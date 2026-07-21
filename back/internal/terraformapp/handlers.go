@@ -7,7 +7,10 @@ import (
 	"strings"
 )
 
-type Handler struct{ runner *terraformadapter.Runner }
+type Handler struct {
+	runner         *terraformadapter.Runner
+	policyEnforcer PolicyEnforcer
+}
 type request struct {
 	Workspace string `json:"workspace"`
 }
@@ -39,6 +42,20 @@ func (h *Handler) start(w http.ResponseWriter, r *http.Request, operation string
 		writeError(w, 400, "invalid_request", "Workspace is required.")
 		return
 	}
+
+	// Self-protection: validate terraform destroy
+	if h.policyEnforcer != nil && operation == "destroy" {
+		if !h.policyEnforcer(w, r, PolicyRequest{
+			Action:       "terraform_destroy",
+			Scope:        "remote",
+			TargetName:   "terraform/workspace/" + req.Workspace,
+			Confirmation: r.Header.Get("X-Confirmation"),
+			TOTPCode:     r.Header.Get("X-TOTP-Code"),
+		}) {
+			return
+		}
+	}
+
 	run, err := h.runner.Start(r.Context(), operation, req.Workspace)
 	if err != nil {
 		if strings.Contains(err.Error(), "allowlisted") {

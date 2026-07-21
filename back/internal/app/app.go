@@ -383,7 +383,7 @@ func (a *App) Handler() http.Handler {
 	kubernetesapp.MountRoutesWithPolicy(mux, a.protect, a.policyEnforcerForK8s, a.kubernetesClient, a.adapterError("kubernetes"))
 	cloudflareapp.MountRoutes(mux, a.protect, a.cloudflareHandler)
 	githubapp.MountRoutes(mux, a.protect, a.githubClient)
-	terraformapp.MountRoutes(mux, a.protect, a.terraformRunner)
+	terraformapp.MountRoutesWithPolicy(mux, a.protect, a.policyEnforcerForTerraform, a.terraformRunner)
 	operationsapp.MountRoutes(mux, a.protect)
 	storageapp.MountRoutes(mux, a.protect, a.storageClient)
 	ociapp.MountRoutes(mux, a.protect, a.ociHandler, a.adapterError("oci"))

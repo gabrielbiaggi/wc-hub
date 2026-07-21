@@ -7,6 +7,7 @@ import (
 	dockerapp "github.com/webcreations/wc-hub/back/internal/dockerapp"
 	kubernetesapp "github.com/webcreations/wc-hub/back/internal/kubernetesapp"
 	security "github.com/webcreations/wc-hub/back/internal/security/domain"
+	terraformapp "github.com/webcreations/wc-hub/back/internal/terraformapp"
 )
 
 func (a *App) evaluatePolicy(w http.ResponseWriter, r *http.Request) {
@@ -69,6 +70,16 @@ func (a *App) policyEnforcerForPlugin(w http.ResponseWriter, r *http.Request, re
 }
 
 func (a *App) policyEnforcerForK8s(w http.ResponseWriter, r *http.Request, req kubernetesapp.PolicyRequest) bool {
+	return a.enforcePolicy(w, r, security.ActionRequest{
+		Action:       req.Action,
+		Scope:        security.Scope(req.Scope),
+		TargetName:   req.TargetName,
+		Confirmation: req.Confirmation,
+		TOTPCode:     req.TOTPCode,
+	})
+}
+
+func (a *App) policyEnforcerForTerraform(w http.ResponseWriter, r *http.Request, req terraformapp.PolicyRequest) bool {
 	return a.enforcePolicy(w, r, security.ActionRequest{
 		Action:       req.Action,
 		Scope:        security.Scope(req.Scope),
