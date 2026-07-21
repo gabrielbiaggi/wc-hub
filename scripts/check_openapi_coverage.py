@@ -26,7 +26,7 @@ for line in (ROOT / "openapi.yaml").read_text().splitlines():
         documented.add((operation_match.group(1), current_path))
 
 missing = sorted(routes - documented)
-extra = sorted(documented - routes)
+extra = sorted((documented - routes) - {("get", "/healthz")})
 print(f"backend={len(routes)} openapi={len(documented)} missing={len(missing)} extra={len(extra)}")
 if missing:
     for method, path in missing:

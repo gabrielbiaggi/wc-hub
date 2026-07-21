@@ -12,19 +12,23 @@ import {
   Server,
   ShieldCheck,
   Terminal,
+  Trash2,
   TriangleAlert,
 } from "lucide-vue-next";
 import Button from "@/components/ui/Button.vue";
 import StatusBadge from "@/components/ui/StatusBadge.vue";
+import ActionGuardModal from "@/components/ActionGuardModal.vue";
 import {
   execKubernetesPod,
   getKubernetesOverview,
   getKubernetesPodLogs,
   runKubernetesDeploymentAction,
+  type KubernetesDeploymentAction,
   type KubeDeployment,
   type KubeNode,
   type KubePod,
 } from "@/lib/api_kubernetes";
+import { buildActionHeaders } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api_error";
 
 const query = useQuery({
@@ -37,14 +41,16 @@ const action = useMutation({
   mutationFn: (input: {
     namespace: string;
     name: string;
-    action: "scale" | "restart";
+    action: KubernetesDeploymentAction;
     replicas?: number;
+    headers?: Record<string, string>;
   }) =>
     runKubernetesDeploymentAction(
       input.namespace,
       input.name,
       input.action,
       input.replicas,
+      input.headers,
     ),
   onSuccess: () =>
     setTimeout(
@@ -60,12 +66,18 @@ const terminal = ref<{
   output: string;
 } | null>(null);
 const podExec = useMutation({
-  mutationFn: () =>
+  mutationFn: (input: {
+    pod: KubePod;
+    container: string;
+    command: string;
+    headers?: Record<string, string>;
+  }) =>
     execKubernetesPod(
-      terminal.value!.pod.metadata.namespace,
-      terminal.value!.pod.metadata.name,
-      terminal.value!.container,
-      ["sh", "-lc", terminal.value!.command],
+      input.pod.metadata.namespace,
+      input.pod.metadata.name,
+      input.container,
+      ["sh", "-lc", input.command],
+      input.headers,
     ),
   onSuccess: (result) => {
     if (terminal.value) terminal.value.output = result.output;
@@ -104,22 +116,32 @@ const readyDeployments = computed(
         (deployment.spec.replicas ?? 0),
     ).length ?? 0,
 );
+type GuardedKubernetesAction =
+  | {
+      kind: "deployment";
+      deployment: KubeDeployment;
+      action: KubernetesDeploymentAction;
+      replicas?: number;
+    }
+  | { kind: "exec"; pod: KubePod; container: string; command: string };
+const guarded = ref<GuardedKubernetesAction | null>(null);
+const guardedTarget = computed(() => {
+  if (!guarded.value) return "";
+  if (guarded.value.kind === "deployment")
+    return `k8s/${guarded.value.deployment.metadata.namespace}/deployment/${guarded.value.deployment.metadata.name}`;
+  return `k8s/${guarded.value.pod.metadata.namespace}/pod/${guarded.value.pod.metadata.name}`;
+});
 const execute = (
   deployment: KubeDeployment,
-  operation: "scale" | "restart",
+  operation: KubernetesDeploymentAction,
   replicas?: number,
 ) => {
-  if (
-    window.confirm(
-      `Confirma a operação em ${deployment.metadata.namespace}/${deployment.metadata.name}${replicas === undefined ? "" : ` para ${replicas} réplica(s)`}?`,
-    )
-  )
-    action.mutate({
-      namespace: deployment.metadata.namespace,
-      name: deployment.metadata.name,
-      action: operation,
-      replicas,
-    });
+  guarded.value = {
+    kind: "deployment",
+    deployment,
+    action: operation,
+    replicas,
+  };
 };
 const openTerminal = (pod: KubePod) => {
   terminal.value = {
@@ -130,13 +152,37 @@ const openTerminal = (pod: KubePod) => {
   };
 };
 const executePod = () => {
-  if (
-    terminal.value &&
-    window.confirm(
-      `Executar comando em ${terminal.value.pod.metadata.namespace}/${terminal.value.pod.metadata.name}?`,
-    )
-  )
-    podExec.mutate();
+  if (terminal.value)
+    guarded.value = {
+      kind: "exec",
+      pod: terminal.value.pod,
+      container: terminal.value.container,
+      command: terminal.value.command,
+    };
+};
+const confirmGuarded = (payload: {
+  confirmation: string;
+  totpCode: string;
+}) => {
+  const current = guarded.value;
+  if (!current) return;
+  const headers = buildActionHeaders(payload.confirmation, payload.totpCode);
+  if (current.kind === "deployment") {
+    action.mutate({
+      namespace: current.deployment.metadata.namespace,
+      name: current.deployment.metadata.name,
+      action: current.action,
+      replicas: current.replicas,
+      headers,
+    });
+  } else
+    podExec.mutate({
+      pod: current.pod,
+      container: current.container,
+      command: current.command,
+      headers,
+    });
+  guarded.value = null;
 };
 </script>
 
@@ -302,6 +348,11 @@ const executePod = () => {
                 :disabled="action.isPending.value"
                 @click="execute(deployment, 'restart')"
                 ><RotateCcw class="h-3.5 w-3.5" />Reiniciar</Button
+              ><Button
+                variant="danger"
+                :disabled="action.isPending.value"
+                @click="execute(deployment, 'delete')"
+                ><Trash2 class="h-3.5 w-3.5" />Excluir</Button
               >
             </div>
           </div>
@@ -462,5 +513,21 @@ const executePod = () => {
           >{{ terminal.output || "A saída aparecerá aqui." }}</pre>
       </section>
     </div>
+    <ActionGuardModal
+      :show="!!guarded"
+      :target-name="guardedTarget"
+      :title="
+        guarded?.kind === 'exec'
+          ? 'Execução protegida no pod'
+          : 'Mutação protegida no deployment'
+      "
+      :action-description="
+        guarded?.kind === 'exec'
+          ? 'O comando será auditado antes de chegar ao pod.'
+          : 'Escala, reinício e exclusão exigem confirmação forte; alvos autoprotegidos são bloqueados no servidor.'
+      "
+      @cancel="guarded = null"
+      @confirm="confirmGuarded"
+    />
   </div>
 </template>

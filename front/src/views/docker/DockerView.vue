@@ -15,16 +15,21 @@ import {
   ShieldCheck,
   Square,
   Terminal,
+  Trash2,
+  Zap,
 } from "lucide-vue-next";
 import Button from "@/components/ui/Button.vue";
 import StatusBadge from "@/components/ui/StatusBadge.vue";
+import ActionGuardModal from "@/components/ActionGuardModal.vue";
 import {
   execDockerContainer,
   getDockerInventory,
   runDockerContainerAction,
   type DockerContainer,
+  type DockerContainerAction,
   type DockerContainerStats,
 } from "@/lib/api_docker";
+import { buildActionHeaders } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api_error";
 
 const tab = ref<"containers" | "images">("containers");
@@ -35,8 +40,11 @@ const query = useQuery({
   refetchInterval: 15_000,
 });
 const action = useMutation({
-  mutationFn: (input: { id: string; action: "start" | "stop" | "restart" }) =>
-    runDockerContainerAction(input.id, input.action),
+  mutationFn: (input: {
+    id: string;
+    action: DockerContainerAction;
+    headers?: Record<string, string>;
+  }) => runDockerContainerAction(input.id, input.action, input.headers),
   onSuccess: () =>
     setTimeout(
       () => queryClient.invalidateQueries({ queryKey: ["docker-inventory"] }),
@@ -49,12 +57,16 @@ const terminal = ref<{
   output: string;
 } | null>(null);
 const exec = useMutation({
-  mutationFn: () =>
-    execDockerContainer(terminal.value!.container.id, [
-      "sh",
-      "-lc",
-      terminal.value!.command,
-    ]),
+  mutationFn: (input: {
+    container: DockerContainer;
+    command: string;
+    headers?: Record<string, string>;
+  }) =>
+    execDockerContainer(
+      input.container.id,
+      ["sh", "-lc", input.command],
+      input.headers,
+    ),
   onSuccess: (result) => {
     if (terminal.value) terminal.value.output = result.output;
   },
@@ -90,25 +102,65 @@ const formatBytes = (value = 0) => {
 };
 const shortID = (value: string) => value.replace(/^sha256:/, "").slice(0, 12);
 const nameOf = (names: string[]) => names[0]?.replace(/^\//, "") || "sem nome";
-const projectOf = (container: DockerContainer) => container.labels["com.docker.compose.project"] || "infraestrutura sem projeto Compose";
-const serviceOf = (container: DockerContainer) => container.labels["com.docker.compose.service"] || "serviço avulso";
+const projectOf = (container: DockerContainer) =>
+  container.labels["com.docker.compose.project"] ||
+  "infraestrutura sem projeto Compose";
+const serviceOf = (container: DockerContainer) =>
+  container.labels["com.docker.compose.service"] || "serviço avulso";
 const statsOf = (id: string): DockerContainerStats | undefined =>
   statsByContainer.value.get(id);
-const execute = (id: string, operation: "start" | "stop" | "restart") => {
-  if (window.confirm(`Confirma a operação no container ${shortID(id)}?`))
-    action.mutate({ id, action: operation });
+type GuardedDockerAction =
+  | {
+      kind: "container";
+      container: DockerContainer;
+      action: Exclude<DockerContainerAction, "start">;
+    }
+  | { kind: "exec"; container: DockerContainer; command: string };
+const guarded = ref<GuardedDockerAction | null>(null);
+const guardedTarget = computed(() =>
+  guarded.value ? `docker/container/${guarded.value.container.id}` : "",
+);
+const execute = (
+  container: DockerContainer,
+  operation: DockerContainerAction,
+) => {
+  if (operation === "start") {
+    action.mutate({ id: container.id, action: operation });
+    return;
+  }
+  guarded.value = { kind: "container", container, action: operation };
 };
 const openTerminal = (container: DockerContainer) => {
   terminal.value = { container, command: "id && uname -a", output: "" };
 };
 const runCommand = () => {
-  if (
-    terminal.value &&
-    window.confirm(
-      `Executar no container ${nameOf(terminal.value.container.names)}?`,
-    )
-  )
-    exec.mutate();
+  if (terminal.value)
+    guarded.value = {
+      kind: "exec",
+      container: terminal.value.container,
+      command: terminal.value.command,
+    };
+};
+const confirmGuarded = (payload: {
+  confirmation: string;
+  totpCode: string;
+}) => {
+  const current = guarded.value;
+  if (!current) return;
+  const headers = buildActionHeaders(payload.confirmation, payload.totpCode);
+  if (current.kind === "container")
+    action.mutate({
+      id: current.container.id,
+      action: current.action,
+      headers,
+    });
+  else
+    exec.mutate({
+      container: current.container,
+      command: current.command,
+      headers,
+    });
+  guarded.value = null;
 };
 </script>
 
@@ -137,7 +189,13 @@ const runCommand = () => {
           Ambiente Docker
         </h1>
         <p class="mt-2 text-sm text-muted">
-          Origem ativa: <span class="font-mono text-slate-300">{{ query.data.value?.source ?? query.data.value?.health.source ?? "aguardando endpoint" }}</span>. Containers são classificados por projeto Compose e serviço.
+          Origem ativa:
+          <span class="font-mono text-slate-300">{{
+            query.data.value?.source ??
+            query.data.value?.health.source ??
+            "aguardando endpoint"
+          }}</span
+          >. Containers são classificados por projeto Compose e serviço.
         </p>
       </div>
       <Button
@@ -211,7 +269,14 @@ const runCommand = () => {
         class="flex flex-col gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:justify-between"
       >
         <div>
-          <h2 class="text-sm font-medium">Inventário do ambiente · {{ query.data.value?.source ?? query.data.value?.health.source ?? "endpoint" }}</h2>
+          <h2 class="text-sm font-medium">
+            Inventário do ambiente ·
+            {{
+              query.data.value?.source ??
+              query.data.value?.health.source ??
+              "endpoint"
+            }}
+          </h2>
           <p class="mt-1 text-[11px] text-muted">
             Captura
             {{
@@ -326,20 +391,33 @@ const runCommand = () => {
               v-if="container.state !== 'running'"
               variant="outline"
               :disabled="action.isPending.value"
-              @click="execute(container.id, 'start')"
+              @click="execute(container, 'start')"
               ><Play class="h-3.5 w-3.5" />Iniciar</Button
             ><Button
               v-if="container.state === 'running'"
               variant="outline"
               :disabled="action.isPending.value"
-              @click="execute(container.id, 'restart')"
+              @click="execute(container, 'restart')"
               ><RotateCcw class="h-3.5 w-3.5" />Reiniciar</Button
             ><Button
               v-if="container.state === 'running'"
               variant="danger"
               :disabled="action.isPending.value"
-              @click="execute(container.id, 'stop')"
+              @click="execute(container, 'stop')"
               ><Square class="h-3.5 w-3.5" />Parar</Button
+            >
+            <Button
+              v-if="container.state === 'running'"
+              variant="danger"
+              :disabled="action.isPending.value"
+              @click="execute(container, 'kill')"
+              ><Zap class="h-3.5 w-3.5" />Forçar</Button
+            ><Button
+              v-if="container.state !== 'running'"
+              variant="danger"
+              :disabled="action.isPending.value"
+              @click="execute(container, 'remove')"
+              ><Trash2 class="h-3.5 w-3.5" />Remover</Button
             >
           </div>
         </article>
@@ -432,5 +510,21 @@ const runCommand = () => {
           >{{ terminal.output || "A saída aparecerá aqui." }}</pre>
       </section>
     </div>
+    <ActionGuardModal
+      :show="!!guarded"
+      :target-name="guardedTarget"
+      :title="
+        guarded?.kind === 'exec'
+          ? 'Execução protegida no container'
+          : 'Ação crítica no container'
+      "
+      :action-description="
+        guarded?.kind === 'exec'
+          ? 'O comando será auditado e executado no container remoto.'
+          : 'Ação destrutiva auditada. O alvo protegido será bloqueado no servidor.'
+      "
+      @cancel="guarded = null"
+      @confirm="confirmGuarded"
+    />
   </div>
 </template>

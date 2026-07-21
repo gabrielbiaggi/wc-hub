@@ -45,6 +45,7 @@ import {
   getProxmoxSnapshots,
   getProxmoxSummary,
   migrateProxmoxGuest,
+  resizeProxmoxDisk,
   rollbackProxmoxSnapshot,
   runProxmoxPowerAction,
   syncProxmox,
@@ -65,12 +66,42 @@ const tab = ref<Tab>("qemu");
 const { hasPermission } = usePermissions();
 const canManage = computed(() => hasPermission("proxmox.manage"));
 type GuardedProxmoxAction =
-  | {kind:"power"; guest:ProxmoxGuest; action:"stop"|"shutdown"|"reboot"|"reset"; target:string}
-  | {kind:"delete"; guest:ProxmoxGuest; target:string}
-  | {kind:"snapshot-delete"|"snapshot-rollback"; guest:ProxmoxGuest; snapshot:string; target:string};
-const guardedAction = ref<GuardedProxmoxAction|null>(null);
+  | {
+      kind: "power";
+      guest: ProxmoxGuest;
+      action: "stop" | "shutdown" | "reboot" | "reset";
+      target: string;
+    }
+  | { kind: "delete"; guest: ProxmoxGuest; target: string }
+  | {
+      kind: "snapshot-delete" | "snapshot-rollback";
+      guest: ProxmoxGuest;
+      snapshot: string;
+      target: string;
+    }
+  | {
+      kind: "migrate";
+      guest: ProxmoxGuest;
+      targetNode: string;
+      online: boolean;
+      target: string;
+    }
+  | {
+      kind: "config";
+      guest: ProxmoxGuest;
+      config: Record<string, string>;
+      target: string;
+    }
+  | {
+      kind: "resize";
+      guest: ProxmoxGuest;
+      disk: string;
+      size: string;
+      target: string;
+    };
+const guardedAction = ref<GuardedProxmoxAction | null>(null);
 const guardedTarget = computed(() => guardedAction.value?.target ?? "");
-const networkNode = ref<{cluster: string; node: string} | null>(null);
+const networkNode = ref<{ cluster: string; node: string } | null>(null);
 const firewallGuest = ref<ProxmoxGuest | null>(null);
 const client = useQueryClient();
 const summary = useQuery({
@@ -102,7 +133,7 @@ const power = useMutation({
   mutationFn: (input: {
     guest: ProxmoxGuest;
     action: "start" | "stop" | "shutdown" | "reboot" | "reset";
-    headers?: Record<string,string>;
+    headers?: Record<string, string>;
   }) =>
     runProxmoxPowerAction(
       input.guest.cluster,
@@ -159,7 +190,10 @@ const provision = useMutation({
     ),
 });
 const destructive = useMutation({
-  mutationFn: (input:{guest:ProxmoxGuest;headers?:Record<string,string>}) => deleteProxmoxGuest(input.guest, true, input.headers),
+  mutationFn: (input: {
+    guest: ProxmoxGuest;
+    headers?: Record<string, string>;
+  }) => deleteProxmoxGuest(input.guest, true, input.headers),
   onSuccess: () =>
     setTimeout(
       () => client.invalidateQueries({ queryKey: ["proxmox-inventory"] }),
@@ -225,10 +259,17 @@ const createSnapshot = useMutation({
   },
 });
 const removeSnapshot = useMutation({
-  mutationFn: (input: {name:string;headers?:Record<string,string>}) => {
+  mutationFn: (input: { name: string; headers?: Record<string, string> }) => {
     const g = snapshotGuest.value;
     if (!g) throw new Error("No guest selected");
-    return deleteProxmoxSnapshot(g.cluster, g.node, g.type, g.vmid, input.name, input.headers);
+    return deleteProxmoxSnapshot(
+      g.cluster,
+      g.node,
+      g.type,
+      g.vmid,
+      input.name,
+      input.headers,
+    );
   },
   onSuccess: () =>
     setTimeout(
@@ -237,10 +278,17 @@ const removeSnapshot = useMutation({
     ),
 });
 const restoreSnapshot = useMutation({
-  mutationFn: (input: {name:string;headers?:Record<string,string>}) => {
+  mutationFn: (input: { name: string; headers?: Record<string, string> }) => {
     const g = snapshotGuest.value;
     if (!g) throw new Error("No guest selected");
-    return rollbackProxmoxSnapshot(g.cluster, g.node, g.type, g.vmid, input.name, input.headers);
+    return rollbackProxmoxSnapshot(
+      g.cluster,
+      g.node,
+      g.type,
+      g.vmid,
+      input.name,
+      input.headers,
+    );
   },
   onSuccess: () => {
     setTimeout(() => {
@@ -250,7 +298,12 @@ const restoreSnapshot = useMutation({
   },
 });
 const migrateGuest = useMutation({
-  mutationFn: (input: { guest: ProxmoxGuest; targetNode: string; online: boolean }) =>
+  mutationFn: (input: {
+    guest: ProxmoxGuest;
+    targetNode: string;
+    online: boolean;
+    headers?: Record<string, string>;
+  }) =>
     migrateProxmoxGuest(
       input.guest.cluster,
       input.guest.node,
@@ -258,6 +311,7 @@ const migrateGuest = useMutation({
       input.guest.vmid,
       input.targetNode,
       input.online,
+      input.headers,
     ),
   onSuccess: () =>
     setTimeout(
@@ -266,13 +320,40 @@ const migrateGuest = useMutation({
     ),
 });
 const updateConfig = useMutation({
-  mutationFn: (input: { guest: ProxmoxGuest; config: Record<string, string> }) =>
+  mutationFn: (input: {
+    guest: ProxmoxGuest;
+    config: Record<string, string>;
+    headers?: Record<string, string>;
+  }) =>
     updateProxmoxConfig(
       input.guest.cluster,
       input.guest.node,
       input.guest.type,
       input.guest.vmid,
       input.config,
+      input.headers,
+    ),
+  onSuccess: () =>
+    setTimeout(
+      () => client.invalidateQueries({ queryKey: ["proxmox-inventory"] }),
+      1500,
+    ),
+});
+const resizeDisk = useMutation({
+  mutationFn: (input: {
+    guest: ProxmoxGuest;
+    disk: string;
+    size: string;
+    headers?: Record<string, string>;
+  }) =>
+    resizeProxmoxDisk(
+      input.guest.cluster,
+      input.guest.node,
+      input.guest.type,
+      input.guest.vmid,
+      input.disk,
+      input.size,
+      input.headers,
     ),
   onSuccess: () =>
     setTimeout(
@@ -281,7 +362,11 @@ const updateConfig = useMutation({
     ),
 });
 const networkInterfaces = useQuery({
-  queryKey: computed(() => ["proxmox-network", networkNode.value?.cluster, networkNode.value?.node]),
+  queryKey: computed(() => [
+    "proxmox-network",
+    networkNode.value?.cluster,
+    networkNode.value?.node,
+  ]),
   queryFn: () => {
     const n = networkNode.value;
     if (!n) return Promise.resolve([]);
@@ -291,7 +376,13 @@ const networkInterfaces = useQuery({
   refetchInterval: false,
 });
 const firewallRules = useQuery({
-  queryKey: computed(() => ["proxmox-firewall", firewallGuest.value?.cluster, firewallGuest.value?.node, firewallGuest.value?.type, firewallGuest.value?.vmid]),
+  queryKey: computed(() => [
+    "proxmox-firewall",
+    firewallGuest.value?.cluster,
+    firewallGuest.value?.node,
+    firewallGuest.value?.type,
+    firewallGuest.value?.vmid,
+  ]),
   queryFn: () => {
     const g = firewallGuest.value;
     if (!g) return Promise.resolve([]);
@@ -300,7 +391,14 @@ const firewallRules = useQuery({
   enabled: computed(() => !!firewallGuest.value),
   refetchInterval: false,
 });
-const firewallRuleForm = ref({type: "in", action: "ACCEPT", proto: "tcp", dport: "", source: "", comment: ""});
+const firewallRuleForm = ref({
+  type: "in",
+  action: "ACCEPT",
+  proto: "tcp",
+  dport: "",
+  source: "",
+  comment: "",
+});
 const createFirewallRule = useMutation({
   mutationFn: () => {
     const g = firewallGuest.value;
@@ -312,13 +410,25 @@ const createFirewallRule = useMutation({
     };
     if (firewallRuleForm.value.proto) rule.proto = firewallRuleForm.value.proto;
     if (firewallRuleForm.value.dport) rule.dport = firewallRuleForm.value.dport;
-    if (firewallRuleForm.value.source) rule.source = firewallRuleForm.value.source;
-    if (firewallRuleForm.value.comment) rule.comment = firewallRuleForm.value.comment;
+    if (firewallRuleForm.value.source)
+      rule.source = firewallRuleForm.value.source;
+    if (firewallRuleForm.value.comment)
+      rule.comment = firewallRuleForm.value.comment;
     return createProxmoxFirewallRule(g.cluster, g.node, g.type, g.vmid, rule);
   },
   onSuccess: () => {
-    firewallRuleForm.value = {type: "in", action: "ACCEPT", proto: "tcp", dport: "", source: "", comment: ""};
-    setTimeout(() => client.invalidateQueries({ queryKey: ["proxmox-firewall"] }), 800);
+    firewallRuleForm.value = {
+      type: "in",
+      action: "ACCEPT",
+      proto: "tcp",
+      dport: "",
+      source: "",
+      comment: "",
+    };
+    setTimeout(
+      () => client.invalidateQueries({ queryKey: ["proxmox-firewall"] }),
+      800,
+    );
   },
 });
 const removeFirewallRule = useMutation({
@@ -327,9 +437,17 @@ const removeFirewallRule = useMutation({
     if (!g) throw new Error("No guest selected");
     return deleteProxmoxFirewallRule(g.cluster, g.node, g.type, g.vmid, pos);
   },
-  onSuccess: () => setTimeout(() => client.invalidateQueries({ queryKey: ["proxmox-firewall"] }), 800),
+  onSuccess: () =>
+    setTimeout(
+      () => client.invalidateQueries({ queryKey: ["proxmox-firewall"] }),
+      800,
+    ),
 });
-const backupForm = ref({storage: "local", mode: "snapshot", compress: "zstd"});
+const backupForm = ref({
+  storage: "local",
+  mode: "snapshot",
+  compress: "zstd",
+});
 const createBackup = useMutation({
   mutationFn: (guest: ProxmoxGuest) =>
     createProxmoxBackup(
@@ -343,7 +461,10 @@ const createBackup = useMutation({
     ),
   onSuccess: () => {
     client.invalidateQueries({ queryKey: ["jobs"] });
-    setTimeout(() => client.invalidateQueries({ queryKey: ["proxmox-backups"] }), 3000);
+    setTimeout(
+      () => client.invalidateQueries({ queryKey: ["proxmox-backups"] }),
+      3000,
+    );
   },
 });
 const lastJob = computed(() =>
@@ -362,6 +483,7 @@ const providerError = computed(() =>
       restoreSnapshot.error.value ??
       migrateGuest.error.value ??
       updateConfig.error.value ??
+      resizeDisk.error.value ??
       createFirewallRule.error.value ??
       removeFirewallRule.error.value ??
       createBackup.error.value,
@@ -388,9 +510,8 @@ const machines = computed(() => {
         cluster,
         nodes: clusterNodes,
         online: clusterNodes.every((node) => node.status === "online"),
-        qemu: virtualMachines.filter(
-          (guest) => guest.cluster === cluster,
-        ).length,
+        qemu: virtualMachines.filter((guest) => guest.cluster === cluster)
+          .length,
         lxc: containers.filter((guest) => guest.cluster === cluster).length,
         storage: storage.filter((store) => store.cluster === cluster).length,
       };
@@ -409,8 +530,16 @@ const execute = (
   action: "start" | "stop" | "shutdown" | "reboot" | "reset",
 ) => {
   if (!canManage.value) return;
-  if (action === "start") { power.mutate({ guest, action }); return; }
-  guardedAction.value = { kind:"power", guest, action, target:`${guest.cluster}/${guest.node}/${guest.type}/${guest.vmid}` };
+  if (action === "start") {
+    power.mutate({ guest, action });
+    return;
+  }
+  guardedAction.value = {
+    kind: "power",
+    guest,
+    action,
+    target: `${guest.cluster}/${guest.node}/${guest.type}/${guest.vmid}`,
+  };
 };
 const createGuest = (kind: "qemu" | "lxc") => {
   const name = kind === "qemu" ? qemuForm.value.name : lxcForm.value.hostname;
@@ -436,7 +565,11 @@ const cloneGuest = (guest: ProxmoxGuest) => {
 };
 const removeGuest = (guest: ProxmoxGuest) => {
   if (!canManage.value) return;
-  guardedAction.value = { kind:"delete", guest, target:`${guest.cluster}/${guest.node}/${guest.type}/${guest.vmid}` };
+  guardedAction.value = {
+    kind: "delete",
+    guest,
+    target: `${guest.cluster}/${guest.node}/${guest.type}/${guest.vmid}`,
+  };
 };
 const openSnapshots = (guest: ProxmoxGuest) => {
   snapshotGuest.value = guest;
@@ -456,27 +589,69 @@ const submitSnapshot = () => {
 const deleteSnapshot = (name: string) => {
   const guest = snapshotGuest.value;
   if (!guest || !canManage.value) return;
-  guardedAction.value = {kind:"snapshot-delete",guest,snapshot:name,target:`${guest.cluster}/${guest.node}/${guest.type}/${guest.vmid}/snapshot/${name}`};
+  guardedAction.value = {
+    kind: "snapshot-delete",
+    guest,
+    snapshot: name,
+    target: `${guest.cluster}/${guest.node}/${guest.type}/${guest.vmid}/snapshot/${name}`,
+  };
 };
 const rollbackSnapshot = (name: string) => {
   const g = snapshotGuest.value;
   if (!g) return;
   if (!canManage.value) return;
-  guardedAction.value = {kind:"snapshot-rollback",guest:g,snapshot:name,target:`${g.cluster}/${g.node}/${g.type}/${g.vmid}/snapshot/${name}`};
+  guardedAction.value = {
+    kind: "snapshot-rollback",
+    guest: g,
+    snapshot: name,
+    target: `${g.cluster}/${g.node}/${g.type}/${g.vmid}/snapshot/${name}`,
+  };
 };
-const confirmGuardedAction = (payload:{confirmation:string;totpCode:string}) => {
+const confirmGuardedAction = (payload: {
+  confirmation: string;
+  totpCode: string;
+}) => {
   const guarded = guardedAction.value;
   if (!guarded) return;
-  const headers = buildActionHeaders(payload.confirmation,payload.totpCode);
-  if (guarded.kind === "power") power.mutate({guest:guarded.guest,action:guarded.action,headers});
-  else if (guarded.kind === "delete") destructive.mutate({guest:guarded.guest,headers});
-  else if (guarded.kind === "snapshot-delete") removeSnapshot.mutate({name:guarded.snapshot,headers});
-  else restoreSnapshot.mutate({name:guarded.snapshot,headers});
+  const headers = buildActionHeaders(payload.confirmation, payload.totpCode);
+  if (guarded.kind === "power")
+    power.mutate({ guest: guarded.guest, action: guarded.action, headers });
+  else if (guarded.kind === "delete")
+    destructive.mutate({ guest: guarded.guest, headers });
+  else if (guarded.kind === "snapshot-delete")
+    removeSnapshot.mutate({ name: guarded.snapshot, headers });
+  else if (guarded.kind === "snapshot-rollback")
+    restoreSnapshot.mutate({ name: guarded.snapshot, headers });
+  else if (guarded.kind === "migrate")
+    migrateGuest.mutate({
+      guest: guarded.guest,
+      targetNode: guarded.targetNode,
+      online: guarded.online,
+      headers,
+    });
+  else if (guarded.kind === "config")
+    updateConfig.mutate({
+      guest: guarded.guest,
+      config: guarded.config,
+      headers,
+    });
+  else if (guarded.kind === "resize")
+    resizeDisk.mutate({
+      guest: guarded.guest,
+      disk: guarded.disk,
+      size: guarded.size,
+      headers,
+    });
   guardedAction.value = null;
 };
 const migrate = (guest: ProxmoxGuest) => {
   const availableNodes = (inventory.data.value?.nodes ?? [])
-    .filter((n) => n.cluster === guest.cluster && n.node !== guest.node && n.status === "online")
+    .filter(
+      (n) =>
+        n.cluster === guest.cluster &&
+        n.node !== guest.node &&
+        n.status === "online",
+    )
     .map((n) => n.node);
 
   if (availableNodes.length === 0) {
@@ -493,15 +668,19 @@ const migrate = (guest: ProxmoxGuest) => {
     return;
   }
 
-  const online = guest.status === "running" && window.confirm(
-    `VM está em execução. Deseja realizar migração online (live migration)?\n\nSim = migração online (sem downtime)\nNão = migração offline (VM será desligada)`,
-  );
+  const online =
+    guest.status === "running" &&
+    window.confirm(
+      `VM está em execução. Deseja realizar migração online (live migration)?\n\nSim = migração online (sem downtime)\nNão = migração offline (VM será desligada)`,
+    );
 
-  if (window.confirm(
-    `Confirma migração ${online ? "ONLINE" : "OFFLINE"} de ${guest.type.toUpperCase()} ${guest.vmid} (${guest.name})\nDe: ${guest.node}\nPara: ${targetNode}?`,
-  )) {
-    migrateGuest.mutate({ guest, targetNode, online });
-  }
+  guardedAction.value = {
+    kind: "migrate",
+    guest,
+    targetNode,
+    online,
+    target: `${guest.cluster}/${guest.node}/${guest.type}/${guest.vmid}`,
+  };
 };
 const editResources = (guest: ProxmoxGuest) => {
   const currentCores = guest.cpus;
@@ -547,11 +726,34 @@ const editResources = (guest: ProxmoxGuest) => {
     return;
   }
 
-  if (window.confirm(
-    `Confirma alteração de recursos?\n\n${Object.entries(config).map(([k, v]) => `${k}: ${v}`).join("\n")}`,
-  )) {
-    updateConfig.mutate({ guest, config });
+  guardedAction.value = {
+    kind: "config",
+    guest,
+    config,
+    target: `${guest.cluster}/${guest.node}/${guest.type}/${guest.vmid}`,
+  };
+};
+const resizeGuestDisk = (guest: ProxmoxGuest) => {
+  const disk = window.prompt(
+    `Disco de ${guest.type.toUpperCase()} ${guest.vmid}. Informe o identificador Proxmox (ex.: ${guest.type === "qemu" ? "scsi0" : "rootfs"}).`,
+    guest.type === "qemu" ? "scsi0" : "rootfs",
+  );
+  if (!disk) return;
+  const size = window.prompt(
+    "Aumento do disco (somente crescimento; ex.: +20G):",
+    "+20G",
+  );
+  if (!size || !/^\+[1-9][0-9]*(?:[KMGT])?$/i.test(size.trim())) {
+    if (size) window.alert("Use apenas aumento positivo, por exemplo +20G.");
+    return;
   }
+  guardedAction.value = {
+    kind: "resize",
+    guest,
+    disk: disk.trim(),
+    size: size.trim(),
+    target: `${guest.cluster}/${guest.node}/${guest.type}/${guest.vmid}`,
+  };
 };
 const viewNodeNetwork = (cluster: string, node: string) => {
   networkNode.value = { cluster, node };
@@ -562,22 +764,42 @@ const openFirewall = (guest: ProxmoxGuest) => {
 };
 const closeFirewall = () => {
   firewallGuest.value = null;
-  firewallRuleForm.value = {type: "in", action: "ACCEPT", proto: "tcp", dport: "", source: "", comment: ""};
+  firewallRuleForm.value = {
+    type: "in",
+    action: "ACCEPT",
+    proto: "tcp",
+    dport: "",
+    source: "",
+    comment: "",
+  };
 };
 const submitFirewallRule = () => {
-  if (window.confirm(
-    `Criar regra de firewall ${firewallRuleForm.value.action} para ${firewallGuest.value?.type.toUpperCase()} ${firewallGuest.value?.vmid}?`,
-  )) createFirewallRule.mutate();
+  if (
+    window.confirm(
+      `Criar regra de firewall ${firewallRuleForm.value.action} para ${firewallGuest.value?.type.toUpperCase()} ${firewallGuest.value?.vmid}?`,
+    )
+  )
+    createFirewallRule.mutate();
 };
 const deleteFirewallRule = (pos: number) => {
   const phrase = `EXCLUIR ${pos}`;
-  if (window.prompt(`Excluir regra de firewall na posição ${pos}. Digite exatamente: ${phrase}`) === phrase) {
+  if (
+    window.prompt(
+      `Excluir regra de firewall na posição ${pos}. Digite exatamente: ${phrase}`,
+    ) === phrase
+  ) {
     removeFirewallRule.mutate(pos);
   }
 };
 const backupGuest = (guest: ProxmoxGuest) => {
   const availableStorages = (inventory.data.value?.storage ?? [])
-    .filter((s) => s.cluster === guest.cluster && s.active && s.type !== "lvm" && s.type !== "lvmthin")
+    .filter(
+      (s) =>
+        s.cluster === guest.cluster &&
+        s.active &&
+        s.type !== "lvm" &&
+        s.type !== "lvmthin",
+    )
     .map((s) => s.storage);
 
   if (availableStorages.length === 0) {
@@ -597,9 +819,11 @@ const backupGuest = (guest: ProxmoxGuest) => {
 
   backupForm.value.storage = storage;
 
-  if (window.confirm(
-    `Confirma backup de ${guest.type.toUpperCase()} ${guest.vmid} (${guest.name})?\n\nStorage: ${storage}\nModo: ${backupForm.value.mode}\nCompressão: ${backupForm.value.compress}\n\nO backup será executado em background.`,
-  )) {
+  if (
+    window.confirm(
+      `Confirma backup de ${guest.type.toUpperCase()} ${guest.vmid} (${guest.name})?\n\nStorage: ${storage}\nModo: ${backupForm.value.mode}\nCompressão: ${backupForm.value.compress}\n\nO backup será executado em background.`,
+    )
+  ) {
     createBackup.mutate(guest);
   }
 };
@@ -632,7 +856,9 @@ const backupGuest = (guest: ProxmoxGuest) => {
         </p>
       </div>
       <Button
-        :disabled="!canManage || !summary.data.value?.configured || sync.isPending.value"
+        :disabled="
+          !canManage || !summary.data.value?.configured || sync.isPending.value
+        "
         @click="sync.mutate()"
         ><RefreshCw
           :class="['h-4 w-4', sync.isPending.value && 'animate-spin']"
@@ -693,7 +919,9 @@ const backupGuest = (guest: ProxmoxGuest) => {
     </section>
     <section class="grid gap-5 xl:grid-cols-[1fr_320px]">
       <div class="space-y-5">
-        <article class="overflow-hidden rounded-xl border border-line bg-panel/65">
+        <article
+          class="overflow-hidden rounded-xl border border-line bg-panel/65"
+        >
           <header class="border-b border-line p-4">
             <h2 class="text-sm font-medium">Conexões por máquina</h2>
             <p class="mt-1 text-[10px] text-muted">
@@ -708,7 +936,9 @@ const backupGuest = (guest: ProxmoxGuest) => {
             >
               <header class="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p class="font-mono text-xs text-signal">{{ machine.cluster }}</p>
+                  <p class="font-mono text-xs text-signal">
+                    {{ machine.cluster }}
+                  </p>
                   <p class="mt-1 text-[10px] text-muted">
                     {{ machine.nodes.length }} nó(s) · {{ machine.qemu }} QEMU ·
                     {{ machine.lxc }} LXC · {{ machine.storage }} storage(s)
@@ -734,7 +964,9 @@ const backupGuest = (guest: ProxmoxGuest) => {
                       </p>
                     </div>
                     <StatusBadge
-                      :status="node.status === 'online' ? 'healthy' : 'critical'"
+                      :status="
+                        node.status === 'online' ? 'healthy' : 'critical'
+                      "
                       :label="node.status"
                     />
                   </div>
@@ -758,7 +990,10 @@ const backupGuest = (guest: ProxmoxGuest) => {
                 </div>
               </div>
             </section>
-            <p v-if="!machines.length" class="p-10 text-center text-sm text-muted">
+            <p
+              v-if="!machines.length"
+              class="p-10 text-center text-sm text-muted"
+            >
               Nenhuma máquina Proxmox retornada.
             </p>
           </div>
@@ -841,14 +1076,31 @@ const backupGuest = (guest: ProxmoxGuest) => {
                   ><Camera class="h-3.5 w-3.5" />Snapshots</Button
                 ><Button variant="outline" @click="openFirewall(guest)"
                   ><Shield class="h-3.5 w-3.5" />Firewall</Button
-                ><Button variant="outline" :disabled="!canManage" @click="backupGuest(guest)"
+                ><Button
+                  variant="outline"
+                  :disabled="!canManage"
+                  @click="backupGuest(guest)"
                   ><HardDrive class="h-3.5 w-3.5" />Backup</Button
-                ><Button variant="outline" :disabled="!canManage" @click="migrate(guest)"
+                ><Button
+                  variant="outline"
+                  :disabled="!canManage"
+                  @click="migrate(guest)"
                   ><ArrowRightLeft class="h-3.5 w-3.5" />Migrar</Button
-                ><Button variant="outline" :disabled="!canManage" @click="cloneGuest(guest)"
+                ><Button
+                  variant="outline"
+                  :disabled="!canManage"
+                  @click="cloneGuest(guest)"
                   ><Copy class="h-3.5 w-3.5" />Clonar</Button
-                ><Button variant="outline" :disabled="!canManage" @click="editResources(guest)"
+                ><Button
+                  variant="outline"
+                  :disabled="!canManage"
+                  @click="editResources(guest)"
                   ><Settings class="h-3.5 w-3.5" />Config</Button
+                ><Button
+                  variant="outline"
+                  :disabled="!canManage || resizeDisk.isPending.value"
+                  @click="resizeGuestDisk(guest)"
+                  ><HardDrive class="h-3.5 w-3.5" />Disco</Button
                 ><Button
                   v-if="guest.status !== 'running'"
                   variant="outline"
@@ -917,7 +1169,9 @@ const backupGuest = (guest: ProxmoxGuest) => {
           <div v-else-if="tab === 'network'" class="divide-y divide-line/60">
             <div v-if="!networkNode" class="p-10 text-center">
               <Network class="mx-auto h-12 w-12 text-muted" />
-              <p class="mt-4 text-sm text-muted">Selecione um nó para visualizar interfaces de rede</p>
+              <p class="mt-4 text-sm text-muted">
+                Selecione um nó para visualizar interfaces de rede
+              </p>
               <div class="mt-6 grid gap-2 md:grid-cols-2">
                 <Button
                   v-for="node in inventory.data.value?.nodes ?? []"
@@ -933,17 +1187,27 @@ const backupGuest = (guest: ProxmoxGuest) => {
               <div class="bg-slate-950/20 p-4">
                 <div class="flex items-center justify-between">
                   <div>
-                    <p class="text-sm font-medium">Interfaces de rede · {{ networkNode.node }}</p>
-                    <p class="mt-1 text-xs text-muted">{{ networkNode.cluster }}</p>
+                    <p class="text-sm font-medium">
+                      Interfaces de rede · {{ networkNode.node }}
+                    </p>
+                    <p class="mt-1 text-xs text-muted">
+                      {{ networkNode.cluster }}
+                    </p>
                   </div>
-                  <Button variant="outline" size="sm" @click="networkNode = null">Voltar</Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    @click="networkNode = null"
+                    >Voltar</Button
+                  >
                 </div>
               </div>
               <div
                 v-if="networkInterfaces.isError.value"
                 class="m-5 rounded-lg border border-danger/20 bg-danger/5 p-4 text-sm text-danger"
               >
-                Erro ao carregar interfaces: {{ networkInterfaces.error.value?.message }}
+                Erro ao carregar interfaces:
+                {{ networkInterfaces.error.value?.message }}
               </div>
               <div v-else class="divide-y divide-line/60">
                 <div
@@ -955,11 +1219,19 @@ const backupGuest = (guest: ProxmoxGuest) => {
                     <p class="font-mono text-sm text-white">{{ iface.name }}</p>
                     <p class="mt-1 text-xs text-muted">
                       Tipo: {{ iface.type }}
-                      <template v-if="iface.bridge">· Bridge: {{ iface.bridge }}</template>
+                      <template v-if="iface.bridge"
+                        >· Bridge: {{ iface.bridge }}</template
+                      >
                     </p>
-                    <p v-if="iface.address" class="mt-1 font-mono text-[10px] text-muted">
-                      {{ iface.address }}{{ iface.netmask ? `/${iface.netmask}` : '' }}
-                      <template v-if="iface.gateway">· GW: {{ iface.gateway }}</template>
+                    <p
+                      v-if="iface.address"
+                      class="mt-1 font-mono text-[10px] text-muted"
+                    >
+                      {{ iface.address
+                      }}{{ iface.netmask ? `/${iface.netmask}` : "" }}
+                      <template v-if="iface.gateway"
+                        >· GW: {{ iface.gateway }}</template
+                      >
                     </p>
                   </div>
                   <StatusBadge
@@ -967,12 +1239,17 @@ const backupGuest = (guest: ProxmoxGuest) => {
                     :label="iface.active ? 'ativa' : 'inativa'"
                   />
                   <div class="flex items-center gap-2 text-xs text-muted">
-                    <span :class="iface.autostart ? 'text-signal' : 'text-muted'">
-                      {{ iface.autostart ? '✓ Autostart' : '✗ Sem autostart' }}
+                    <span
+                      :class="iface.autostart ? 'text-signal' : 'text-muted'"
+                    >
+                      {{ iface.autostart ? "✓ Autostart" : "✗ Sem autostart" }}
                     </span>
                   </div>
                 </div>
-                <p v-if="!networkInterfaces.data.value?.length" class="p-10 text-center text-sm text-muted">
+                <p
+                  v-if="!networkInterfaces.data.value?.length"
+                  class="p-10 text-center text-sm text-muted"
+                >
                   Nenhuma interface encontrada.
                 </p>
               </div>
@@ -1228,7 +1505,9 @@ const backupGuest = (guest: ProxmoxGuest) => {
                     ? new Date(snap.snaptime * 1000).toLocaleString("pt-BR")
                     : "—"
                 }}
-                <template v-if="snap.parent">· Parent: {{ snap.parent }}</template>
+                <template v-if="snap.parent"
+                  >· Parent: {{ snap.parent }}</template
+                >
                 <template v-if="snap.vmstate">· COM estado de RAM</template>
               </p>
             </div>
@@ -1249,10 +1528,7 @@ const backupGuest = (guest: ProxmoxGuest) => {
             </div>
           </div>
           <p
-            v-if="
-              !snapshots.isLoading.value &&
-              !snapshots.data.value?.length
-            "
+            v-if="!snapshots.isLoading.value && !snapshots.data.value?.length"
             class="p-10 text-center text-sm text-muted"
           >
             Nenhum snapshot encontrado.
@@ -1333,7 +1609,9 @@ const backupGuest = (guest: ProxmoxGuest) => {
                 <span
                   :class="[
                     'rounded px-2 py-0.5 font-mono text-xs font-medium',
-                    rule.action === 'ACCEPT' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400',
+                    rule.action === 'ACCEPT'
+                      ? 'bg-green-500/20 text-green-400'
+                      : 'bg-red-500/20 text-red-400',
                   ]"
                 >
                   {{ rule.action }}
@@ -1350,11 +1628,21 @@ const backupGuest = (guest: ProxmoxGuest) => {
               </div>
               <p class="mt-2 font-mono text-xs text-slate-300">
                 <template v-if="rule.proto">Proto: {{ rule.proto }}</template>
-                <template v-if="rule.dport"> · Porta: {{ rule.dport }}</template>
-                <template v-if="rule.source"> · Origem: {{ rule.source }}</template>
-                <template v-if="rule.dest"> · Destino: {{ rule.dest }}</template>
-                <template v-if="rule.sport"> · Sport: {{ rule.sport }}</template>
-                <template v-if="rule.iface"> · Interface: {{ rule.iface }}</template>
+                <template v-if="rule.dport">
+                  · Porta: {{ rule.dport }}</template
+                >
+                <template v-if="rule.source">
+                  · Origem: {{ rule.source }}</template
+                >
+                <template v-if="rule.dest">
+                  · Destino: {{ rule.dest }}</template
+                >
+                <template v-if="rule.sport">
+                  · Sport: {{ rule.sport }}</template
+                >
+                <template v-if="rule.iface">
+                  · Interface: {{ rule.iface }}</template
+                >
               </p>
               <p v-if="rule.comment" class="mt-1 text-xs text-muted">
                 {{ rule.comment }}
@@ -1437,7 +1725,8 @@ const backupGuest = (guest: ProxmoxGuest) => {
             /></label>
           </div>
           <p class="mt-3 text-[10px] text-muted">
-            Regras são aplicadas imediatamente. A ordem importa: regras são avaliadas sequencialmente.
+            Regras são aplicadas imediatamente. A ordem importa: regras são
+            avaliadas sequencialmente.
           </p>
           <Button
             type="submit"
@@ -1448,6 +1737,12 @@ const backupGuest = (guest: ProxmoxGuest) => {
         </form>
       </article>
     </div>
-    <ActionGuardModal :show="!!guardedAction" :target-name="guardedTarget" title="Operação Proxmox protegida" @cancel="guardedAction = null" @confirm="confirmGuardedAction" />
+    <ActionGuardModal
+      :show="!!guardedAction"
+      :target-name="guardedTarget"
+      title="Operação Proxmox protegida"
+      @cancel="guardedAction = null"
+      @confirm="confirmGuardedAction"
+    />
   </div>
 </template>

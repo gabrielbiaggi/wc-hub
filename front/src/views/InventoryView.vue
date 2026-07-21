@@ -1,14 +1,360 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
-import { Boxes, CloudCog, LockKeyhole, Plus, Server, ShieldCheck, X } from 'lucide-vue-next'
-import Button from '@/components/ui/Button.vue'
-import StatusBadge from '@/components/ui/StatusBadge.vue'
-import { createHost, createIntegration, getHosts, getIntegrations } from '@/lib/api'
-import { traduzirTexto } from '@/lib/ptbr'
-const client=useQueryClient();const integrations=useQuery({queryKey:['integrations'],queryFn:getIntegrations});const hosts=useQuery({queryKey:['hosts'],queryFn:getHosts});const mode=ref<'host'|'integration'|null>(null)
-const hostForm=ref({name:'',hostname:'',scope:'remote' as 'local'|'remote'|'cloud',self_protected:false,ssh_address:'',ssh_user:'root'});const integrationForm=ref({name:'',provider:'proxmox'})
-const addHost=useMutation({mutationFn:()=>{const{ssh_address,ssh_user,...host}=hostForm.value;return createHost({...host,labels:{},facts:{ssh_address:ssh_address||host.hostname,ssh_user,ssh_port:22}})},onSuccess:()=>{client.invalidateQueries({queryKey:['hosts']});mode.value=null}})
-const addIntegration=useMutation({mutationFn:()=>createIntegration({...integrationForm.value,config:{}}),onSuccess:()=>{client.invalidateQueries({queryKey:['integrations']});mode.value=null}})
+import { computed, ref } from "vue";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
+import {
+  Boxes,
+  CloudCog,
+  KeyRound,
+  LockKeyhole,
+  Plus,
+  Server,
+  ShieldCheck,
+  X,
+} from "lucide-vue-next";
+import Button from "@/components/ui/Button.vue";
+import StatusBadge from "@/components/ui/StatusBadge.vue";
+import ActionGuardModal from "@/components/ActionGuardModal.vue";
+import {
+  createHost,
+  createIntegration,
+  getHosts,
+  getIntegrations,
+  provisionAgentToken,
+  type Host,
+} from "@/lib/api";
+import { traduzirTexto } from "@/lib/ptbr";
+const client = useQueryClient();
+const integrations = useQuery({
+  queryKey: ["integrations"],
+  queryFn: getIntegrations,
+});
+const hosts = useQuery({ queryKey: ["hosts"], queryFn: getHosts });
+const mode = ref<"host" | "integration" | null>(null);
+const hostForm = ref({
+  name: "",
+  hostname: "",
+  scope: "remote" as "local" | "remote" | "cloud",
+  self_protected: false,
+  ssh_address: "",
+  ssh_user: "root",
+});
+const integrationForm = ref({ name: "", provider: "proxmox" });
+const addHost = useMutation({
+  mutationFn: () => {
+    const { ssh_address, ssh_user, ...host } = hostForm.value;
+    return createHost({
+      ...host,
+      labels: {},
+      facts: {
+        ssh_address: ssh_address || host.hostname,
+        ssh_user,
+        ssh_port: 22,
+      },
+    });
+  },
+  onSuccess: () => {
+    client.invalidateQueries({ queryKey: ["hosts"] });
+    mode.value = null;
+  },
+});
+const addIntegration = useMutation({
+  mutationFn: () => createIntegration({ ...integrationForm.value, config: {} }),
+  onSuccess: () => {
+    client.invalidateQueries({ queryKey: ["integrations"] });
+    mode.value = null;
+  },
+});
+const agentHost = ref<Host | null>(null);
+const issuedAgentToken = ref("");
+const agentError = ref("");
+const agentTarget = computed(() => agentHost.value?.name ?? "");
+const provisionAgent = useMutation({
+  mutationFn: (input: { confirmation: string; totpCode: string }) =>
+    provisionAgentToken(
+      agentHost.value!.id,
+      input.confirmation,
+      input.totpCode,
+    ),
+  onSuccess: (result) => {
+    issuedAgentToken.value = result.token;
+    agentHost.value = null;
+  },
+  onError: (error: any) =>
+    (agentError.value =
+      error?.response?.data?.error?.message ??
+      "Não foi possível gerar o token do agente."),
+});
+const copyAgentToken = () =>
+  window.navigator.clipboard?.writeText(issuedAgentToken.value);
 </script>
-<template><div class="mx-auto max-w-[1680px] space-y-5"><header class="flex flex-col justify-between gap-4 md:flex-row md:items-end"><div><div class="flex gap-2"><StatusBadge status="healthy" label="PostgreSQL como fonte de verdade"/><span class="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-signal"><ShieldCheck class="h-3.5 w-3.5"/>RBAC aplicado</span></div><h1 class="mt-4 text-3xl font-semibold tracking-tight">Inventário de recursos</h1><p class="mt-2 text-sm text-muted">Alvos e integrações classificados antes de qualquer ação operacional.</p></div><div class="flex gap-2"><Button variant="outline" @click="mode='integration'"><CloudCog class="h-4 w-4"/>Integração</Button><Button @click="mode='host'"><Plus class="h-4 w-4"/>Host</Button></div></header><section class="grid gap-5 xl:grid-cols-[1.5fr_1fr]"><article class="overflow-hidden rounded-xl border border-line bg-panel/65"><header class="flex items-center gap-3 border-b border-line px-5 py-4"><Server class="h-4 w-4 text-pulse"/><div><h2 class="text-sm font-medium">Alvos gerenciados</h2><p class="text-[11px] text-muted">{{hosts.data.value?.length??0}} hosts registrados</p></div></header><div class="divide-y divide-line/70"><div v-for="host in hosts.data.value" :key="host.id" class="grid gap-3 px-5 py-4 transition-colors hover:bg-white/[.02] sm:grid-cols-[1fr_140px_120px]"><div class="flex items-center gap-3"><div class="grid h-9 w-9 place-items-center rounded-lg border border-line bg-slate-950/50"><LockKeyhole v-if="host.self_protected" class="h-4 w-4 text-signal"/><Server v-else class="h-4 w-4 text-muted"/></div><div><p class="text-sm text-slate-200">{{host.name}}</p><p class="font-mono text-[10px] text-muted">{{host.hostname}}</p></div></div><div class="self-center font-mono text-[10px] uppercase tracking-wider text-muted">{{traduzirTexto(host.scope)}}</div><div class="self-center sm:text-right"><StatusBadge :status="host.self_protected?'healthy':'info'" :label="host.self_protected?'protegido':host.status"/></div></div><div v-if="!hosts.data.value?.length" class="p-10 text-center text-sm text-muted">Nenhum host registrado.</div></div></article><article class="overflow-hidden rounded-xl border border-line bg-panel/65"><header class="flex items-center gap-3 border-b border-line px-5 py-4"><Boxes class="h-4 w-4 text-signal"/><div><h2 class="text-sm font-medium">Integrações</h2><p class="text-[11px] text-muted">Adaptadores e credenciais</p></div></header><div class="divide-y divide-line/70"><div v-for="integration in integrations.data.value" :key="integration.id" class="flex items-center gap-3 px-5 py-4"><div class="grid h-9 w-9 place-items-center rounded-lg border border-line bg-slate-950/50"><CloudCog class="h-4 w-4 text-muted"/></div><div class="min-w-0 flex-1"><p class="truncate text-sm text-slate-200">{{integration.name}}</p><p class="font-mono text-[10px] uppercase text-muted">{{integration.provider}}</p></div><StatusBadge :status="integration.status==='connected'?'healthy':'warning'" :label="integration.status"/></div><div v-if="!integrations.data.value?.length" class="p-10 text-center text-sm text-muted">Nenhuma integração configurada.</div></div></article></section><div v-if="mode" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" @click.self="mode=null"><form class="w-full max-w-md rounded-xl border border-line bg-panel p-6 shadow-2xl" @submit.prevent="mode==='host'?addHost.mutate():addIntegration.mutate()"><div class="flex items-start"><div><p class="font-mono text-[10px] uppercase tracking-widest text-signal">Inventário seguro</p><h2 class="mt-2 text-xl font-semibold">Nova {{mode==='host'?'máquina':'integração'}}</h2></div><button type="button" class="ml-auto cursor-pointer p-2 text-muted hover:text-white" @click="mode=null"><X class="h-4 w-4"/></button></div><div v-if="mode==='host'" class="mt-6 space-y-4"><label class="block text-xs">Nome<input v-model="hostForm.name" required class="field" placeholder="node-proxmox-01"/></label><label class="block text-xs">Nome do host / IP<input v-model="hostForm.hostname" required class="field" placeholder="10.0.10.15"/></label><label class="block text-xs">Escopo<select v-model="hostForm.scope" class="field"><option value="remote">Remoto</option><option value="cloud">Nuvem</option><option value="local">Local</option></select></label><label class="flex items-center gap-3 rounded-lg border border-line p-3 text-xs text-muted"><input v-model="hostForm.self_protected" type="checkbox" class="accent-emerald-400"/>Marcar como alvo local autoprotegido</label></div><div v-else class="mt-6 space-y-4"><label class="block text-xs">Nome<input v-model="integrationForm.name" required class="field" placeholder="Proxmox Homelab"/></label><label class="block text-xs">Provedor<select v-model="integrationForm.provider" class="field"><option v-for="provider in ['proxmox','docker','kubernetes','github','cloudflare','oracle','terraform']" :key="provider">{{provider}}</option></select></label><p class="text-[11px] leading-5 text-muted">Credenciais serão adicionadas em fluxo criptografado separado; este passo cria somente os metadados.</p></div><Button class="mt-6 w-full" type="submit">Registrar com auditoria</Button></form></div></div></template>
+<template>
+  <div class="mx-auto max-w-[1680px] space-y-5">
+    <header
+      class="flex flex-col justify-between gap-4 md:flex-row md:items-end"
+    >
+      <div>
+        <div class="flex gap-2">
+          <StatusBadge
+            status="healthy"
+            label="PostgreSQL como fonte de verdade"
+          /><span
+            class="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-signal"
+            ><ShieldCheck class="h-3.5 w-3.5" />RBAC aplicado</span
+          >
+        </div>
+        <h1 class="mt-4 text-3xl font-semibold tracking-tight">
+          Inventário de recursos
+        </h1>
+        <p class="mt-2 text-sm text-muted">
+          Alvos e integrações classificados antes de qualquer ação operacional.
+        </p>
+      </div>
+      <div class="flex gap-2">
+        <Button variant="outline" @click="mode = 'integration'"
+          ><CloudCog class="h-4 w-4" />Integração</Button
+        ><Button @click="mode = 'host'"><Plus class="h-4 w-4" />Host</Button>
+      </div>
+    </header>
+    <section class="grid gap-5 xl:grid-cols-[1.5fr_1fr]">
+      <article
+        class="overflow-hidden rounded-xl border border-line bg-panel/65"
+      >
+        <header class="flex items-center gap-3 border-b border-line px-5 py-4">
+          <Server class="h-4 w-4 text-pulse" />
+          <div>
+            <h2 class="text-sm font-medium">Alvos gerenciados</h2>
+            <p class="text-[11px] text-muted">
+              {{ hosts.data.value?.length ?? 0 }} hosts registrados
+            </p>
+          </div>
+        </header>
+        <div class="divide-y divide-line/70">
+          <div
+            v-for="host in hosts.data.value"
+            :key="host.id"
+            class="grid gap-3 px-5 py-4 transition-colors hover:bg-white/[.02] sm:grid-cols-[1fr_140px_120px]"
+          >
+            <div class="flex items-center gap-3">
+              <div
+                class="grid h-9 w-9 place-items-center rounded-lg border border-line bg-slate-950/50"
+              >
+                <LockKeyhole
+                  v-if="host.self_protected"
+                  class="h-4 w-4 text-signal"
+                /><Server v-else class="h-4 w-4 text-muted" />
+              </div>
+              <div>
+                <p class="text-sm text-slate-200">{{ host.name }}</p>
+                <p class="font-mono text-[10px] text-muted">
+                  {{ host.hostname }}
+                </p>
+              </div>
+            </div>
+            <div
+              class="self-center font-mono text-[10px] uppercase tracking-wider text-muted"
+            >
+              {{ traduzirTexto(host.scope) }}
+            </div>
+            <div class="flex items-center justify-end gap-2 self-center">
+              <Button
+                v-if="host.scope !== 'local' && !host.self_protected"
+                variant="outline"
+                class="!px-2 !py-1"
+                @click="
+                  agentError = '';
+                  agentHost = host;
+                "
+                ><KeyRound class="h-3.5 w-3.5" />Agente</Button
+              >
+              <StatusBadge
+                :status="host.self_protected ? 'healthy' : 'info'"
+                :label="host.self_protected ? 'protegido' : host.status"
+              />
+            </div>
+          </div>
+          <div
+            v-if="!hosts.data.value?.length"
+            class="p-10 text-center text-sm text-muted"
+          >
+            Nenhum host registrado.
+          </div>
+        </div>
+      </article>
+      <article
+        class="overflow-hidden rounded-xl border border-line bg-panel/65"
+      >
+        <header class="flex items-center gap-3 border-b border-line px-5 py-4">
+          <Boxes class="h-4 w-4 text-signal" />
+          <div>
+            <h2 class="text-sm font-medium">Integrações</h2>
+            <p class="text-[11px] text-muted">Adaptadores e credenciais</p>
+          </div>
+        </header>
+        <div class="divide-y divide-line/70">
+          <div
+            v-for="integration in integrations.data.value"
+            :key="integration.id"
+            class="flex items-center gap-3 px-5 py-4"
+          >
+            <div
+              class="grid h-9 w-9 place-items-center rounded-lg border border-line bg-slate-950/50"
+            >
+              <CloudCog class="h-4 w-4 text-muted" />
+            </div>
+            <div class="min-w-0 flex-1">
+              <p class="truncate text-sm text-slate-200">
+                {{ integration.name }}
+              </p>
+              <p class="font-mono text-[10px] uppercase text-muted">
+                {{ integration.provider }}
+              </p>
+            </div>
+            <StatusBadge
+              :status="
+                integration.status === 'connected' ? 'healthy' : 'warning'
+              "
+              :label="integration.status"
+            />
+          </div>
+          <div
+            v-if="!integrations.data.value?.length"
+            class="p-10 text-center text-sm text-muted"
+          >
+            Nenhuma integração configurada.
+          </div>
+        </div>
+      </article>
+    </section>
+    <div
+      v-if="mode"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+      @click.self="mode = null"
+    >
+      <form
+        class="w-full max-w-md rounded-xl border border-line bg-panel p-6 shadow-2xl"
+        @submit.prevent="
+          mode === 'host' ? addHost.mutate() : addIntegration.mutate()
+        "
+      >
+        <div class="flex items-start">
+          <div>
+            <p
+              class="font-mono text-[10px] uppercase tracking-widest text-signal"
+            >
+              Inventário seguro
+            </p>
+            <h2 class="mt-2 text-xl font-semibold">
+              Nova {{ mode === "host" ? "máquina" : "integração" }}
+            </h2>
+          </div>
+          <button
+            type="button"
+            class="ml-auto cursor-pointer p-2 text-muted hover:text-white"
+            @click="mode = null"
+          >
+            <X class="h-4 w-4" />
+          </button>
+        </div>
+        <div v-if="mode === 'host'" class="mt-6 space-y-4">
+          <label class="block text-xs"
+            >Nome<input
+              v-model="hostForm.name"
+              required
+              class="field"
+              placeholder="node-proxmox-01" /></label
+          ><label class="block text-xs"
+            >Nome do host / IP<input
+              v-model="hostForm.hostname"
+              required
+              class="field"
+              placeholder="10.0.10.15" /></label
+          ><label class="block text-xs"
+            >Escopo<select v-model="hostForm.scope" class="field">
+              <option value="remote">Remoto</option>
+              <option value="cloud">Nuvem</option>
+              <option value="local">Local</option>
+            </select></label
+          ><label
+            class="flex items-center gap-3 rounded-lg border border-line p-3 text-xs text-muted"
+            ><input
+              v-model="hostForm.self_protected"
+              type="checkbox"
+              class="accent-emerald-400"
+            />Marcar como alvo local autoprotegido</label
+          >
+        </div>
+        <div v-else class="mt-6 space-y-4">
+          <label class="block text-xs"
+            >Nome<input
+              v-model="integrationForm.name"
+              required
+              class="field"
+              placeholder="Proxmox Homelab" /></label
+          ><label class="block text-xs"
+            >Provedor<select v-model="integrationForm.provider" class="field">
+              <option
+                v-for="provider in [
+                  'proxmox',
+                  'docker',
+                  'kubernetes',
+                  'github',
+                  'cloudflare',
+                  'oracle',
+                  'terraform',
+                ]"
+                :key="provider"
+              >
+                {{ provider }}
+              </option>
+            </select></label
+          >
+          <p class="text-[11px] leading-5 text-muted">
+            Credenciais serão adicionadas em fluxo criptografado separado; este
+            passo cria somente os metadados.
+          </p>
+        </div>
+        <Button class="mt-6 w-full" type="submit"
+          >Registrar com auditoria</Button
+        >
+      </form>
+    </div>
+    <ActionGuardModal
+      :show="!!agentHost"
+      :target-name="agentTarget"
+      title="Gerar token de agente remoto"
+      action-description="O token aparece somente uma vez. A rotação para o próprio Hub é bloqueada no backend."
+      @cancel="agentHost = null"
+      @confirm="provisionAgent.mutate"
+    />
+    <div
+      v-if="agentError"
+      class="fixed bottom-5 right-5 z-50 max-w-md rounded-xl border border-danger/30 bg-panel p-4 text-xs text-danger"
+    >
+      {{ agentError }}
+    </div>
+    <div
+      v-if="issuedAgentToken"
+      class="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm"
+    >
+      <section
+        class="w-full max-w-xl rounded-xl border border-warning/30 bg-panel p-6"
+      >
+        <p class="font-mono text-[10px] uppercase tracking-widest text-warning">
+          Token de uso único
+        </p>
+        <h2 class="mt-2 text-lg font-semibold">Instale o agente agora</h2>
+        <p class="mt-2 text-xs leading-5 text-muted">
+          Copie este token antes de fechar. Ele não será exibido novamente.
+        </p>
+        <code
+          class="mt-4 block break-all rounded-lg border border-line bg-slate-950 p-3 text-xs text-signal"
+          >{{ issuedAgentToken }}</code
+        >
+        <div class="mt-5 flex justify-end gap-2">
+          <Button variant="outline" @click="copyAgentToken">Copiar</Button
+          ><Button @click="issuedAgentToken = ''">Fechar</Button>
+        </div>
+      </section>
+    </div>
+  </div>
+</template>

@@ -156,6 +156,18 @@ func (a *App) proxmoxMigrateGuest(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &in) {
 		return
 	}
+	targetName := c.ID() + "/" + n + "/" + k + "/" + strconv.Itoa(id)
+	isSelf := a.targetResolver != nil && a.targetResolver.IsSelfProtectedVM(id, targetName)
+	if !a.enforcePolicy(w, r, security.ActionRequest{
+		Action:              "proxmox_migrate",
+		Scope:               security.ScopeRemote,
+		TargetName:          targetName,
+		TargetSelfProtected: isSelf,
+		Confirmation:        r.Header.Get("X-Confirmation"),
+		TOTPCode:            r.Header.Get("X-TOTP-Code"),
+	}) {
+		return
+	}
 	if e := c.MigrateGuest(r.Context(), n, k, id, in.TargetNode, in.Online); e != nil {
 		writeError(w, 502, "proxmox_migration_failed", e.Error())
 		return
@@ -187,6 +199,18 @@ func (a *App) proxmoxResizeDisk(w http.ResponseWriter, r *http.Request) {
 		Size string `json:"size"`
 	}
 	if !decodeJSON(w, r, &in) {
+		return
+	}
+	targetName := c.ID() + "/" + n + "/" + k + "/" + strconv.Itoa(id)
+	isSelf := a.targetResolver != nil && a.targetResolver.IsSelfProtectedVM(id, targetName)
+	if !a.enforcePolicy(w, r, security.ActionRequest{
+		Action:              "proxmox_resize",
+		Scope:               security.ScopeRemote,
+		TargetName:          targetName,
+		TargetSelfProtected: isSelf,
+		Confirmation:        r.Header.Get("X-Confirmation"),
+		TOTPCode:            r.Header.Get("X-TOTP-Code"),
+	}) {
 		return
 	}
 	if e := c.ResizeDisk(r.Context(), n, k, id, in.Disk, in.Size); e != nil {
@@ -223,6 +247,18 @@ func (a *App) proxmoxUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(in.Config) == 0 {
 		writeError(w, 400, "empty_config", "Configuração vazia.")
+		return
+	}
+	targetName := c.ID() + "/" + n + "/" + k + "/" + strconv.Itoa(id)
+	isSelf := a.targetResolver != nil && a.targetResolver.IsSelfProtectedVM(id, targetName)
+	if !a.enforcePolicy(w, r, security.ActionRequest{
+		Action:              "proxmox_config_update",
+		Scope:               security.ScopeRemote,
+		TargetName:          targetName,
+		TargetSelfProtected: isSelf,
+		Confirmation:        r.Header.Get("X-Confirmation"),
+		TOTPCode:            r.Header.Get("X-TOTP-Code"),
+	}) {
 		return
 	}
 	if e := c.UpdateGuestConfig(r.Context(), n, k, id, in.Config); e != nil {
