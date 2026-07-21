@@ -22,6 +22,7 @@ type Config struct {
 	EncryptionKey             string
 	TOTPIssuer                string
 	ProxmoxURL                string
+	ProxmoxClusterName        string
 	ProxmoxTokenID            string
 	ProxmoxSecret             string
 	ProxmoxTLSCA              string
@@ -86,6 +87,7 @@ func Load() Config {
 		EncryptionKey:             secretEnv("WC_HUB_ENCRYPTION_KEY", "WC_HUB_ENCRYPTION_KEY_FILE"),
 		TOTPIssuer:                env("WC_HUB_TOTP_ISSUER", "WC Hub"),
 		ProxmoxURL:                strings.TrimRight(env("PROXMOX_API_URL", ""), "/"),
+		ProxmoxClusterName:        env("PROXMOX_CLUSTER_NAME", ""),
 		ProxmoxTokenID:            env("PROXMOX_API_TOKEN_ID", ""),
 		ProxmoxSecret:             env("PROXMOX_API_TOKEN_SECRET", ""),
 		ProxmoxTLSCA:              env("PROXMOX_TLS_CA_PATH", ""),

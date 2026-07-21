@@ -151,7 +151,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, fun
 	application.terminal = terminalrepo.NewPostgres(pool)
 	application.monitorStore = monitorapp.NewStore(pool)
 	if cfg.ProxmoxURL != "" {
-		client, clientErr := proxmoxadapter.NewWithConfig(proxmoxadapter.Config{URL: cfg.ProxmoxURL, TokenID: cfg.ProxmoxTokenID, Secret: []byte(cfg.ProxmoxSecret), CAPath: cfg.ProxmoxTLSCA, InsecureSkipVerify: cfg.ProxmoxTLSInsecure})
+		client, clientErr := proxmoxadapter.NewWithConfig(proxmoxadapter.Config{URL: cfg.ProxmoxURL, ClusterName: cfg.ProxmoxClusterName, TokenID: cfg.ProxmoxTokenID, Secret: []byte(cfg.ProxmoxSecret), CAPath: cfg.ProxmoxTLSCA, InsecureSkipVerify: cfg.ProxmoxTLSInsecure})
 		if clientErr != nil {
 			logger.Error("Proxmox adapter disabled", "error", clientErr)
 			application.setAdapterError("proxmox", clientErr)

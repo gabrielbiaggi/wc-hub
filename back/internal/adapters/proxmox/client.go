@@ -22,12 +22,14 @@ import (
 
 type Client struct {
 	baseURL, tokenID string
+	clusterName      string
 	secret           []byte
 	http             *http.Client
 	tlsConfig        *tls.Config
 }
 type Config struct {
 	URL                string
+	ClusterName        string
 	TokenID            string
 	Secret             []byte
 	CAPath             string
@@ -162,7 +164,7 @@ func NewWithConfig(config Config) (*Client, error) {
 		tlsConfig.RootCAs = pool
 	}
 	transport := &http.Transport{TLSClientConfig: tlsConfig, MaxIdleConns: 20, IdleConnTimeout: 60 * time.Second}
-	return &Client{baseURL: strings.TrimRight(config.URL, "/"), tokenID: config.TokenID, secret: append([]byte(nil), config.Secret...), http: &http.Client{Timeout: 20 * time.Second, Transport: transport}, tlsConfig: tlsConfig}, nil
+	return &Client{baseURL: strings.TrimRight(config.URL, "/"), clusterName: strings.TrimSpace(config.ClusterName), tokenID: config.TokenID, secret: append([]byte(nil), config.Secret...), http: &http.Client{Timeout: 20 * time.Second, Transport: transport}, tlsConfig: tlsConfig}, nil
 }
 
 // NewFromEnvFile loads an additional cluster from a root-readable secret file.
@@ -186,7 +188,7 @@ func NewFromEnvFile(path string) (*Client, error) {
 			continue
 		}
 		key = strings.TrimSpace(key)
-		if key == "PROXMOX_API_URL" || key == "PROXMOX_API_TOKEN_ID" || key == "PROXMOX_API_TOKEN_SECRET" || key == "PROXMOX_TLS_CA_PATH" || key == "PROXMOX_TLS_INSECURE_SKIP_VERIFY" {
+		if key == "PROXMOX_API_URL" || key == "PROXMOX_CLUSTER_NAME" || key == "PROXMOX_API_TOKEN_ID" || key == "PROXMOX_API_TOKEN_SECRET" || key == "PROXMOX_TLS_CA_PATH" || key == "PROXMOX_TLS_INSECURE_SKIP_VERIFY" {
 			values[key] = strings.Trim(strings.TrimSpace(value), `"'`)
 		}
 	}
@@ -201,12 +203,15 @@ func NewFromEnvFile(path string) (*Client, error) {
 		}
 		insecure = parsed
 	}
-	return NewWithConfig(Config{URL: values["PROXMOX_API_URL"], TokenID: values["PROXMOX_API_TOKEN_ID"], Secret: []byte(values["PROXMOX_API_TOKEN_SECRET"]), CAPath: values["PROXMOX_TLS_CA_PATH"], InsecureSkipVerify: insecure})
+	return NewWithConfig(Config{URL: values["PROXMOX_API_URL"], ClusterName: values["PROXMOX_CLUSTER_NAME"], TokenID: values["PROXMOX_API_TOKEN_ID"], Secret: []byte(values["PROXMOX_API_TOKEN_SECRET"]), CAPath: values["PROXMOX_TLS_CA_PATH"], InsecureSkipVerify: insecure})
 }
 func (c *Client) Configured() bool { return c != nil && c.baseURL != "" }
 func (c *Client) ID() string {
 	if c == nil {
 		return "proxmox"
+	}
+	if c.clusterName != "" {
+		return c.clusterName
 	}
 	parsed, err := url.Parse(c.baseURL)
 	if err != nil || parsed == nil || parsed.Hostname() == "" {
@@ -387,15 +392,15 @@ func (c *Client) UpdateGuestConfig(ctx context.Context, node, kind string, vmid 
 }
 
 type NetworkInterface struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Type    string `json:"type"`
-	Active  bool   `json:"active"`
-	Autostart bool `json:"autostart"`
-	Bridge  string `json:"bridge,omitempty"`
-	Address string `json:"address,omitempty"`
-	Netmask string `json:"netmask,omitempty"`
-	Gateway string `json:"gateway,omitempty"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Type      string `json:"type"`
+	Active    bool   `json:"active"`
+	Autostart bool   `json:"autostart"`
+	Bridge    string `json:"bridge,omitempty"`
+	Address   string `json:"address,omitempty"`
+	Netmask   string `json:"netmask,omitempty"`
+	Gateway   string `json:"gateway,omitempty"`
 }
 
 func (c *Client) GetNodeNetworkConfig(ctx context.Context, node string) ([]NetworkInterface, error) {
@@ -404,14 +409,14 @@ func (c *Client) GetNodeNetworkConfig(ctx context.Context, node string) ([]Netwo
 	}
 	var result struct {
 		Data []struct {
-			Iface     string `json:"iface"`
-			Type      string `json:"type"`
-			Active    int    `json:"active"`
-			Autostart int    `json:"autostart"`
+			Iface       string `json:"iface"`
+			Type        string `json:"type"`
+			Active      int    `json:"active"`
+			Autostart   int    `json:"autostart"`
 			BridgePorts string `json:"bridge_ports,omitempty"`
-			Address   string `json:"address,omitempty"`
-			Netmask   string `json:"netmask,omitempty"`
-			Gateway   string `json:"gateway,omitempty"`
+			Address     string `json:"address,omitempty"`
+			Netmask     string `json:"netmask,omitempty"`
+			Gateway     string `json:"gateway,omitempty"`
 		} `json:"data"`
 	}
 	if err := c.request(ctx, http.MethodGet, fmt.Sprintf("/api2/json/nodes/%s/network", url.PathEscape(node)), &result); err != nil {
@@ -435,17 +440,17 @@ func (c *Client) GetNodeNetworkConfig(ctx context.Context, node string) ([]Netwo
 }
 
 type FirewallRule struct {
-	Pos       int    `json:"pos"`
-	Type      string `json:"type"`
-	Action    string `json:"action"`
-	Enable    int    `json:"enable"`
-	Proto     string `json:"proto,omitempty"`
-	Source    string `json:"source,omitempty"`
-	Dest      string `json:"dest,omitempty"`
-	Dport     string `json:"dport,omitempty"`
-	Sport     string `json:"sport,omitempty"`
-	Comment   string `json:"comment,omitempty"`
-	IFace     string `json:"iface,omitempty"`
+	Pos     int    `json:"pos"`
+	Type    string `json:"type"`
+	Action  string `json:"action"`
+	Enable  int    `json:"enable"`
+	Proto   string `json:"proto,omitempty"`
+	Source  string `json:"source,omitempty"`
+	Dest    string `json:"dest,omitempty"`
+	Dport   string `json:"dport,omitempty"`
+	Sport   string `json:"sport,omitempty"`
+	Comment string `json:"comment,omitempty"`
+	IFace   string `json:"iface,omitempty"`
 }
 
 func (c *Client) GetGuestFirewallRules(ctx context.Context, node, kind string, vmid int) ([]FirewallRule, error) {
@@ -480,13 +485,13 @@ func (c *Client) DeleteGuestFirewallRule(ctx context.Context, node, kind string,
 }
 
 type BackupInfo struct {
-	VolID   string  `json:"volid"`
-	Content string  `json:"content"`
-	Size    int64   `json:"size"`
-	Format  string  `json:"format"`
-	Ctime   int64   `json:"ctime"`
-	VMID    int     `json:"vmid"`
-	Notes   string  `json:"notes,omitempty"`
+	VolID   string `json:"volid"`
+	Content string `json:"content"`
+	Size    int64  `json:"size"`
+	Format  string `json:"format"`
+	Ctime   int64  `json:"ctime"`
+	VMID    int    `json:"vmid"`
+	Notes   string `json:"notes,omitempty"`
 }
 
 func (c *Client) GetNodeBackups(ctx context.Context, node, storage string) ([]BackupInfo, error) {
