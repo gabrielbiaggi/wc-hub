@@ -196,18 +196,25 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, fun
 	} else {
 		application.setAdapterError("kubernetes", fmt.Errorf("Kubernetes API or kubeconfig is not configured"))
 	}
-	if cfg.CloudflareToken != "" && (len(cfg.CloudflareAccounts) > 0 || len(cfg.CloudflareZones) > 0) {
+	cloudflareCredential := cfg.CloudflareToken
+	cloudflareGlobalEmail := ""
+	if cfg.CloudflareGlobalAPIKey != "" {
+		cloudflareCredential = cfg.CloudflareGlobalAPIKey
+		cloudflareGlobalEmail = cfg.CloudflareGlobalAPIEmail
+		logger.Warn("Cloudflare global API key authentication enabled; account and zone allowlists remain enforced")
+	}
+	if cloudflareCredential != "" && (len(cfg.CloudflareAccounts) > 0 || len(cfg.CloudflareZones) > 0) {
 		kek, decodeErr := base64.StdEncoding.DecodeString(cfg.EncryptionKey)
 		if decodeErr != nil || len(kek) != 32 {
 			logger.Error("Cloudflare adapter disabled", "error", "WC_HUB_ENCRYPTION_KEY must be base64-encoded 32 bytes")
 		} else {
-			envelope, sealErr := cloudflareadapter.SealToken(kek, []byte(cfg.CloudflareToken))
+			envelope, sealErr := cloudflareadapter.SealToken(kek, []byte(cloudflareCredential))
 			decryptor, decryptErr := cloudflareadapter.NewAESGCMEnvelopeDecryptor(kek)
 			if sealErr != nil || decryptErr != nil {
 				logger.Error("Cloudflare adapter disabled", "seal_error", sealErr, "decryptor_error", decryptErr)
 			} else {
 				source := cloudflareadapter.CredentialSourceFunc(func(context.Context) (cloudflareadapter.TokenEnvelope, error) { return envelope, nil })
-				client, clientErr := cloudflareadapter.New(cloudflareadapter.Config{CredentialSource: source, Decryptor: decryptor, AllowedAccounts: cfg.CloudflareAccounts, AllowedZones: cfg.CloudflareZones})
+				client, clientErr := cloudflareadapter.New(cloudflareadapter.Config{CredentialSource: source, Decryptor: decryptor, GlobalAPIEmail: cloudflareGlobalEmail, AllowedAccounts: cfg.CloudflareAccounts, AllowedZones: cfg.CloudflareZones})
 				if clientErr != nil {
 					logger.Error("Cloudflare adapter disabled", "error", clientErr)
 				} else {

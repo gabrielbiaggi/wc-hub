@@ -147,6 +147,10 @@ func newGCM(key []byte) (cipher.AEAD, error) {
 type Config struct {
 	CredentialSource CredentialSource
 	Decryptor        EnvelopeDecryptor
+	// GlobalAPIEmail switches authentication to Cloudflare's legacy global API
+	// key headers. The key itself still travels through CredentialSource and is
+	// decrypted only at the request boundary.
+	GlobalAPIEmail   string
 	AllowedAccounts  []string
 	AllowedZones     []string
 	HTTPClient       *http.Client
@@ -159,6 +163,7 @@ type Client struct {
 	baseURL         *url.URL
 	credentials     CredentialSource
 	decryptor       EnvelopeDecryptor
+	globalAPIEmail  string
 	allowedAccounts map[string]struct{}
 	allowedZones    map[string]struct{}
 	http            *http.Client
@@ -289,6 +294,10 @@ func New(config Config) (*Client, error) {
 	if len(accounts) == 0 && len(zones) == 0 {
 		return nil, fmt.Errorf("at least one Cloudflare account or zone must be allowlisted")
 	}
+	globalAPIEmail := strings.TrimSpace(config.GlobalAPIEmail)
+	if globalAPIEmail != "" && (!strings.Contains(globalAPIEmail, "@") || len(globalAPIEmail) > 254) {
+		return nil, fmt.Errorf("invalid Cloudflare global API email")
+	}
 
 	httpClient := config.HTTPClient
 	if httpClient == nil {
@@ -326,6 +335,7 @@ func New(config Config) (*Client, error) {
 		baseURL:         parsed,
 		credentials:     config.CredentialSource,
 		decryptor:       config.Decryptor,
+		globalAPIEmail:  globalAPIEmail,
 		allowedAccounts: accounts,
 		allowedZones:    zones,
 		http:            httpClient,
@@ -665,13 +675,19 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 	if err != nil {
 		return resultInfo{}, fmt.Errorf("build Cloudflare request: %w", ErrUpstream)
 	}
-	request.Header.Set("Authorization", "Bearer "+string(token))
+	if c.globalAPIEmail != "" {
+		request.Header.Set("X-Auth-Email", c.globalAPIEmail)
+		request.Header.Set("X-Auth-Key", string(token))
+	} else {
+		request.Header.Set("Authorization", "Bearer "+string(token))
+	}
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("User-Agent", "wc-hub/cloudflare")
 	if len(requestBody) > 0 {
 		request.Header.Set("Content-Type", "application/json")
 	}
 	defer request.Header.Del("Authorization")
+	defer request.Header.Del("X-Auth-Key")
 
 	response, err := c.http.Do(request)
 	if err != nil {

@@ -62,6 +62,39 @@ func TestEncryptedCredentialAndAllowlists(t *testing.T) {
 	}
 }
 
+func TestGlobalAPIKeyUsesLegacyHeadersAtRequestBoundary(t *testing.T) {
+	kek := []byte("0123456789abcdef0123456789abcdef")
+	key := []byte("0123456789abcdef0123456789abcdefabcde")
+	envelope, err := SealToken(kek, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decryptor, err := NewAESGCMEnvelopeDecryptor(kek)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Header.Get("Authorization") != "" || r.Header.Get("X-Auth-Email") != "owner@example.com" || r.Header.Get("X-Auth-Key") != string(key) {
+			t.Fatalf("unexpected Cloudflare global-key headers")
+		}
+		body := `{"success":true,"errors":[],"result":[],"result_info":{"page":1,"total_pages":1}}`
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+	})
+	client, err := New(Config{
+		CredentialSource: CredentialSourceFunc(func(context.Context) (TokenEnvelope, error) { return envelope, nil }),
+		Decryptor:        decryptor,
+		GlobalAPIEmail:   "owner@example.com",
+		AllowedAccounts:  []string{"account-1"},
+		HTTPClient:       &http.Client{Transport: transport},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = client.ListTunnels(context.Background(), "account-1"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestTamperedEnvelopeIsRejected(t *testing.T) {
 	kek := []byte("0123456789abcdef0123456789abcdef")
 	envelope, err := SealToken(kek, []byte("cloudflare-scoped-token-value"))

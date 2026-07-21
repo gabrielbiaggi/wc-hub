@@ -37,6 +37,8 @@ type Config struct {
 	KubernetesCA              string
 	KubernetesKubeconfig      string
 	CloudflareToken           string
+	CloudflareGlobalAPIKey    string
+	CloudflareGlobalAPIEmail  string
 	CloudflareAccounts        []string
 	CloudflareZones           []string
 	GitHubToken               string
@@ -99,6 +101,8 @@ func Load() Config {
 		KubernetesCA:              env("KUBERNETES_CA_PATH", "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"),
 		KubernetesKubeconfig:      env("KUBERNETES_KUBECONFIG_PATH", ""),
 		CloudflareToken:           env("CLOUDFLARE_API_TOKEN", ""),
+		CloudflareGlobalAPIKey:    env("CLOUDFLARE_GLOBAL_API_KEY", ""),
+		CloudflareGlobalAPIEmail:  env("CLOUDFLARE_GLOBAL_API_EMAIL", ""),
 		CloudflareAccounts:        split(env("CLOUDFLARE_ACCOUNT_ALLOWLIST", "")),
 		CloudflareZones:           split(env("CLOUDFLARE_ZONE_ALLOWLIST", "")),
 		GitHubToken:               env("GITHUB_TOKEN", ""),
