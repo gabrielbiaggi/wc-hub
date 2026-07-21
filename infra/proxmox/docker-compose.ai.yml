@@ -5,6 +5,9 @@ services:
       PROXMOX_TLS_CA_PATH: /run/secrets/proxmox_ca.pem
       PROXMOX_TLS_INSECURE_SKIP_VERIFY: "false"
       DOCKER_FALLBACK_SOCKET_PATH: /var/run/docker.sock
+      DOCKER_TLS_CA_PATH: ""
+      DOCKER_CLIENT_CERT_PATH: ""
+      DOCKER_CLIENT_KEY_PATH: ""
       HUB_PROXMOX_VMID: "101"
       HUB_CONTAINER_NAME: wc-hub-back-1
       HUB_HOST_ID: wc-hub-ai
