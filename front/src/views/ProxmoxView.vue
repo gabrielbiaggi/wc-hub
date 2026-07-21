@@ -25,6 +25,8 @@ import {
 } from "lucide-vue-next";
 import Button from "@/components/ui/Button.vue";
 import StatusBadge from "@/components/ui/StatusBadge.vue";
+import ActionGuardModal from "@/components/ActionGuardModal.vue";
+import { usePermissions } from "@/composables/usePermissions";
 import {
   cloneProxmoxGuest,
   createProxmoxBackup,
@@ -54,11 +56,20 @@ import {
   type ProxmoxNetworkInterface,
   type ProxmoxQEMUInput,
   type ProxmoxSnapshot,
+  buildActionHeaders,
 } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api_error";
 
 type Tab = "qemu" | "lxc" | "storage" | "network" | "provision";
 const tab = ref<Tab>("qemu");
+const { hasPermission } = usePermissions();
+const canManage = computed(() => hasPermission("proxmox.manage"));
+type GuardedProxmoxAction =
+  | {kind:"power"; guest:ProxmoxGuest; action:"stop"|"shutdown"|"reboot"|"reset"; target:string}
+  | {kind:"delete"; guest:ProxmoxGuest; target:string}
+  | {kind:"snapshot-delete"|"snapshot-rollback"; guest:ProxmoxGuest; snapshot:string; target:string};
+const guardedAction = ref<GuardedProxmoxAction|null>(null);
+const guardedTarget = computed(() => guardedAction.value?.target ?? "");
 const networkNode = ref<{cluster: string; node: string} | null>(null);
 const firewallGuest = ref<ProxmoxGuest | null>(null);
 const client = useQueryClient();
@@ -91,6 +102,7 @@ const power = useMutation({
   mutationFn: (input: {
     guest: ProxmoxGuest;
     action: "start" | "stop" | "shutdown" | "reboot" | "reset";
+    headers?: Record<string,string>;
   }) =>
     runProxmoxPowerAction(
       input.guest.cluster,
@@ -98,6 +110,7 @@ const power = useMutation({
       input.guest.type,
       input.guest.vmid,
       input.action,
+      input.headers,
     ),
   onSuccess: () =>
     setTimeout(
@@ -146,7 +159,7 @@ const provision = useMutation({
     ),
 });
 const destructive = useMutation({
-  mutationFn: (guest: ProxmoxGuest) => deleteProxmoxGuest(guest, true),
+  mutationFn: (input:{guest:ProxmoxGuest;headers?:Record<string,string>}) => deleteProxmoxGuest(input.guest, true, input.headers),
   onSuccess: () =>
     setTimeout(
       () => client.invalidateQueries({ queryKey: ["proxmox-inventory"] }),
@@ -212,10 +225,10 @@ const createSnapshot = useMutation({
   },
 });
 const removeSnapshot = useMutation({
-  mutationFn: (name: string) => {
+  mutationFn: (input: {name:string;headers?:Record<string,string>}) => {
     const g = snapshotGuest.value;
     if (!g) throw new Error("No guest selected");
-    return deleteProxmoxSnapshot(g.cluster, g.node, g.type, g.vmid, name);
+    return deleteProxmoxSnapshot(g.cluster, g.node, g.type, g.vmid, input.name, input.headers);
   },
   onSuccess: () =>
     setTimeout(
@@ -224,10 +237,10 @@ const removeSnapshot = useMutation({
     ),
 });
 const restoreSnapshot = useMutation({
-  mutationFn: (name: string) => {
+  mutationFn: (input: {name:string;headers?:Record<string,string>}) => {
     const g = snapshotGuest.value;
     if (!g) throw new Error("No guest selected");
-    return rollbackProxmoxSnapshot(g.cluster, g.node, g.type, g.vmid, name);
+    return rollbackProxmoxSnapshot(g.cluster, g.node, g.type, g.vmid, input.name, input.headers);
   },
   onSuccess: () => {
     setTimeout(() => {
@@ -395,12 +408,9 @@ const execute = (
   guest: ProxmoxGuest,
   action: "start" | "stop" | "shutdown" | "reboot" | "reset",
 ) => {
-  if (
-    window.confirm(
-      `Confirma ${action} em ${guest.type.toUpperCase()} ${guest.vmid} (${guest.name})?`,
-    )
-  )
-    power.mutate({ guest, action });
+  if (!canManage.value) return;
+  if (action === "start") { power.mutate({ guest, action }); return; }
+  guardedAction.value = { kind:"power", guest, action, target:`${guest.cluster}/${guest.node}/${guest.type}/${guest.vmid}` };
 };
 const createGuest = (kind: "qemu" | "lxc") => {
   const name = kind === "qemu" ? qemuForm.value.name : lxcForm.value.hostname;
@@ -425,13 +435,8 @@ const cloneGuest = (guest: ProxmoxGuest) => {
     cloning.mutate({ guest, vmid, name });
 };
 const removeGuest = (guest: ProxmoxGuest) => {
-  const phrase = `EXCLUIR ${guest.vmid}`;
-  if (
-    window.prompt(
-      `Exclusão permanente com purge. Digite exatamente: ${phrase}`,
-    ) === phrase
-  )
-    destructive.mutate(guest);
+  if (!canManage.value) return;
+  guardedAction.value = { kind:"delete", guest, target:`${guest.cluster}/${guest.node}/${guest.type}/${guest.vmid}` };
 };
 const openSnapshots = (guest: ProxmoxGuest) => {
   snapshotGuest.value = guest;
@@ -449,24 +454,25 @@ const submitSnapshot = () => {
     createSnapshot.mutate();
 };
 const deleteSnapshot = (name: string) => {
-  const phrase = `EXCLUIR ${name}`;
-  if (
-    window.prompt(
-      `Excluir snapshot permanentemente. Digite exatamente: ${phrase}`,
-    ) === phrase
-  )
-    removeSnapshot.mutate(name);
+  const guest = snapshotGuest.value;
+  if (!guest || !canManage.value) return;
+  guardedAction.value = {kind:"snapshot-delete",guest,snapshot:name,target:`${guest.cluster}/${guest.node}/${guest.type}/${guest.vmid}/snapshot/${name}`};
 };
 const rollbackSnapshot = (name: string) => {
   const g = snapshotGuest.value;
   if (!g) return;
-  const phrase = `RESTAURAR ${name}`;
-  if (
-    window.prompt(
-      `Restaurar ${g.type.toUpperCase()} ${g.vmid} para snapshot ${name}. Isso reverterá o estado atual. Digite exatamente: ${phrase}`,
-    ) === phrase
-  )
-    restoreSnapshot.mutate(name);
+  if (!canManage.value) return;
+  guardedAction.value = {kind:"snapshot-rollback",guest:g,snapshot:name,target:`${g.cluster}/${g.node}/${g.type}/${g.vmid}/snapshot/${name}`};
+};
+const confirmGuardedAction = (payload:{confirmation:string;totpCode:string}) => {
+  const guarded = guardedAction.value;
+  if (!guarded) return;
+  const headers = buildActionHeaders(payload.confirmation,payload.totpCode);
+  if (guarded.kind === "power") power.mutate({guest:guarded.guest,action:guarded.action,headers});
+  else if (guarded.kind === "delete") destructive.mutate({guest:guarded.guest,headers});
+  else if (guarded.kind === "snapshot-delete") removeSnapshot.mutate({name:guarded.snapshot,headers});
+  else restoreSnapshot.mutate({name:guarded.snapshot,headers});
+  guardedAction.value = null;
 };
 const migrate = (guest: ProxmoxGuest) => {
   const availableNodes = (inventory.data.value?.nodes ?? [])
@@ -626,7 +632,7 @@ const backupGuest = (guest: ProxmoxGuest) => {
         </p>
       </div>
       <Button
-        :disabled="!summary.data.value?.configured || sync.isPending.value"
+        :disabled="!canManage || !summary.data.value?.configured || sync.isPending.value"
         @click="sync.mutate()"
         ><RefreshCw
           :class="['h-4 w-4', sync.isPending.value && 'animate-spin']"
@@ -835,40 +841,40 @@ const backupGuest = (guest: ProxmoxGuest) => {
                   ><Camera class="h-3.5 w-3.5" />Snapshots</Button
                 ><Button variant="outline" @click="openFirewall(guest)"
                   ><Shield class="h-3.5 w-3.5" />Firewall</Button
-                ><Button variant="outline" @click="backupGuest(guest)"
+                ><Button variant="outline" :disabled="!canManage" @click="backupGuest(guest)"
                   ><HardDrive class="h-3.5 w-3.5" />Backup</Button
-                ><Button variant="outline" @click="migrate(guest)"
+                ><Button variant="outline" :disabled="!canManage" @click="migrate(guest)"
                   ><ArrowRightLeft class="h-3.5 w-3.5" />Migrar</Button
-                ><Button variant="outline" @click="cloneGuest(guest)"
+                ><Button variant="outline" :disabled="!canManage" @click="cloneGuest(guest)"
                   ><Copy class="h-3.5 w-3.5" />Clonar</Button
-                ><Button variant="outline" @click="editResources(guest)"
+                ><Button variant="outline" :disabled="!canManage" @click="editResources(guest)"
                   ><Settings class="h-3.5 w-3.5" />Config</Button
                 ><Button
                   v-if="guest.status !== 'running'"
                   variant="outline"
-                  :disabled="power.isPending.value"
+                  :disabled="!canManage || power.isPending.value"
                   @click="execute(guest, 'start')"
                   ><Play class="h-3.5 w-3.5" />Iniciar</Button
                 ><template v-else
                   ><Button
                     variant="outline"
-                    :disabled="power.isPending.value"
+                    :disabled="!canManage || power.isPending.value"
                     @click="execute(guest, 'reboot')"
                     ><RotateCcw class="h-3.5 w-3.5" />Reiniciar</Button
                   ><Button
                     variant="outline"
-                    :disabled="power.isPending.value"
+                    :disabled="!canManage || power.isPending.value"
                     @click="execute(guest, 'shutdown')"
                     ><Power class="h-3.5 w-3.5" />Desligar</Button
                   ><Button
                     variant="danger"
-                    :disabled="power.isPending.value"
+                    :disabled="!canManage || power.isPending.value"
                     @click="execute(guest, 'stop')"
                     ><Square class="h-3.5 w-3.5" />Parar</Button
                   ></template
                 ><Button
                   variant="danger"
-                  :disabled="destructive.isPending.value"
+                  :disabled="!canManage || destructive.isPending.value"
                   @click="removeGuest(guest)"
                   ><Trash2 class="h-3.5 w-3.5" />Excluir</Button
                 >
@@ -1048,7 +1054,7 @@ const backupGuest = (guest: ProxmoxGuest) => {
               <label class="flex gap-2 text-xs text-muted"
                 ><input v-model="qemuForm.start" type="checkbox" />Iniciar após
                 criar</label
-              ><Button type="submit">Criar QEMU</Button>
+              ><Button type="submit" :disabled="!canManage">Criar QEMU</Button>
             </form>
             <form
               class="space-y-4 bg-panel p-5"
@@ -1137,7 +1143,7 @@ const backupGuest = (guest: ProxmoxGuest) => {
                   />Iniciar</label
                 >
               </div>
-              <Button type="submit">Criar LXC</Button>
+              <Button type="submit" :disabled="!canManage">Criar LXC</Button>
             </form>
           </div>
         </article>
@@ -1230,13 +1236,13 @@ const backupGuest = (guest: ProxmoxGuest) => {
               <Button
                 variant="outline"
                 size="sm"
-                :disabled="restoreSnapshot.isPending.value"
+                :disabled="!canManage || restoreSnapshot.isPending.value"
                 @click="rollbackSnapshot(snap.name)"
                 ><Undo2 class="h-3.5 w-3.5" />Restaurar</Button
               ><Button
                 variant="danger"
                 size="sm"
-                :disabled="removeSnapshot.isPending.value"
+                :disabled="!canManage || removeSnapshot.isPending.value"
                 @click="deleteSnapshot(snap.name)"
                 ><Trash2 class="h-3.5 w-3.5" />Excluir</Button
               >
@@ -1279,7 +1285,7 @@ const backupGuest = (guest: ProxmoxGuest) => {
           </p>
           <Button
             type="submit"
-            :disabled="createSnapshot.isPending.value"
+            :disabled="!canManage || createSnapshot.isPending.value"
             class="mt-4"
             ><Camera class="h-4 w-4" />Criar Snapshot</Button
           >
@@ -1359,7 +1365,7 @@ const backupGuest = (guest: ProxmoxGuest) => {
               <Button
                 variant="danger"
                 size="sm"
-                :disabled="removeFirewallRule.isPending.value"
+                :disabled="!canManage || removeFirewallRule.isPending.value"
                 @click="deleteFirewallRule(rule.pos)"
                 ><Trash2 class="h-3.5 w-3.5" />Excluir</Button
               >
@@ -1435,12 +1441,13 @@ const backupGuest = (guest: ProxmoxGuest) => {
           </p>
           <Button
             type="submit"
-            :disabled="createFirewallRule.isPending.value"
+            :disabled="!canManage || createFirewallRule.isPending.value"
             class="mt-4"
             ><Shield class="h-4 w-4" />Criar Regra</Button
           >
         </form>
       </article>
     </div>
+    <ActionGuardModal :show="!!guardedAction" :target-name="guardedTarget" title="Operação Proxmox protegida" @cancel="guardedAction = null" @confirm="confirmGuardedAction" />
   </div>
 </template>

@@ -82,13 +82,13 @@ func (r *Resolver) IsSelfProtectedContainer(idOrName string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	target := strings.ToLower(strings.TrimSpace(idOrName))
+	target := resourceName(idOrName)
 	if target == "" {
 		return false
 	}
 
 	for _, cid := range r.containerIDs {
-		if target == cid || strings.HasPrefix(target, cid) || strings.HasPrefix(cid, target) {
+		if target == cid || strings.HasPrefix(target, cid+"-") {
 			return true
 		}
 	}
@@ -99,13 +99,13 @@ func (r *Resolver) IsSelfProtectedPod(podOrDeploymentName string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	target := strings.ToLower(strings.TrimSpace(podOrDeploymentName))
+	target := resourceName(podOrDeploymentName)
 	if target == "" {
 		return false
 	}
 
 	for _, p := range r.podNames {
-		if target == p || strings.HasPrefix(target, p) {
+		if target == p || strings.HasPrefix(target, p+"-") {
 			return true
 		}
 	}
@@ -137,17 +137,28 @@ func (r *Resolver) IsSelfProtectedWorkspace(workspaceName string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	target := strings.ToLower(strings.TrimSpace(workspaceName))
+	target := resourceName(workspaceName)
 	if target == "" {
 		return false
 	}
 
 	for _, ws := range r.workspaces {
-		if target == ws || strings.Contains(target, ws) {
+		if target == ws {
 			return true
 		}
 	}
 	return false
+}
+
+// resourceName accepts both raw provider identifiers and the canonical audit
+// targets used by handlers (for example docker/container/<id>). Keeping the
+// normalization here prevents a handler prefix from bypassing self-protection.
+func resourceName(value string) string {
+	target := strings.ToLower(strings.Trim(strings.TrimSpace(value), "/"))
+	if index := strings.LastIndexByte(target, '/'); index >= 0 {
+		return target[index+1:]
+	}
+	return target
 }
 
 func (r *Resolver) IsSelfProtectedHost(idOrNameOrIP string) bool {

@@ -17,7 +17,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version-file: back/go.mod
           cache: true
           cache-dependency-path: back/go.sum
 
@@ -65,7 +65,7 @@ jobs:
       - name: Run Type Check
         run: |
           cd front
-          npm run type-check || npx vue-tsc --noEmit
+          npm run typecheck
 
       - name: Build Frontend Production Assets
         run: |
@@ -82,3 +82,26 @@ jobs:
       - name: Validate OpenAPI Schema
         run: |
           npx @redocly/cli lint openapi.yaml
+      - name: Enforce backend route coverage
+        run: python3 scripts/check_openapi_coverage.py
+
+  security-ci:
+    name: Dependency and vulnerability scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: back/go.mod
+          cache-dependency-path: back/go.sum
+      - name: Scan reachable Go vulnerabilities
+        working-directory: back
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: front/package-lock.json
+      - name: Audit frontend production dependencies
+        working-directory: front
+        run: npm audit --omit=dev --audit-level=high

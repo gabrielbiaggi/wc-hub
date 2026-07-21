@@ -4,98 +4,97 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"regexp"
 	"sort"
+	"strings"
 )
 
 type RouteInfo struct {
-	Method        string `json:"method"`
-	Path          string `json:"path"`
-	Module        string `json:"module"`
-	Permission    string `json:"permission"`
-	ActionGuard   bool   `json:"action_guard"`
+	Method         string `json:"method"`
+	Path           string `json:"path"`
+	Module         string `json:"module"`
 	OpenAPICovered bool   `json:"openapi_covered"`
 }
 
+var routePattern = regexp.MustCompile(`(?:HandleFunc|Handle)\(\s*"(?:(GET|POST|PUT|PATCH|DELETE) )(/api/[^" ]+)`)
+var pathPattern = regexp.MustCompile(`(?m)^  (/[^:]+):\s*$`)
+var operationPattern = regexp.MustCompile(`(?m)^    (get|post|put|patch|delete):\s*$`)
+
 func main() {
-	routes := []RouteInfo{
-		// Auth & Health
-		{Method: "GET", Path: "/healthz", Module: "overview", Permission: "none", ActionGuard: false, OpenAPICovered: true},
-		{Method: "GET", Path: "/api/v1/auth/bootstrap-status", Module: "auth", Permission: "none", ActionGuard: false, OpenAPICovered: true},
-		{Method: "POST", Path: "/api/v1/auth/bootstrap", Module: "auth", Permission: "none", ActionGuard: false, OpenAPICovered: true},
-		{Method: "POST", Path: "/api/v1/auth/login", Module: "auth", Permission: "none", ActionGuard: false, OpenAPICovered: true},
-		{Method: "POST", Path: "/api/v1/auth/logout", Module: "auth", Permission: "authenticated", ActionGuard: false, OpenAPICovered: true},
-		{Method: "GET", Path: "/api/v1/auth/me", Module: "auth", Permission: "authenticated", ActionGuard: false, OpenAPICovered: true},
-		{Method: "POST", Path: "/api/v1/auth/totp/enroll", Module: "auth", Permission: "authenticated", ActionGuard: false, OpenAPICovered: true},
-		{Method: "POST", Path: "/api/v1/auth/totp/confirm", Module: "auth", Permission: "authenticated", ActionGuard: false, OpenAPICovered: true},
-		{Method: "POST", Path: "/api/v1/auth/totp/disable", Module: "auth", Permission: "authenticated", ActionGuard: true, OpenAPICovered: true},
-
-		// Docker
-		{Method: "GET", Path: "/api/v1/docker/health", Module: "docker", Permission: "docker.read", ActionGuard: false, OpenAPICovered: true},
-		{Method: "GET", Path: "/api/v1/docker/inventory", Module: "docker", Permission: "docker.read", ActionGuard: false, OpenAPICovered: true},
-		{Method: "GET", Path: "/api/v1/docker/containers", Module: "docker", Permission: "docker.read", ActionGuard: false, OpenAPICovered: true},
-		{Method: "GET", Path: "/api/v1/docker/images", Module: "docker", Permission: "docker.read", ActionGuard: false, OpenAPICovered: true},
-		{Method: "GET", Path: "/api/v1/docker/stats", Module: "docker", Permission: "docker.read", ActionGuard: false, OpenAPICovered: true},
-		{Method: "POST", Path: "/api/v1/docker/containers/{id}/{action}", Module: "docker", Permission: "docker.manage", ActionGuard: true, OpenAPICovered: true},
-		{Method: "POST", Path: "/api/v1/docker/containers/{id}/exec", Module: "docker", Permission: "docker.manage", ActionGuard: true, OpenAPICovered: true},
-
-		// Kubernetes
-		{Method: "GET", Path: "/api/v1/kubernetes/overview", Module: "kubernetes", Permission: "kubernetes.read", ActionGuard: false, OpenAPICovered: true},
-		{Method: "GET", Path: "/api/v1/kubernetes/namespaces/{namespace}/pods/{pod}/logs", Module: "kubernetes", Permission: "kubernetes.read", ActionGuard: false, OpenAPICovered: true},
-		{Method: "POST", Path: "/api/v1/kubernetes/namespaces/{namespace}/pods/{pod}/exec", Module: "kubernetes", Permission: "kubernetes.manage", ActionGuard: true, OpenAPICovered: true},
-		{Method: "POST", Path: "/api/v1/kubernetes/namespaces/{namespace}/deployments/{name}/{action}", Module: "kubernetes", Permission: "kubernetes.manage", ActionGuard: true, OpenAPICovered: true},
-
-		// Proxmox
-		{Method: "GET", Path: "/api/v1/proxmox/summary", Module: "proxmox", Permission: "proxmox.read", ActionGuard: false, OpenAPICovered: true},
-		{Method: "POST", Path: "/api/v1/proxmox/sync", Module: "proxmox", Permission: "proxmox.manage", ActionGuard: false, OpenAPICovered: true},
-		{Method: "GET", Path: "/api/v1/proxmox/inventory", Module: "proxmox", Permission: "proxmox.read", ActionGuard: false, OpenAPICovered: true},
-		{Method: "POST", Path: "/api/v1/proxmox/nodes/{node}/{kind}/{vmid}/{action}", Module: "proxmox", Permission: "proxmox.manage", ActionGuard: true, OpenAPICovered: true},
-		{Method: "POST", Path: "/api/v1/proxmox/qemu", Module: "proxmox", Permission: "proxmox.manage", ActionGuard: true, OpenAPICovered: true},
-		{Method: "POST", Path: "/api/v1/proxmox/lxc", Module: "proxmox", Permission: "proxmox.manage", ActionGuard: true, OpenAPICovered: true},
-		{Method: "POST", Path: "/api/v1/proxmox/clone", Module: "proxmox", Permission: "proxmox.manage", ActionGuard: true, OpenAPICovered: true},
-		{Method: "DELETE", Path: "/api/v1/proxmox/nodes/{node}/{kind}/{vmid}", Module: "proxmox", Permission: "proxmox.manage", ActionGuard: true, OpenAPICovered: true},
-
-		// Terraform
-		{Method: "GET", Path: "/api/v1/terraform/runs", Module: "terraform", Permission: "terraform.read", ActionGuard: false, OpenAPICovered: true},
-		{Method: "POST", Path: "/api/v1/terraform/validate", Module: "terraform", Permission: "terraform.manage", ActionGuard: false, OpenAPICovered: true},
-		{Method: "POST", Path: "/api/v1/terraform/plan", Module: "terraform", Permission: "terraform.manage", ActionGuard: false, OpenAPICovered: true},
-		{Method: "POST", Path: "/api/v1/terraform/apply", Module: "terraform", Permission: "terraform.manage", ActionGuard: true, OpenAPICovered: true},
-		{Method: "POST", Path: "/api/v1/terraform/destroy", Module: "terraform", Permission: "terraform.manage", ActionGuard: true, OpenAPICovered: true},
-
-		// Admin & RBAC
-		{Method: "GET", Path: "/api/v1/admin/users", Module: "admin", Permission: "admin.users.read", ActionGuard: false, OpenAPICovered: true},
-		{Method: "POST", Path: "/api/v1/admin/users", Module: "admin", Permission: "admin.users.manage", ActionGuard: true, OpenAPICovered: true},
-		{Method: "PATCH", Path: "/api/v1/admin/users/{id}", Module: "admin", Permission: "admin.users.manage", ActionGuard: true, OpenAPICovered: true},
-		{Method: "DELETE", Path: "/api/v1/admin/users/{id}", Module: "admin", Permission: "admin.users.manage", ActionGuard: true, OpenAPICovered: true},
-		{Method: "GET", Path: "/api/v1/admin/roles", Module: "admin", Permission: "admin.roles.read", ActionGuard: false, OpenAPICovered: true},
-		{Method: "POST", Path: "/api/v1/admin/roles", Module: "admin", Permission: "admin.roles.manage", ActionGuard: true, OpenAPICovered: true},
-		{Method: "PATCH", Path: "/api/v1/admin/roles/{id}", Module: "admin", Permission: "admin.roles.manage", ActionGuard: true, OpenAPICovered: true},
-		{Method: "DELETE", Path: "/api/v1/admin/roles/{id}", Module: "admin", Permission: "admin.roles.manage", ActionGuard: true, OpenAPICovered: true},
-		{Method: "GET", Path: "/api/v1/admin/permissions", Module: "admin", Permission: "admin.roles.read", ActionGuard: false, OpenAPICovered: true},
-
-		// Audit & Telemetry & Jobs
-		{Method: "GET", Path: "/api/v1/audit", Module: "audit", Permission: "audit.read", ActionGuard: false, OpenAPICovered: true},
-		{Method: "GET", Path: "/api/v1/jobs", Module: "jobs", Permission: "jobs.read", ActionGuard: false, OpenAPICovered: true},
-		{Method: "POST", Path: "/api/v1/jobs", Module: "jobs", Permission: "jobs.manage", ActionGuard: false, OpenAPICovered: true},
-		{Method: "GET", Path: "/api/v1/telemetry/hosts", Module: "telemetry", Permission: "telemetry.read", ActionGuard: false, OpenAPICovered: true},
-		{Method: "POST", Path: "/api/v1/hosts/{host_id}/agent-token", Module: "telemetry", Permission: "hosts.manage", ActionGuard: true, OpenAPICovered: true},
-		{Method: "POST", Path: "/api/v1/terminal/tickets", Module: "terminal", Permission: "terminal.connect", ActionGuard: true, OpenAPICovered: true},
-	}
-
-	sort.Slice(routes, func(i, j int) bool {
-		if routes[i].Module == routes[j].Module {
-			return routes[i].Path < routes[j].Path
-		}
-		return routes[i].Module < routes[j].Module
-	})
-
-	output, err := json.MarshalIndent(map[string]any{
-		"total_endpoints": len(routes),
-		"routes":          routes,
-	}, "", "  ")
+	root, err := repositoryRoot()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error generating inventory: %v\n", err)
-		os.Exit(1)
+		fatal(err)
 	}
+	documented, err := openAPIOperations(filepath.Join(root, "openapi.yaml"))
+	if err != nil {
+		fatal(err)
+	}
+	routes := map[string]RouteInfo{}
+	err = filepath.WalkDir(filepath.Join(root, "back", "internal"), func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
+			return walkErr
+		}
+		body, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		for _, match := range routePattern.FindAllStringSubmatch(string(body), -1) {
+			key := strings.ToLower(match[1]) + " " + match[2]
+			parts := strings.Split(strings.TrimPrefix(match[2], "/api/v1/"), "/")
+			module := parts[0]
+			routes[key] = RouteInfo{Method: match[1], Path: match[2], Module: module, OpenAPICovered: documented[key]}
+		}
+		return nil
+	})
+	if err != nil {
+		fatal(err)
+	}
+	items := make([]RouteInfo, 0, len(routes))
+	for _, route := range routes {
+		items = append(items, route)
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Method+items[i].Path < items[j].Method+items[j].Path })
+	_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"total_endpoints": len(items), "routes": items})
+}
 
-	fmt.Println(string(output))
+func repositoryRoot() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		if _, statErr := os.Stat(filepath.Join(dir, "openapi.yaml")); statErr == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("openapi.yaml not found from working directory")
+		}
+		dir = parent
+	}
+}
+
+func openAPIOperations(path string) (map[string]bool, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	result := map[string]bool{}
+	current := ""
+	for _, line := range strings.Split(string(body), "\n") {
+		if match := pathPattern.FindStringSubmatch(line); match != nil {
+			current = match[1]
+			continue
+		}
+		if match := operationPattern.FindStringSubmatch(line); match != nil && current != "" {
+			result[match[1]+" "+current] = true
+		}
+	}
+	return result, nil
+}
+
+func fatal(err error) {
+	fmt.Fprintln(os.Stderr, err)
+	os.Exit(1)
 }

@@ -14,15 +14,23 @@ import {
 } from "lucide-vue-next";
 import Button from "@/components/ui/Button.vue";
 import StatusBadge from "@/components/ui/StatusBadge.vue";
+import ActionGuardModal from "@/components/ActionGuardModal.vue";
+import { usePermissions } from "@/composables/usePermissions";
 import {
   dockerContainerAction,
   dockerContainerExec,
   getDockerInventory,
   type DockerContainer,
+  buildActionHeaders,
 } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api_error";
 
 const client = useQueryClient();
+const { hasPermission } = usePermissions();
+const canManage = computed(() => hasPermission("docker.manage"));
+type GuardedDockerAction = { kind: "action"; id: string; action: "stop" | "restart" } | { kind: "exec"; id: string; command: string[] };
+const guardedAction = ref<GuardedDockerAction | null>(null);
+const guardedTarget = computed(() => guardedAction.value ? `docker/container/${guardedAction.value.id}` : "");
 const inventory = useQuery({
   queryKey: ["docker-inventory"],
   queryFn: getDockerInventory,
@@ -30,8 +38,8 @@ const inventory = useQuery({
 });
 
 const containerAction = useMutation({
-  mutationFn: (input: { id: string; action: "start" | "stop" | "restart" }) =>
-    dockerContainerAction(input.id, input.action),
+  mutationFn: (input: { id: string; action: "start" | "stop" | "restart"; headers?: Record<string,string> }) =>
+    dockerContainerAction(input.id, input.action, input.headers),
   onSuccess: () =>
     setTimeout(
       () => client.invalidateQueries({ queryKey: ["docker-inventory"] }),
@@ -42,8 +50,8 @@ const containerAction = useMutation({
 const execForm = ref({ containerId: "", command: "" });
 const execOutput = ref("");
 const execContainer = useMutation({
-  mutationFn: (input: { id: string; command: string[] }) =>
-    dockerContainerExec(input.id, input.command),
+  mutationFn: (input: { id: string; command: string[]; headers?: Record<string,string> }) =>
+    dockerContainerExec(input.id, input.command, input.headers),
   onSuccess: (data) => {
     execOutput.value = data.output;
   },
@@ -72,12 +80,9 @@ const execute = (
   container: DockerContainer,
   action: "start" | "stop" | "restart",
 ) => {
-  if (
-    window.confirm(
-      `Confirma ${action} do container ${container.names[0] || container.id.substring(0, 12)}?`,
-    )
-  )
-    containerAction.mutate({ id: container.id, action });
+  if (!canManage.value) return;
+  if (action === "start") { containerAction.mutate({ id: container.id, action }); return; }
+  guardedAction.value = { kind: "action", id: container.id, action };
 };
 
 const openExec = (container: DockerContainer) => {
@@ -93,9 +98,19 @@ const closeExec = () => {
 };
 
 const submitExec = () => {
+  if (!canManage.value) return;
   const command = execForm.value.command.trim().split(/\s+/);
-  if (command.length === 0) return;
-  execContainer.mutate({ id: execForm.value.containerId, command });
+  if (command.length === 0 || !command[0]) return;
+  guardedAction.value = { kind: "exec", id: execForm.value.containerId, command };
+};
+
+const confirmGuardedAction = (payload: { confirmation:string; totpCode:string }) => {
+  const action = guardedAction.value;
+  if (!action) return;
+  const headers = buildActionHeaders(payload.confirmation, payload.totpCode);
+  if (action.kind === "exec") execContainer.mutate({ id: action.id, command: action.command, headers });
+  else containerAction.mutate({ id: action.id, action: action.action, headers });
+  guardedAction.value = null;
 };
 
 const selectedContainer = computed(() =>
@@ -287,27 +302,27 @@ const selectedContainer = computed(() =>
           <div class="flex flex-wrap justify-end gap-2">
             <Button
               variant="outline"
+              :disabled="!canManage || container.state !== 'running'"
               @click="openExec(container)"
-              :disabled="container.state !== 'running'"
               ><Terminal class="h-3.5 w-3.5" />Exec</Button
             >
             <Button
               v-if="container.state !== 'running'"
               variant="outline"
-              :disabled="containerAction.isPending.value"
+              :disabled="!canManage || containerAction.isPending.value"
               @click="execute(container, 'start')"
               ><Play class="h-3.5 w-3.5" />Iniciar</Button
             >
             <template v-else>
               <Button
                 variant="outline"
-                :disabled="containerAction.isPending.value"
+                :disabled="!canManage || containerAction.isPending.value"
                 @click="execute(container, 'restart')"
                 ><RotateCcw class="h-3.5 w-3.5" />Reiniciar</Button
               >
               <Button
                 variant="danger"
-                :disabled="containerAction.isPending.value"
+                :disabled="!canManage || containerAction.isPending.value"
                 @click="execute(container, 'stop')"
                 ><Square class="h-3.5 w-3.5" />Parar</Button
               >
@@ -474,5 +489,6 @@ const selectedContainer = computed(() =>
         </div>
       </article>
     </div>
+    <ActionGuardModal :show="!!guardedAction" :target-name="guardedTarget" title="Operação Docker protegida" @cancel="guardedAction = null" @confirm="confirmGuardedAction" />
   </div>
 </template>

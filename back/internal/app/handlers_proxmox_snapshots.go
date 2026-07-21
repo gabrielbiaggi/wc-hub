@@ -71,12 +71,14 @@ func (a *App) proxmoxDeleteSnapshot(w http.ResponseWriter, r *http.Request) {
 	// Self-protection: snapshots são críticos para recovery
 	snapshotName := r.PathValue("name")
 	targetName := c.ID() + "/" + n + "/" + k + "/" + strconv.Itoa(id) + "/snapshot/" + snapshotName
+	isSelf := a.targetResolver != nil && a.targetResolver.IsSelfProtectedVM(id, "")
 	if !a.enforcePolicy(w, r, security.ActionRequest{
-		Action:       "delete_snapshot",
-		Scope:        security.ScopeRemote,
-		TargetName:   targetName,
-		Confirmation: r.Header.Get("X-Confirmation"),
-		TOTPCode:     r.Header.Get("X-TOTP-Code"),
+		Action:              "delete_snapshot",
+		Scope:               security.ScopeRemote,
+		TargetName:          targetName,
+		TargetSelfProtected: isSelf,
+		Confirmation:        r.Header.Get("X-Confirmation"),
+		TOTPCode:            r.Header.Get("X-TOTP-Code"),
 	}) {
 		return
 	}
@@ -110,12 +112,14 @@ func (a *App) proxmoxRollbackSnapshot(w http.ResponseWriter, r *http.Request) {
 	// Self-protection: rollback pode causar perda de dados
 	snapshotName := r.PathValue("name")
 	targetName := c.ID() + "/" + n + "/" + k + "/" + strconv.Itoa(id) + "/snapshot/" + snapshotName
+	isSelf := a.targetResolver != nil && a.targetResolver.IsSelfProtectedVM(id, "")
 	if !a.enforcePolicy(w, r, security.ActionRequest{
-		Action:       "rollback_snapshot",
-		Scope:        security.ScopeRemote,
-		TargetName:   targetName,
-		Confirmation: r.Header.Get("X-Confirmation"),
-		TOTPCode:     r.Header.Get("X-TOTP-Code"),
+		Action:              "rollback_snapshot",
+		Scope:               security.ScopeRemote,
+		TargetName:          targetName,
+		TargetSelfProtected: isSelf,
+		Confirmation:        r.Header.Get("X-Confirmation"),
+		TOTPCode:            r.Header.Get("X-TOTP-Code"),
 	}) {
 		return
 	}

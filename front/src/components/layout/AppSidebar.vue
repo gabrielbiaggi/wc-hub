@@ -28,8 +28,12 @@ import {
   X,
 } from "lucide-vue-next";
 import { useUiStore } from "@/stores/ui";
+import { useQuery } from "@tanstack/vue-query";
+import { getOverview } from "@/lib/api";
 const route = useRoute();
 const ui = useUiStore();
+const overview = useQuery({ queryKey:["overview"], queryFn:getOverview, refetchInterval:30_000 });
+const selfProtectionActive = computed(() => overview.data.value?.self_protected === true);
 const groups = [
   {
     label: "Comando",
@@ -155,7 +159,7 @@ const isActive = (to: string) => computed(() => route.path === to).value;
       </div>
       <div class="mt-3 flex items-center gap-2 text-[11px] text-muted">
         <Boxes class="h-3.5 w-3.5" /><span>Autoprotegido</span
-        ><span class="ml-auto font-mono text-signal">ATIVO</span>
+        ><span :class="['ml-auto font-mono', selfProtectionActive ? 'text-signal' : 'text-warning']">{{ selfProtectionActive ? 'ATIVO' : overview.isLoading.value ? 'VERIFICANDO' : 'DEGRADADO' }}</span>
       </div>
     </div>
   </aside>

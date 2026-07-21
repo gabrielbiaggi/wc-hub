@@ -4,16 +4,24 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { FileCode2, ListTree, Play, Plus, RefreshCw, Rocket, ShieldCheck, Skull, SquareMinus, TriangleAlert } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
+import ActionGuardModal from '@/components/ActionGuardModal.vue'
+import { buildActionHeaders } from '@/lib/api'
 import { getTerraformRuns, startTerraformRun, type TerraformOperation } from '@/lib/api_terraform'
+import { usePermissions } from '@/composables/usePermissions'
 
 const queryClient = useQueryClient()
 const workspace = ref('')
 const selectedID = ref('')
+const guardOperation = ref<TerraformOperation | null>(null)
+const { hasPermission } = usePermissions()
+const canRead = computed(() => hasPermission('terraform.read'))
+const canApply = computed(() => hasPermission('terraform.apply'))
+const canManage = computed(() => hasPermission('terraform.manage') || canApply.value)
 const query = useQuery({ queryKey: ['terraform-runs'], queryFn: getTerraformRuns, refetchInterval: 5000 })
 const runs = computed(() => query.data.value?.items ?? [])
 const selected = computed(() => runs.value.find((item) => item.id === selectedID.value) ?? runs.value[0])
 const mutation = useMutation({
-  mutationFn: (operation: TerraformOperation) => startTerraformRun(operation, workspace.value),
+  mutationFn: (input: { operation: TerraformOperation; headers?: Record<string,string> }) => startTerraformRun(input.operation, workspace.value, input.headers),
   onSuccess: (run) => {
     selectedID.value = run.id
     void queryClient.invalidateQueries({ queryKey: ['terraform-runs'] })
@@ -22,14 +30,20 @@ const mutation = useMutation({
 
 const run = (operation: TerraformOperation) => {
   if (!workspace.value) return
-  if (operation === 'apply' && window.prompt(`Digite APPLY ${workspace.value} para confirmar a execução real:`) !== `APPLY ${workspace.value}`) return
-  if (operation === 'destroy' && window.prompt(`Esta ação destrói os recursos do estado. Digite DESTROY ${workspace.value}:`) !== `DESTROY ${workspace.value}`) return
-  mutation.mutate(operation)
+  if (!canManage.value) return
+  if (operation === 'apply' || operation === 'destroy') { guardOperation.value = operation; return }
+  mutation.mutate({ operation })
+}
+const guardedTarget = computed(() => `terraform/workspace/${workspace.value}`)
+const confirmGuardedRun = (payload: { confirmation:string; totpCode:string }) => {
+  if (!guardOperation.value) return
+  mutation.mutate({ operation: guardOperation.value, headers: buildActionHeaders(payload.confirmation, payload.totpCode) })
+  guardOperation.value = null
 }
 </script>
 
 <template>
-  <div class="mx-auto max-w-[1500px] space-y-5">
+  <div v-if="canRead" class="mx-auto max-w-[1500px] space-y-5">
     <header>
       <div class="flex gap-2">
         <StatusBadge :status="query.isError.value ? 'critical' : 'healthy'" :label="query.isError.value ? 'worker indisponível' : 'worker efêmero'" />
@@ -47,11 +61,11 @@ const run = (operation: TerraformOperation) => {
             <option v-for="item in query.data.value?.workspaces" :key="item" :value="item">{{ item }}</option>
           </select>
         </label>
-        <Button class="self-end" variant="outline" :disabled="!workspace || mutation.isPending.value" @click="run('validate')"><FileCode2 class="h-4 w-4" />Validar</Button>
-        <Button class="self-end" :disabled="!workspace || mutation.isPending.value" @click="run('plan')"><Play class="h-4 w-4" />Planejar</Button>
-        <Button class="self-end" variant="outline" :disabled="!workspace || mutation.isPending.value" @click="run('output')"><ListTree class="h-4 w-4" />Outputs</Button>
-        <Button class="self-end" variant="danger" :disabled="!workspace || mutation.isPending.value" @click="run('apply')"><Rocket class="h-4 w-4" />Aplicar</Button>
-        <Button class="self-end" variant="danger" :disabled="!workspace || mutation.isPending.value" @click="run('destroy')"><Skull class="h-4 w-4" />Destruir</Button>
+        <Button class="self-end" variant="outline" :disabled="!canManage || !workspace || mutation.isPending.value" @click="run('validate')"><FileCode2 class="h-4 w-4" />Validar</Button>
+        <Button class="self-end" :disabled="!canManage || !workspace || mutation.isPending.value" @click="run('plan')"><Play class="h-4 w-4" />Planejar</Button>
+        <Button class="self-end" variant="outline" :disabled="!canManage || !workspace || mutation.isPending.value" @click="run('output')"><ListTree class="h-4 w-4" />Outputs</Button>
+        <Button class="self-end" variant="danger" :disabled="!canApply || !workspace || mutation.isPending.value" @click="run('apply')"><Rocket class="h-4 w-4" />Aplicar</Button>
+        <Button class="self-end" variant="danger" :disabled="!canApply || !workspace || mutation.isPending.value" @click="run('destroy')"><Skull class="h-4 w-4" />Destruir</Button>
       </div>
       <p v-if="query.isError.value" class="mt-4 text-xs text-danger">O worker Terraform não está disponível.</p>
       <p v-else-if="mutation.isError.value" class="mt-4 text-xs text-danger">O worker recusou a solicitação. Confirme o espaço de trabalho e as credenciais efêmeras.</p>
@@ -79,5 +93,7 @@ const run = (operation: TerraformOperation) => {
         <pre class="mt-5 max-h-[560px] overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-slate-400">{{ selected?.output || 'Execute validar ou planejar para visualizar a saída redigida do worker.' }}</pre>
       </article>
     </section>
+    <ActionGuardModal :show="!!guardOperation" :target-name="guardedTarget" :title="guardOperation === 'destroy' ? 'Destruir workspace' : 'Aplicar plano Terraform'" @cancel="guardOperation = null" @confirm="confirmGuardedRun" />
   </div>
+  <div v-else class="rounded-xl border border-warning/30 bg-warning/5 p-6 text-sm text-warning">Sua conta não possui a permissão terraform.read.</div>
 </template>

@@ -12,7 +12,7 @@ func TestSelfProtectedHostCannotBeDestroyed(t *testing.T) {
 
 func TestRemoteSelfProtectedTargetIsBlocked(t *testing.T) {
 	engine := NewEngine(nil)
-	actions := []string{"docker_stop", "docker_kill", "docker_remove", "delete_vm", "shutdown", "reboot", "terraform_destroy", "k8s_deployment_delete"}
+	actions := []string{"docker_stop", "docker_kill", "docker_remove", "delete_vm", "shutdown", "reboot", "reset", "terraform_destroy", "k8s_deployment_scale", "k8s_deployment_delete"}
 	for _, action := range actions {
 		decision := engine.Evaluate(ActionRequest{
 			Action:              action,

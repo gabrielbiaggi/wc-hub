@@ -99,8 +99,10 @@ func (h *Handler) DeploymentAction(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	action := r.PathValue("action")
 
-	// Self-protection: validate destructive deployment actions
-	if h.policyEnforcer != nil && isDestructiveDeploymentAction(action) {
+	// Every deployment mutation is guarded. Scaling to zero or changing the
+	// self deployment is just as capable of taking the control plane down as a
+	// delete/restart.
+	if h.policyEnforcer != nil && (action == "scale" || isDestructiveDeploymentAction(action)) {
 		if !h.policyEnforcer(w, r, PolicyRequest{
 			Action:       "k8s_deployment_" + action,
 			Scope:        "remote",

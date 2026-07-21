@@ -375,7 +375,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object:
+                type: object
                 properties:
                   items:
                     type: array
@@ -671,6 +671,11 @@ paths:
               properties:
                 workspace:
                   type: string
+      responses:
+        '202':
+          description: Destroy aceito
+        '403':
+          description: Ação bloqueada por policy
   /api/v1/terraform/apply:
     post:
       summary: Terraform apply
@@ -1054,6 +1059,1470 @@ paths:
           description: Ticket gerado
         '403':
           description: Acesso bloqueado por policy
+
+  /api/v1/agents/hosts/{host_id}/token:
+    post:
+      summary: POST /api/v1/agents/hosts/{host_id}/token
+      operationId: post_agents_hosts_host_id_token
+      tags: [agents]
+      parameters:
+        - name: host_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/alerts:
+    get:
+      summary: GET /api/v1/alerts
+      operationId: get_alerts
+      tags: [alerts]
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/alerts/{id}:
+    patch:
+      summary: PATCH /api/v1/alerts/{id}
+      operationId: patch_alerts_id
+      tags: [alerts]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/backups/overview:
+    get:
+      summary: GET /api/v1/backups/overview
+      operationId: get_backups_overview
+      tags: [backups]
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/cloudflare/accounts/{account_id}/private-routes:
+    get:
+      summary: GET /api/v1/cloudflare/accounts/{account_id}/private-routes
+      operationId: get_cloudflare_accounts_account_id_private_routes
+      tags: [cloudflare]
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      summary: POST /api/v1/cloudflare/accounts/{account_id}/private-routes
+      operationId: post_cloudflare_accounts_account_id_private_routes
+      tags: [cloudflare]
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/cloudflare/accounts/{account_id}/tunnels:
+    get:
+      summary: GET /api/v1/cloudflare/accounts/{account_id}/tunnels
+      operationId: get_cloudflare_accounts_account_id_tunnels
+      tags: [cloudflare]
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      summary: POST /api/v1/cloudflare/accounts/{account_id}/tunnels
+      operationId: post_cloudflare_accounts_account_id_tunnels
+      tags: [cloudflare]
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/cloudflare/accounts/{account_id}/tunnels/{tunnel_id}:
+    delete:
+      summary: DELETE /api/v1/cloudflare/accounts/{account_id}/tunnels/{tunnel_id}
+      operationId: delete_cloudflare_accounts_account_id_tunnels_tunnel_id
+      tags: [cloudflare]
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: tunnel_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    patch:
+      summary: PATCH /api/v1/cloudflare/accounts/{account_id}/tunnels/{tunnel_id}
+      operationId: patch_cloudflare_accounts_account_id_tunnels_tunnel_id
+      tags: [cloudflare]
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: tunnel_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/cloudflare/accounts/{account_id}/tunnels/{tunnel_id}/configuration:
+    get:
+      summary: GET /api/v1/cloudflare/accounts/{account_id}/tunnels/{tunnel_id}/configuration
+      operationId: get_cloudflare_accounts_account_id_tunnels_tunnel_id_configuration
+      tags: [cloudflare]
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: tunnel_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      summary: PUT /api/v1/cloudflare/accounts/{account_id}/tunnels/{tunnel_id}/configuration
+      operationId: put_cloudflare_accounts_account_id_tunnels_tunnel_id_configuration
+      tags: [cloudflare]
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: tunnel_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/cloudflare/overview:
+    get:
+      summary: GET /api/v1/cloudflare/overview
+      operationId: get_cloudflare_overview
+      tags: [cloudflare]
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/cloudflare/zones/{zone_id}/dns-records:
+    get:
+      summary: GET /api/v1/cloudflare/zones/{zone_id}/dns-records
+      operationId: get_cloudflare_zones_zone_id_dns_records
+      tags: [cloudflare]
+      parameters:
+        - name: zone_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      summary: POST /api/v1/cloudflare/zones/{zone_id}/dns-records
+      operationId: post_cloudflare_zones_zone_id_dns_records
+      tags: [cloudflare]
+      parameters:
+        - name: zone_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/cloudflare/zones/{zone_id}/dns-records/{record_id}:
+    delete:
+      summary: DELETE /api/v1/cloudflare/zones/{zone_id}/dns-records/{record_id}
+      operationId: delete_cloudflare_zones_zone_id_dns_records_record_id
+      tags: [cloudflare]
+      parameters:
+        - name: zone_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: record_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      summary: PUT /api/v1/cloudflare/zones/{zone_id}/dns-records/{record_id}
+      operationId: put_cloudflare_zones_zone_id_dns_records_record_id
+      tags: [cloudflare]
+      parameters:
+        - name: zone_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: record_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/cloudflare/zones/{zone_id}/purge-cache:
+    post:
+      summary: POST /api/v1/cloudflare/zones/{zone_id}/purge-cache
+      operationId: post_cloudflare_zones_zone_id_purge_cache
+      tags: [cloudflare]
+      parameters:
+        - name: zone_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/cloudflare/zones/{zone_id}/rulesets:
+    get:
+      summary: GET /api/v1/cloudflare/zones/{zone_id}/rulesets
+      operationId: get_cloudflare_zones_zone_id_rulesets
+      tags: [cloudflare]
+      parameters:
+        - name: zone_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/cloudflare/zones/{zone_id}/settings:
+    get:
+      summary: GET /api/v1/cloudflare/zones/{zone_id}/settings
+      operationId: get_cloudflare_zones_zone_id_settings
+      tags: [cloudflare]
+      parameters:
+        - name: zone_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/cloudflare/zones/{zone_id}/settings/{setting}:
+    patch:
+      summary: PATCH /api/v1/cloudflare/zones/{zone_id}/settings/{setting}
+      operationId: patch_cloudflare_zones_zone_id_settings_setting
+      tags: [cloudflare]
+      parameters:
+        - name: zone_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: setting
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/github/overview:
+    get:
+      summary: GET /api/v1/github/overview
+      operationId: get_github_overview
+      tags: [github]
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/github/repos/{owner}/{repo}/actions/runs/{run_id}/{action}:
+    post:
+      summary: POST /api/v1/github/repos/{owner}/{repo}/actions/runs/{run_id}/{action}
+      operationId: post_github_repos_owner_repo_actions_runs_run_id_action
+      tags: [github]
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: action
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/github/repos/{owner}/{repo}/commits:
+    get:
+      summary: GET /api/v1/github/repos/{owner}/{repo}/commits
+      operationId: get_github_repos_owner_repo_commits
+      tags: [github]
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/github/repos/{owner}/{repo}/commits/{sha}:
+    get:
+      summary: GET /api/v1/github/repos/{owner}/{repo}/commits/{sha}
+      operationId: get_github_repos_owner_repo_commits_sha
+      tags: [github]
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sha
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/github/repos/{owner}/{repo}/workflow-file:
+    get:
+      summary: GET /api/v1/github/repos/{owner}/{repo}/workflow-file
+      operationId: get_github_repos_owner_repo_workflow_file
+      tags: [github]
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      summary: PUT /api/v1/github/repos/{owner}/{repo}/workflow-file
+      operationId: put_github_repos_owner_repo_workflow_file
+      tags: [github]
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/github/repos/{owner}/{repo}/workflows:
+    get:
+      summary: GET /api/v1/github/repos/{owner}/{repo}/workflows
+      operationId: get_github_repos_owner_repo_workflows
+      tags: [github]
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/github/repos/{owner}/{repo}/workflows/{workflow_id}/{action}:
+    post:
+      summary: POST /api/v1/github/repos/{owner}/{repo}/workflows/{workflow_id}/{action}
+      operationId: post_github_repos_owner_repo_workflows_workflow_id_action
+      tags: [github]
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: workflow_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: action
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/hosts:
+    get:
+      summary: GET /api/v1/hosts
+      operationId: get_hosts
+      tags: [hosts]
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      summary: POST /api/v1/hosts
+      operationId: post_hosts
+      tags: [hosts]
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/monitor/targets:
+    get:
+      summary: GET /api/v1/monitor/targets
+      operationId: get_monitor_targets
+      tags: [monitor]
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      summary: POST /api/v1/monitor/targets
+      operationId: post_monitor_targets
+      tags: [monitor]
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/monitor/targets/{id}:
+    delete:
+      summary: DELETE /api/v1/monitor/targets/{id}
+      operationId: delete_monitor_targets_id
+      tags: [monitor]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    patch:
+      summary: PATCH /api/v1/monitor/targets/{id}
+      operationId: patch_monitor_targets_id
+      tags: [monitor]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/monitor/webhook:
+    get:
+      summary: GET /api/v1/monitor/webhook
+      operationId: get_monitor_webhook
+      tags: [monitor]
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      summary: PUT /api/v1/monitor/webhook
+      operationId: put_monitor_webhook
+      tags: [monitor]
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/oci/autonomous-databases:
+    post:
+      summary: POST /api/v1/oci/autonomous-databases
+      operationId: post_oci_autonomous_databases
+      tags: [oci]
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/oci/instances:
+    post:
+      summary: POST /api/v1/oci/instances
+      operationId: post_oci_instances
+      tags: [oci]
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/oci/instances/{action}:
+    post:
+      summary: POST /api/v1/oci/instances/{action}
+      operationId: post_oci_instances_action
+      tags: [oci]
+      parameters:
+        - name: action
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/oci/overview:
+    get:
+      summary: GET /api/v1/oci/overview
+      operationId: get_oci_overview
+      tags: [oci]
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/operations/catalog:
+    get:
+      summary: GET /api/v1/operations/catalog
+      operationId: get_operations_catalog
+      tags: [operations]
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/power/status:
+    get:
+      summary: GET /api/v1/power/status
+      operationId: get_power_status
+      tags: [power]
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/power/targets:
+    get:
+      summary: GET /api/v1/power/targets
+      operationId: get_power_targets
+      tags: [power]
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/power/wake/{target}:
+    post:
+      summary: POST /api/v1/power/wake/{target}
+      operationId: post_power_wake_target
+      tags: [power]
+      parameters:
+        - name: target
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/proxmox/nodes/{node}/backups:
+    get:
+      summary: GET /api/v1/proxmox/nodes/{node}/backups
+      operationId: get_proxmox_nodes_node_backups
+      tags: [proxmox]
+      parameters:
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/proxmox/nodes/{node}/network:
+    get:
+      summary: GET /api/v1/proxmox/nodes/{node}/network
+      operationId: get_proxmox_nodes_node_network
+      tags: [proxmox]
+      parameters:
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/backup:
+    post:
+      summary: POST /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/backup
+      operationId: post_proxmox_nodes_node_kind_vmid_backup
+      tags: [proxmox]
+      parameters:
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: vmid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/config:
+    put:
+      summary: PUT /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/config
+      operationId: put_proxmox_nodes_node_kind_vmid_config
+      tags: [proxmox]
+      parameters:
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: vmid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/firewall/rules:
+    get:
+      summary: GET /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/firewall/rules
+      operationId: get_proxmox_nodes_node_kind_vmid_firewall_rules
+      tags: [proxmox]
+      parameters:
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: vmid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      summary: POST /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/firewall/rules
+      operationId: post_proxmox_nodes_node_kind_vmid_firewall_rules
+      tags: [proxmox]
+      parameters:
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: vmid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/firewall/rules/{pos}:
+    delete:
+      summary: DELETE /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/firewall/rules/{pos}
+      operationId: delete_proxmox_nodes_node_kind_vmid_firewall_rules_pos
+      tags: [proxmox]
+      parameters:
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: vmid
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: pos
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/migrate:
+    post:
+      summary: POST /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/migrate
+      operationId: post_proxmox_nodes_node_kind_vmid_migrate
+      tags: [proxmox]
+      parameters:
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: vmid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/resize:
+    put:
+      summary: PUT /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/resize
+      operationId: put_proxmox_nodes_node_kind_vmid_resize
+      tags: [proxmox]
+      parameters:
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: vmid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/snapshots:
+    get:
+      summary: GET /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/snapshots
+      operationId: get_proxmox_nodes_node_kind_vmid_snapshots
+      tags: [proxmox]
+      parameters:
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: vmid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      summary: POST /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/snapshots
+      operationId: post_proxmox_nodes_node_kind_vmid_snapshots
+      tags: [proxmox]
+      parameters:
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: vmid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/snapshots/{name}:
+    delete:
+      summary: DELETE /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/snapshots/{name}
+      operationId: delete_proxmox_nodes_node_kind_vmid_snapshots_name
+      tags: [proxmox]
+      parameters:
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: vmid
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/snapshots/{name}/rollback:
+    post:
+      summary: POST /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/snapshots/{name}/rollback
+      operationId: post_proxmox_nodes_node_kind_vmid_snapshots_name_rollback
+      tags: [proxmox]
+      parameters:
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: vmid
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/storage/browse:
+    get:
+      summary: GET /api/v1/storage/browse
+      operationId: get_storage_browse
+      tags: [storage]
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/storage/directories:
+    post:
+      summary: POST /api/v1/storage/directories
+      operationId: post_storage_directories
+      tags: [storage]
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/storage/entry:
+    delete:
+      summary: DELETE /api/v1/storage/entry
+      operationId: delete_storage_entry
+      tags: [storage]
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    patch:
+      summary: PATCH /api/v1/storage/entry
+      operationId: patch_storage_entry
+      tags: [storage]
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/storage/index:
+    get:
+      summary: GET /api/v1/storage/index
+      operationId: get_storage_index
+      tags: [storage]
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/storage/stream:
+    get:
+      summary: GET /api/v1/storage/stream
+      operationId: get_storage_stream
+      tags: [storage]
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/storage/upload:
+    post:
+      summary: POST /api/v1/storage/upload
+      operationId: post_storage_upload
+      tags: [storage]
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/terminal/sessions:
+    get:
+      summary: GET /api/v1/terminal/sessions
+      operationId: get_terminal_sessions
+      tags: [terminal]
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/terraform/output:
+    post:
+      summary: POST /api/v1/terraform/output
+      operationId: post_terraform_output
+      tags: [terraform]
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/vnc/targets:
+    get:
+      summary: GET /api/v1/vnc/targets
+      operationId: get_vnc_targets
+      tags: [vnc]
+      responses:
+        '200':
+          description: Operação concluída
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
 components:
   securitySchemes:

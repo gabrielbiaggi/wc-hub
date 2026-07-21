@@ -51,11 +51,11 @@ func NewEngine(commands []string) *Engine {
 }
 
 var destructiveActions = map[string]struct{}{
-	"terminate": {}, "shutdown": {}, "destroy": {}, "reboot": {}, "poweroff": {}, "stop": {},
+	"terminate": {}, "shutdown": {}, "destroy": {}, "reboot": {}, "reset": {}, "poweroff": {}, "stop": {},
 	"delete_host": {}, "delete_vm": {}, "delete_snapshot": {}, "rollback_snapshot": {},
 	"terraform_destroy": {}, "terraform_apply": {}, "wipe_disk": {},
 	"docker_stop": {}, "docker_kill": {}, "docker_remove": {}, "docker_restart": {}, "docker_exec": {},
-	"k8s_exec": {}, "k8s_deployment_restart": {}, "k8s_deployment_delete": {},
+	"k8s_exec": {}, "k8s_deployment_scale": {}, "k8s_deployment_restart": {}, "k8s_deployment_delete": {},
 }
 
 var destructiveCommands = map[string]struct{}{

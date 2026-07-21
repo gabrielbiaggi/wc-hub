@@ -16,6 +16,8 @@ import {
 } from "lucide-vue-next";
 import Button from "@/components/ui/Button.vue";
 import StatusBadge from "@/components/ui/StatusBadge.vue";
+import ActionGuardModal from "@/components/ActionGuardModal.vue";
+import { usePermissions } from "@/composables/usePermissions";
 import {
   getKubernetesOverview,
   getKubernetesPodLogs,
@@ -23,12 +25,22 @@ import {
   kubernetesPodExec,
   type KubernetesDeployment,
   type KubernetesPod,
+  buildActionHeaders,
 } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api_error";
 
 type Tab = "nodes" | "deployments" | "pods" | "events";
 const tab = ref<Tab>("deployments");
 const client = useQueryClient();
+const { hasPermission } = usePermissions();
+const canManage = computed(() => hasPermission("kubernetes.manage"));
+type GuardedK8sAction = { kind:"deployment"; namespace:string; name:string; action:"scale"|"restart"; replicas?:number } | { kind:"exec"; namespace:string; pod:string; container:string; command:string[] };
+const guardedAction = ref<GuardedK8sAction | null>(null);
+const guardedTarget = computed(() => {
+  const action = guardedAction.value;
+  if (!action) return "";
+  return action.kind === "deployment" ? `k8s/${action.namespace}/deployment/${action.name}` : `k8s/${action.namespace}/pod/${action.pod}`;
+});
 const overview = useQuery({
   queryKey: ["kubernetes-overview"],
   queryFn: getKubernetesOverview,
@@ -41,12 +53,14 @@ const deploymentAction = useMutation({
     name: string;
     action: "scale" | "restart";
     replicas?: number;
+    headers?: Record<string,string>;
   }) =>
     kubernetesDeploymentAction(
       input.namespace,
       input.name,
       input.action,
       input.replicas,
+      input.headers,
     ),
   onSuccess: () =>
     setTimeout(
@@ -83,12 +97,14 @@ const podExec = useMutation({
     pod: string;
     container: string;
     command: string[];
+    headers?: Record<string,string>;
   }) =>
     kubernetesPodExec(
       input.namespace,
       input.pod,
       input.container,
       input.command,
+      input.headers,
     ),
   onSuccess: (data) => {
     execOutput.value = data.output;
@@ -109,6 +125,7 @@ const formatDate = (timestamp: string) =>
   new Date(timestamp).toLocaleString("pt-BR");
 
 const scaleDeployment = (deployment: KubernetesDeployment) => {
+  if (!canManage.value) return;
   const current = deployment.replicas;
   const input = window.prompt(
     `Escalar deployment ${deployment.metadata.name}\n\nRéplicas atual: ${current}\nNovo valor (0-100):`,
@@ -120,32 +137,12 @@ const scaleDeployment = (deployment: KubernetesDeployment) => {
     window.alert("Valor inválido. Use um número entre 0 e 100.");
     return;
   }
-  if (
-    window.confirm(
-      `Confirma escalar ${deployment.metadata.name} de ${current} para ${replicas} réplicas?`,
-    )
-  ) {
-    deploymentAction.mutate({
-      namespace: deployment.metadata.namespace,
-      name: deployment.metadata.name,
-      action: "scale",
-      replicas,
-    });
-  }
+  guardedAction.value = { kind:"deployment", namespace:deployment.metadata.namespace, name:deployment.metadata.name, action:"scale", replicas };
 };
 
 const restartDeployment = (deployment: KubernetesDeployment) => {
-  if (
-    window.confirm(
-      `Confirma restart do deployment ${deployment.metadata.name} no namespace ${deployment.metadata.namespace}?`,
-    )
-  ) {
-    deploymentAction.mutate({
-      namespace: deployment.metadata.namespace,
-      name: deployment.metadata.name,
-      action: "restart",
-    });
-  }
+  if (!canManage.value) return;
+  guardedAction.value = { kind:"deployment", namespace:deployment.metadata.namespace, name:deployment.metadata.name, action:"restart" };
 };
 
 const openLogs = (pod: KubernetesPod) => {
@@ -181,14 +178,19 @@ const closeExec = () => {
 };
 
 const submitExec = () => {
+  if (!canManage.value) return;
   const command = execForm.value.command.trim().split(/\s+/);
-  if (command.length === 0 || !execForm.value.container) return;
-  podExec.mutate({
-    namespace: execForm.value.namespace,
-    pod: execForm.value.pod,
-    container: execForm.value.container,
-    command,
-  });
+  if (command.length === 0 || !command[0] || !execForm.value.container) return;
+  guardedAction.value = { kind:"exec", namespace:execForm.value.namespace, pod:execForm.value.pod, container:execForm.value.container, command };
+};
+
+const confirmGuardedAction = (payload:{confirmation:string;totpCode:string}) => {
+  const action = guardedAction.value;
+  if (!action) return;
+  const headers = buildActionHeaders(payload.confirmation, payload.totpCode);
+  if (action.kind === "deployment") deploymentAction.mutate({ namespace:action.namespace, name:action.name, action:action.action, replicas:action.replicas, headers });
+  else podExec.mutate({ ...action, headers });
+  guardedAction.value = null;
 };
 
 const selectedPod = computed(() =>
@@ -360,13 +362,13 @@ const selectedExecPod = computed(() =>
           <div class="flex flex-wrap justify-end gap-2">
             <Button
               variant="outline"
-              :disabled="deploymentAction.isPending.value"
+              :disabled="!canManage || deploymentAction.isPending.value"
               @click="scaleDeployment(deployment)"
               ><ChevronUp class="h-3.5 w-3.5" />Scale</Button
             >
             <Button
               variant="outline"
-              :disabled="deploymentAction.isPending.value"
+              :disabled="!canManage || deploymentAction.isPending.value"
               @click="restartDeployment(deployment)"
               ><RotateCcw class="h-3.5 w-3.5" />Restart</Button
             >
@@ -414,7 +416,7 @@ const selectedExecPod = computed(() =>
             >
             <Button
               variant="outline"
-              :disabled="pod.phase !== 'Running'"
+              :disabled="!canManage || pod.phase !== 'Running'"
               @click="openExec(pod)"
               ><Terminal class="h-3.5 w-3.5" />Exec</Button
             >
@@ -669,5 +671,6 @@ const selectedExecPod = computed(() =>
         </div>
       </article>
     </div>
+    <ActionGuardModal :show="!!guardedAction" :target-name="guardedTarget" title="Operação Kubernetes protegida" @cancel="guardedAction = null" @confirm="confirmGuardedAction" />
   </div>
 </template>

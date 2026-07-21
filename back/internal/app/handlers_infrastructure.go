@@ -100,7 +100,7 @@ func (a *App) proxmoxPowerAction(w http.ResponseWriter, r *http.Request) {
 
 	// Self-protection: avaliar ações destrutivas (shutdown, reboot) antes de executar
 	actionLower := strings.ToLower(action)
-	if actionLower == "shutdown" || actionLower == "reboot" || actionLower == "stop" {
+	if actionLower == "shutdown" || actionLower == "reboot" || actionLower == "reset" || actionLower == "stop" {
 		targetName := target.ID() + "/" + node + "/" + kind + "/" + strconv.Itoa(vmid)
 		isSelf := a.targetResolver != nil && a.targetResolver.IsSelfProtectedVM(vmid, targetName)
 		if !a.enforcePolicy(w, r, security.ActionRequest{

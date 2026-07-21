@@ -13,10 +13,14 @@ func TestTargetResolver(t *testing.T) {
 		expected bool
 	}{
 		{"container wc-hub", func() bool { return resolver.IsSelfProtectedContainer("wc-hub") }, true},
+		{"canonical docker target", func() bool { return resolver.IsSelfProtectedContainer("docker/container/wc-hub") }, true},
+		{"container prefix false positive", func() bool { return resolver.IsSelfProtectedContainer("hubspot") }, false},
 		{"container my-app", func() bool { return resolver.IsSelfProtectedContainer("my-app") }, false},
 		{"pod wc-hub-api", func() bool { return resolver.IsSelfProtectedPod("wc-hub-api-79d8f") }, true},
+		{"canonical kubernetes target", func() bool { return resolver.IsSelfProtectedPod("k8s/default/pod/wc-hub-api-79d8f") }, true},
 		{"pod nginx", func() bool { return resolver.IsSelfProtectedPod("nginx-deployment") }, false},
 		{"workspace hub-infrastructure", func() bool { return resolver.IsSelfProtectedWorkspace("hub-infrastructure") }, true},
+		{"canonical terraform target", func() bool { return resolver.IsSelfProtectedWorkspace("terraform/workspace/hub-infrastructure") }, true},
 		{"workspace staging-app", func() bool { return resolver.IsSelfProtectedWorkspace("staging-app") }, false},
 		{"host 127.0.0.1", func() bool { return resolver.IsSelfProtectedHost("127.0.0.1") }, true},
 		{"host 10.99.99.99", func() bool { return resolver.IsSelfProtectedHost("10.99.99.99") }, false},
