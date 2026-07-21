@@ -2,6 +2,7 @@ package app
 
 import (
 	proxmox "github.com/webcreations/wc-hub/back/internal/adapters/proxmox"
+	auditrepo "github.com/webcreations/wc-hub/back/internal/audit/repository"
 	security "github.com/webcreations/wc-hub/back/internal/security/domain"
 	"net/http"
 	"strconv"
@@ -45,6 +46,19 @@ func (a *App) proxmoxCreateSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 502, "proxmox_snapshot_create_failed", e.Error())
 		return
 	}
+	session := currentSession(r)
+	_ = a.audit.Append(r.Context(), auditrepo.Record{
+		ActorID:      session.User.ID,
+		Action:       "proxmox." + k + ".snapshot.create",
+		Scope:        security.ScopeRemote,
+		ResourceType: "snapshot",
+		ResourceID:   in.Name,
+		TargetName:   c.ID() + "/" + n + "/" + k + "/" + strconv.Itoa(id),
+		Risk:         security.RiskDangerous,
+		Decision:     "allowed",
+		RequestID:    requestID(r.Context()),
+		SourceIP:     remoteIP(r),
+	})
 	writeJSON(w, 202, map[string]string{"status": "accepted"})
 }
 func (a *App) proxmoxDeleteSnapshot(w http.ResponseWriter, r *http.Request) {
@@ -71,6 +85,19 @@ func (a *App) proxmoxDeleteSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 502, "proxmox_snapshot_delete_failed", e.Error())
 		return
 	}
+	session := currentSession(r)
+	_ = a.audit.Append(r.Context(), auditrepo.Record{
+		ActorID:      session.User.ID,
+		Action:       "proxmox." + k + ".snapshot.delete",
+		Scope:        security.ScopeRemote,
+		ResourceType: "snapshot",
+		ResourceID:   snapshotName,
+		TargetName:   targetName,
+		Risk:         security.RiskCritical,
+		Decision:     "allowed",
+		RequestID:    requestID(r.Context()),
+		SourceIP:     remoteIP(r),
+	})
 	w.WriteHeader(204)
 }
 func (a *App) proxmoxRollbackSnapshot(w http.ResponseWriter, r *http.Request) {
@@ -97,6 +124,19 @@ func (a *App) proxmoxRollbackSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 502, "proxmox_snapshot_rollback_failed", e.Error())
 		return
 	}
+	session := currentSession(r)
+	_ = a.audit.Append(r.Context(), auditrepo.Record{
+		ActorID:      session.User.ID,
+		Action:       "proxmox." + k + ".snapshot.rollback",
+		Scope:        security.ScopeRemote,
+		ResourceType: "snapshot",
+		ResourceID:   snapshotName,
+		TargetName:   targetName,
+		Risk:         security.RiskCritical,
+		Decision:     "allowed",
+		RequestID:    requestID(r.Context()),
+		SourceIP:     remoteIP(r),
+	})
 	writeJSON(w, 202, map[string]string{"status": "accepted"})
 }
 func (a *App) proxmoxMigrateGuest(w http.ResponseWriter, r *http.Request) {
@@ -116,6 +156,20 @@ func (a *App) proxmoxMigrateGuest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 502, "proxmox_migration_failed", e.Error())
 		return
 	}
+	session := currentSession(r)
+	_ = a.audit.Append(r.Context(), auditrepo.Record{
+		ActorID:      session.User.ID,
+		Action:       "proxmox." + k + ".migrate",
+		Scope:        security.ScopeRemote,
+		ResourceType: k,
+		ResourceID:   strconv.Itoa(id),
+		TargetName:   c.ID() + "/" + n + " → " + in.TargetNode,
+		Risk:         security.RiskDangerous,
+		Decision:     "allowed",
+		RequestID:    requestID(r.Context()),
+		SourceIP:     remoteIP(r),
+		Payload:      map[string]any{"online": in.Online},
+	})
 	writeJSON(w, 202, map[string]string{"status": "accepted"})
 }
 func (a *App) proxmoxResizeDisk(w http.ResponseWriter, r *http.Request) {
@@ -135,6 +189,20 @@ func (a *App) proxmoxResizeDisk(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 502, "proxmox_resize_failed", e.Error())
 		return
 	}
+	session := currentSession(r)
+	_ = a.audit.Append(r.Context(), auditrepo.Record{
+		ActorID:      session.User.ID,
+		Action:       "proxmox." + k + ".resize",
+		Scope:        security.ScopeRemote,
+		ResourceType: k,
+		ResourceID:   strconv.Itoa(id),
+		TargetName:   c.ID() + "/" + n + "/" + k + "/" + strconv.Itoa(id),
+		Risk:         security.RiskDangerous,
+		Decision:     "allowed",
+		RequestID:    requestID(r.Context()),
+		SourceIP:     remoteIP(r),
+		Payload:      map[string]any{"disk": in.Disk, "size": in.Size},
+	})
 	writeJSON(w, 202, map[string]string{"status": "accepted"})
 }
 func (a *App) proxmoxUpdateConfig(w http.ResponseWriter, r *http.Request) {
