@@ -37,6 +37,10 @@ func (a *App) listAdminUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) createAdminUser(w http.ResponseWriter, r *http.Request) {
+	if a.cfg.DevelopmentMasterLogin {
+		writeError(w, http.StatusConflict, "single_user_mode", "WC Hub is configured for the allmight single-user identity.")
+		return
+	}
 	var req struct {
 		Email       string   `json:"email"`
 		DisplayName string   `json:"display_name"`
@@ -75,6 +79,14 @@ func (a *App) updateAdminUser(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	session := currentSession(r)
+	if a.cfg.DevelopmentMasterLogin && id != session.User.ID {
+		writeError(w, http.StatusConflict, "single_user_mode", "Only the allmight identity may exist in single-user mode.")
+		return
+	}
+	if a.cfg.DevelopmentMasterLogin && !strings.EqualFold(strings.TrimSpace(req.Email), a.cfg.DevelopmentMasterEmail) {
+		writeError(w, http.StatusConflict, "master_identity_locked", "The allmight email is managed by WC_HUB_MASTER_EMAIL.")
+		return
+	}
 	if id == session.User.ID && req.Disabled {
 		writeError(w, 409, "self_lockout", "You cannot disable your own account.")
 		return

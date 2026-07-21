@@ -14,7 +14,8 @@ func TestDevelopmentMasterPasswordAndExpiryUseConfiguredTimezone(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, time.July, 19, 16, 42, 10, 0, location)
-	if got := DevelopmentMasterPassword(now, location); got != "Hub1907202616" {
+	secret := []byte("01234567890123456789012345678901")
+	if got := DevelopmentMasterPassword(secret, now, location); got != "Hub-YdTaR0HPC19maDr1" {
 		t.Fatalf("unexpected hourly password: %s", got)
 	}
 	expires := developmentMasterExpiry(now, location)
@@ -62,18 +63,22 @@ func TestDevelopmentMasterLoginIssuesOnlyAnHourlySession(t *testing.T) {
 	now := time.Date(2026, time.July, 19, 16, 42, 10, 0, location)
 	repository := &developmentMasterRepository{}
 	service := New(repository, 12*time.Hour)
-	password := DevelopmentMasterPassword(now, location)
-	tokens, err := service.LoginDevelopmentMaster(context.Background(), "allmight", password, "test", "127.0.0.1", now, location)
+	secret := []byte("01234567890123456789012345678901")
+	if err = service.ConfigureDevelopmentMaster("gabrielbiaggi3@gmail.com", "MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE="); err != nil {
+		t.Fatal(err)
+	}
+	password := DevelopmentMasterPassword(secret, now, location)
+	tokens, err := service.LoginDevelopmentMaster(context.Background(), "allmight", password, "", "test", "127.0.0.1", now, location)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if repository.identity != domain.DevelopmentMasterIdentity || tokens.User.Email != "allmight" {
+	if repository.identity != "gabrielbiaggi3@gmail.com" || tokens.User.Email != "gabrielbiaggi3@gmail.com" {
 		t.Fatalf("unexpected master identity: repo=%q user=%q", repository.identity, tokens.User.Email)
 	}
 	if !tokens.Expires.Equal(repository.sessionExpires) || !tokens.Expires.Equal(developmentMasterExpiry(now, location)) {
 		t.Fatalf("master session did not expire at the hour boundary: %s", tokens.Expires)
 	}
-	if _, err = service.LoginDevelopmentMaster(context.Background(), "allmight", password+"x", "test", "127.0.0.1", now, location); err == nil {
+	if _, err = service.LoginDevelopmentMaster(context.Background(), "allmight", password+"x", "", "test", "127.0.0.1", now, location); err == nil {
 		t.Fatal("expected an invalid hourly password to be rejected")
 	}
 }

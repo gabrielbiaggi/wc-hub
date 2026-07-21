@@ -56,6 +56,8 @@ type Config struct {
 	SSHKnownHostsPath         string
 	DevelopmentMasterLogin    bool
 	DevelopmentMasterTimezone string
+	DevelopmentMasterEmail    string
+	DevelopmentMasterSecret   string
 	VNCTargets                []string
 	PBSURL                    string
 	PBSTokenID                string
@@ -80,7 +82,7 @@ func Load() Config {
 		LogLevelValue:             env("WC_HUB_LOG_LEVEL", "info"),
 		SessionTTL:                envDuration("WC_HUB_SESSION_TTL", 12*time.Hour),
 		SecureCookies:             envBool("WC_HUB_SECURE_COOKIES", false),
-		EncryptionKey:             env("WC_HUB_ENCRYPTION_KEY", ""),
+		EncryptionKey:             secretEnv("WC_HUB_ENCRYPTION_KEY", "WC_HUB_ENCRYPTION_KEY_FILE"),
 		TOTPIssuer:                env("WC_HUB_TOTP_ISSUER", "WC Hub"),
 		ProxmoxURL:                strings.TrimRight(env("PROXMOX_API_URL", ""), "/"),
 		ProxmoxTokenID:            env("PROXMOX_API_TOKEN_ID", ""),
@@ -117,6 +119,8 @@ func Load() Config {
 		SSHKnownHostsPath:         env("WC_HUB_SSH_KNOWN_HOSTS_PATH", ""),
 		DevelopmentMasterLogin:    envBool("WC_HUB_DEV_MASTER_LOGIN", false),
 		DevelopmentMasterTimezone: env("WC_HUB_DEV_MASTER_TIMEZONE", "America/Sao_Paulo"),
+		DevelopmentMasterEmail:    strings.ToLower(strings.TrimSpace(env("WC_HUB_MASTER_EMAIL", "gabrielbiaggi3@gmail.com"))),
+		DevelopmentMasterSecret:   secretEnv("WC_HUB_MASTER_SECRET", "WC_HUB_MASTER_SECRET_FILE"),
 		VNCTargets:                split(env("VNC_ALLOWED_TARGETS", "")),
 		PBSURL:                    strings.TrimRight(env("PBS_API_URL", ""), "/"),
 		PBSTokenID:                env("PBS_API_TOKEN_ID", ""),
@@ -128,6 +132,21 @@ func Load() Config {
 		PowerWOLTargets:           split(env("WOL_ALLOWED_TARGETS", "")),
 		PowerWOLBroadcast:         env("WOL_BROADCAST_ADDRESS", "255.255.255.255:9"),
 	}
+}
+
+func secretEnv(valueKey, fileKey string) string {
+	if value := strings.TrimSpace(os.Getenv(valueKey)); value != "" {
+		return value
+	}
+	path := strings.TrimSpace(os.Getenv(fileKey))
+	if path == "" {
+		return ""
+	}
+	value, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(value))
 }
 
 func envDuration(key string, fallback time.Duration) time.Duration {

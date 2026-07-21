@@ -108,8 +108,8 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, fun
 	}
 	var developmentMasterLocation *time.Location
 	if cfg.DevelopmentMasterLogin {
-		if !developmentMasterAllowed(cfg.Environment) {
-			return nil, nil, fmt.Errorf("WC_HUB_DEV_MASTER_LOGIN is forbidden outside development, local, or test environments")
+		if _, _, configErr := authapp.ValidateDevelopmentMasterConfig(cfg.DevelopmentMasterEmail, cfg.DevelopmentMasterSecret); configErr != nil {
+			return nil, nil, configErr
 		}
 		location, locationErr := time.LoadLocation(cfg.DevelopmentMasterTimezone)
 		if locationErr != nil {
@@ -129,12 +129,16 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, fun
 	authRepository := authrepo.NewPostgres(pool)
 	application.auth = authapp.New(authRepository, cfg.SessionTTL)
 	if cfg.DevelopmentMasterLogin {
-		if _, masterErr := authRepository.EnsureDevelopmentMaster(ctx); masterErr != nil {
+		if masterErr := application.auth.ConfigureDevelopmentMaster(cfg.DevelopmentMasterEmail, cfg.DevelopmentMasterSecret); masterErr != nil {
+			pool.Close()
+			return nil, nil, masterErr
+		}
+		if _, masterErr := authRepository.EnsureDevelopmentMaster(ctx, cfg.DevelopmentMasterEmail); masterErr != nil {
 			pool.Close()
 			return nil, nil, fmt.Errorf("ensure development master: %w", masterErr)
 		}
 		application.developmentMasterLocation = developmentMasterLocation
-		logger.Warn("development-only hourly master login enabled", "username", authdomain.DevelopmentMasterUsername, "timezone", developmentMasterLocation.String())
+		logger.Warn("single-user dynamic master login enabled", "username", authdomain.DevelopmentMasterUsername, "email", cfg.DevelopmentMasterEmail, "timezone", developmentMasterLocation.String())
 	}
 	if err := application.auth.ConfigureTOTP(cfg.EncryptionKey, cfg.TOTPIssuer); err != nil {
 		logger.Warn("TOTP enrollment disabled", "error", err)

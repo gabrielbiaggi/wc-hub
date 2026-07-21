@@ -81,6 +81,12 @@ After configuring a module, restart the `back` service and sign in with a role c
 
 ## Development-only master login
 
-For a single-user local test environment, set `WC_HUB_ENV=development` and `WC_HUB_DEV_MASTER_LOGIN=true`. The username is `allmight`; its password is calculated in memory as `HubDDMMYYYYHH` using `WC_HUB_DEV_MASTER_TIMEZONE` (default `America/Sao_Paulo`). No password or password hash for this hourly credential is stored. Its session expires at the next hour boundary.
+For the single-user operator mode, set `WC_HUB_DEV_MASTER_LOGIN=true`,
+`WC_HUB_MASTER_EMAIL`, and mount independent base64 secrets through
+`WC_HUB_MASTER_SECRET_FILE` and `WC_HUB_ENCRYPTION_KEY_FILE`. The username is
+`allmight`; run `/app/wc-hub master-password` inside the trusted backend host to
+obtain the current HMAC-derived hourly password. No password or password hash is
+stored. Sessions expire at the next hour boundary. The first session enrolls
+TOTP; subsequent logins require the authenticator code as a second factor.
 
 The API refuses to start with this option in production or staging. Docker Compose binds the frontend to `127.0.0.1` by default; changing `WC_HUB_BIND_IP` can expose the predictable credential to other machines and is not recommended.

@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/webcreations/wc-hub/back/internal/app"
+	authapp "github.com/webcreations/wc-hub/back/internal/auth/application"
 	"github.com/webcreations/wc-hub/back/internal/platform/config"
 	telemetryrepo "github.com/webcreations/wc-hub/back/internal/telemetry/repository"
 )
@@ -24,6 +25,18 @@ func main() {
 		if err != nil || resp.StatusCode != http.StatusOK {
 			os.Exit(1)
 		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "master-password" {
+		location, err := time.LoadLocation(cfg.DevelopmentMasterTimezone)
+		if err != nil {
+			panic(err)
+		}
+		_, secret, err := authapp.ValidateDevelopmentMasterConfig(cfg.DevelopmentMasterEmail, cfg.DevelopmentMasterSecret)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println(authapp.DevelopmentMasterPassword(secret, time.Now(), location))
 		return
 	}
 	if len(os.Args) == 3 && os.Args[1] == "provision-agent-token" {

@@ -3,10 +3,13 @@ import { ref } from 'vue'
 import { Activity, ArrowRight, Fingerprint, Gauge, LockKeyhole, ShieldCheck } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useRouter } from 'vue-router'
 
 const auth = useAuthStore()
+const router = useRouter()
 const email = ref('')
 const password = ref('')
+const totpCode = ref('')
 const displayName = ref('')
 const showError = ref('')
 
@@ -14,7 +17,10 @@ const submit = async () => {
   showError.value = ''
   try {
     if (auth.bootstrapRequired) await auth.bootstrap(displayName.value, email.value, password.value)
-    else await auth.login(email.value, password.value)
+    else {
+      await auth.login(email.value, password.value, totpCode.value)
+      if (!auth.user?.totp_enabled) await router.push('/settings')
+    }
   } catch (error: any) {
     showError.value = error.message
   }
@@ -38,6 +44,7 @@ const submit = async () => {
           <label v-if="auth.bootstrapRequired" class="block text-xs text-slate-300">Nome do operador<input v-model="displayName" required autocomplete="name" class="mt-2 h-11 w-full rounded-lg border border-line bg-slate-950/60 px-3 text-sm outline-none transition-colors focus:border-signal/60 focus:ring-2 focus:ring-signal/10" placeholder="Gabriel"></label>
           <label class="block text-xs text-slate-300">{{ auth.bootstrapRequired ? 'E-mail' : 'E-mail ou usuário' }}<input v-model="email" required :type="auth.bootstrapRequired ? 'email' : 'text'" :autocomplete="auth.bootstrapRequired ? 'email' : 'username'" class="mt-2 h-11 w-full rounded-lg border border-line bg-slate-950/60 px-3 text-sm outline-none transition-colors focus:border-signal/60 focus:ring-2 focus:ring-signal/10" :placeholder="auth.bootstrapRequired ? 'operador@webcreations.com.br' : 'allmight ou e-mail'"></label>
           <label class="block text-xs text-slate-300">Senha<input v-model="password" required type="password" :minlength="auth.bootstrapRequired ? 14 : 1" autocomplete="current-password" class="mt-2 h-11 w-full rounded-lg border border-line bg-slate-950/60 px-3 text-sm outline-none transition-colors focus:border-signal/60 focus:ring-2 focus:ring-signal/10" placeholder="••••••••••••••"><span v-if="auth.bootstrapRequired" class="mt-1.5 block text-[10px] text-muted">Mínimo de 14 caracteres. O TOTP será configurado em Configurações.</span></label>
+          <label v-if="!auth.bootstrapRequired" class="block text-xs text-slate-300">Código do autenticador <span class="text-muted">(após ativação)</span><input v-model="totpCode" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" class="mt-2 h-11 w-full rounded-lg border border-line bg-slate-950/60 px-3 font-mono text-sm tracking-[.3em] outline-none transition-colors focus:border-signal/60 focus:ring-2 focus:ring-signal/10" placeholder="000000"></label>
         </div>
         <p v-if="showError" class="mt-4 rounded-lg border border-danger/20 bg-danger/5 px-3 py-2 text-xs text-danger">{{ showError }}</p>
         <Button class="mt-6 h-11 w-full" type="submit" :disabled="auth.loading"><LockKeyhole class="h-4 w-4" />{{ auth.bootstrapRequired ? 'Selar inicialização' : 'Autenticar' }}<ArrowRight class="ml-auto h-4 w-4" /></Button>

@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -25,10 +26,12 @@ type Tokens struct {
 }
 
 type Service struct {
-	repo   domain.Repository
-	ttl    time.Duration
-	aead   cipher.AEAD
-	issuer string
+	repo         domain.Repository
+	ttl          time.Duration
+	aead         cipher.AEAD
+	issuer       string
+	masterEmail  string
+	masterSecret []byte
 }
 
 func New(repo domain.Repository, ttl time.Duration) *Service { return &Service{repo: repo, ttl: ttl} }
@@ -64,11 +67,35 @@ func (s *Service) Login(ctx context.Context, email, password, userAgent, remoteI
 	return s.issue(ctx, user, userAgent, remoteIP, time.Now().UTC().Add(s.ttl))
 }
 
-func DevelopmentMasterPassword(now time.Time, location *time.Location) string {
+func DevelopmentMasterPassword(secret []byte, now time.Time, location *time.Location) string {
 	if location == nil {
 		location = time.UTC
 	}
-	return "Hub" + now.In(location).Format("0201200615")
+	mac := hmac.New(sha256.New, secret)
+	_, _ = mac.Write([]byte("wc-hub/master-password/v1\x00" + now.In(location).Format("2006010215")))
+	code := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	return "Hub-" + code[:16]
+}
+
+func (s *Service) ConfigureDevelopmentMaster(email, encodedSecret string) error {
+	parsedEmail, secret, err := ValidateDevelopmentMasterConfig(email, encodedSecret)
+	if err != nil {
+		return err
+	}
+	s.masterEmail, s.masterSecret = parsedEmail, secret
+	return nil
+}
+
+func ValidateDevelopmentMasterConfig(email, encodedSecret string) (string, []byte, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if _, err := mail.ParseAddress(email); err != nil {
+		return "", nil, fmt.Errorf("WC_HUB_MASTER_EMAIL must be a valid email")
+	}
+	secret, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encodedSecret))
+	if err != nil || len(secret) < 32 {
+		return "", nil, fmt.Errorf("WC_HUB_MASTER_SECRET must be base64-encoded and contain at least 32 bytes")
+	}
+	return email, secret, nil
 }
 
 func developmentMasterExpiry(now time.Time, location *time.Location) time.Time {
@@ -78,16 +105,23 @@ func developmentMasterExpiry(now time.Time, location *time.Location) time.Time {
 	return now.In(location).Truncate(time.Hour).Add(time.Hour).UTC()
 }
 
-func (s *Service) LoginDevelopmentMaster(ctx context.Context, username, password, userAgent, remoteIP string, now time.Time, location *time.Location) (Tokens, error) {
+func (s *Service) LoginDevelopmentMaster(ctx context.Context, username, password, totpCode, userAgent, remoteIP string, now time.Time, location *time.Location) (Tokens, error) {
 	username = strings.ToLower(strings.TrimSpace(username))
-	expected := DevelopmentMasterPassword(now, location)
+	expected := DevelopmentMasterPassword(s.masterSecret, now, location)
 	validPassword := len(password) == len(expected) && subtle.ConstantTimeCompare([]byte(password), []byte(expected)) == 1
-	if username != domain.DevelopmentMasterUsername || !validPassword {
+	validIdentity := username == domain.DevelopmentMasterUsername || username == s.masterEmail
+	if len(s.masterSecret) < 32 || !validIdentity || !validPassword {
 		return Tokens{}, domain.ErrInvalidCredentials
 	}
-	user, _, err := s.repo.PasswordIdentity(ctx, domain.DevelopmentMasterIdentity)
+	user, _, err := s.repo.PasswordIdentity(ctx, s.masterEmail)
 	if err != nil {
 		return Tokens{}, domain.ErrInvalidCredentials
+	}
+	if user.TOTPEnabled {
+		valid, verifyErr := s.VerifyTOTP(ctx, user.ID, strings.TrimSpace(totpCode))
+		if verifyErr != nil || !valid {
+			return Tokens{}, domain.ErrInvalidCredentials
+		}
 	}
 	return s.issue(ctx, user, userAgent, remoteIP, developmentMasterExpiry(now, location))
 }

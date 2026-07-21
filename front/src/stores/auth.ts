@@ -19,9 +19,8 @@ export const useAuthStore = defineStore('auth', () => {
     } catch { user.value = null }
     finally { loading.value = false }
   }
-  const login = async (email:string,password:string) => { loading.value=true; try{accept((await api.post<AuthResponse>('/v1/auth/login',{email,password})).data)}catch{error.value='Credenciais inválidas ou acesso bloqueado.';throw new Error(error.value)}finally{loading.value=false} }
+  const login = async (email:string,password:string,totp_code:string) => { loading.value=true; try{accept((await api.post<AuthResponse>('/v1/auth/login',{email,password,totp_code})).data)}catch{error.value='Credenciais, senha horária ou TOTP inválidos.';throw new Error(error.value)}finally{loading.value=false} }
   const bootstrap = async (display_name:string,email:string,password:string) => { loading.value=true; try{accept((await api.post<AuthResponse>('/v1/auth/bootstrap',{display_name,email,password})).data);bootstrapRequired.value=false}catch(error:any){const message=error?.response?.data?.error?.message;error.value=message||'Não foi possível criar o administrador.';throw new Error(error.value)}finally{loading.value=false} }
   const logout = async () => { try{await api.post('/v1/auth/logout')}finally{user.value=null;setCSRFToken('')} }
   return { user, loading, bootstrapRequired, error, authenticated, initialize, login, bootstrap, logout }
 })
-

@@ -22,14 +22,15 @@ func TestDevelopmentMasterEnvironmentGuard(t *testing.T) {
 	}
 }
 
-func TestApplicationRejectsDevelopmentMasterBeforeDatabaseConnectionInProduction(t *testing.T) {
+func TestApplicationRejectsDevelopmentMasterWithoutStrongSecret(t *testing.T) {
 	_, _, err := New(context.Background(), config.Config{
 		DatabaseURL:               "postgres://not-used",
 		Environment:               "production",
 		DevelopmentMasterLogin:    true,
 		DevelopmentMasterTimezone: "America/Sao_Paulo",
+		DevelopmentMasterEmail:    "gabrielbiaggi3@gmail.com",
 	}, slog.Default())
-	if err == nil || !strings.Contains(err.Error(), "forbidden") {
-		t.Fatalf("expected production guard, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "MASTER_SECRET") {
+		t.Fatalf("expected secret guard, got %v", err)
 	}
 }

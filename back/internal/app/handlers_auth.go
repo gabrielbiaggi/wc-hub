@@ -17,6 +17,7 @@ type authRequest struct {
 	Email       string `json:"email"`
 	DisplayName string `json:"display_name"`
 	Password    string `json:"password"`
+	TOTPCode    string `json:"totp_code"`
 }
 type totpRequest struct {
 	Code string `json:"code"`
@@ -78,9 +79,9 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 	}
 	var tokens authapp.Tokens
 	var err error
-	developmentMaster := a.cfg.DevelopmentMasterLogin && strings.EqualFold(strings.TrimSpace(req.Email), authdomain.DevelopmentMasterUsername)
+	developmentMaster := a.cfg.DevelopmentMasterLogin && (strings.EqualFold(strings.TrimSpace(req.Email), authdomain.DevelopmentMasterUsername) || strings.EqualFold(strings.TrimSpace(req.Email), a.cfg.DevelopmentMasterEmail))
 	if developmentMaster {
-		tokens, err = a.auth.LoginDevelopmentMaster(r.Context(), req.Email, req.Password, r.UserAgent(), remoteIP(r), time.Now(), a.developmentMasterLocation)
+		tokens, err = a.auth.LoginDevelopmentMaster(r.Context(), req.Email, req.Password, req.TOTPCode, r.UserAgent(), remoteIP(r), time.Now(), a.developmentMasterLocation)
 	} else {
 		tokens, err = a.auth.Login(r.Context(), req.Email, req.Password, r.UserAgent(), remoteIP(r))
 	}
@@ -93,7 +94,7 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 			risk = security.RiskCritical
 		}
 		_ = a.audit.Append(r.Context(), auditrepo.Record{Action: action, Scope: security.ScopeLocal, ResourceType: "session", TargetName: req.Email, Risk: risk, Decision: "denied", Reason: "invalid credentials", RequestID: requestID(r.Context()), SourceIP: remoteIP(r)})
-		writeError(w, 401, "invalid_credentials", "Email or password is invalid.")
+		writeError(w, 401, "invalid_credentials", "Identity, hourly password, or TOTP is invalid.")
 		return
 	}
 	a.loginLimiter.success(limiterKeys)
@@ -104,7 +105,7 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 	if developmentMaster {
 		action = "auth.development_master.login"
 		risk = security.RiskCritical
-		reason = "development-only hourly master credential"
+		reason = "HMAC hourly master credential with TOTP enforcement"
 	}
 	_ = a.audit.Append(r.Context(), auditrepo.Record{ActorID: tokens.User.ID, Action: action, Scope: security.ScopeLocal, ResourceType: "session", TargetName: tokens.User.Email, Risk: risk, Decision: "allowed", Reason: reason, RequestID: requestID(r.Context()), SourceIP: remoteIP(r)})
 	writeJSON(w, 200, tokens)
