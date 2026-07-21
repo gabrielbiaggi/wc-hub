@@ -43,7 +43,7 @@ This matrix distinguishes compiled UI from a complete runtime feature. A feature
 
 1. The production build reports an `OverviewView` chunk slightly above 500 kB; route/vendor chunking should be tuned.
 2. Handler-level contract tests should be expanded beyond the current adapter and browser coverage.
-3. CI should run the Compose/Playwright suite with disposable credentials; real provider credentials must stay outside CI.
+3. A infraestrutura interna de pré-push deve executar Compose/Playwright com credenciais descartáveis; credenciais reais de providers permanecem fora desses testes.
 
 ## Runtime verification on 2026-07-19
 

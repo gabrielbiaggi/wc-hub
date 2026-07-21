@@ -84,7 +84,7 @@ cd ../front && npm audit
 - Testes E2E: `playwright.config.ts` existe
 - Coverage: gerar report
 
-**Prioridade:** BAIXA - Não bloqueia produção, mas recomendado para CI/CD
+**Prioridade:** BAIXA - Não bloqueia produção, mas recomendado para a validação interna pré-push
 
 #### 6. Documentação de API
 **Status:** Verificar se existe OpenAPI/Swagger

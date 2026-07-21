@@ -261,9 +261,9 @@ Browser Validation → RBAC → Self-Protection Engine → Operação → Audit
 
 ### O Que Pode Melhorar
 
-1. **CI/CD inexistente**
+1. **Validação interna pré-push**
    - Deveria ter detectado erros de compilação automaticamente
-   - Recomendação: Adicionar GitHub Actions
+   - Decisão: manter os gates na infraestrutura interna; GitHub somente como repositório remoto
 
 2. **Dependências desatualizadas**
    - Dependabot reportou vulnerabilidades
@@ -366,7 +366,7 @@ Browser Validation → RBAC → Self-Protection Engine → Operação → Audit
 ### Médio Prazo (Próximo Sprint)
 1. [ ] Implementar self-protection em plugins
 2. [ ] RBAC visual no dashboard
-3. [ ] CI/CD com GitHub Actions
+3. [ ] Automatizar os gates internos de pré-push
 4. [ ] Dependency update automation
 
 ---

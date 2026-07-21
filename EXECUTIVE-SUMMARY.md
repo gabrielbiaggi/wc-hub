@@ -195,7 +195,7 @@ Usuário → Browser Validation → RBAC → Operação → Audit Log
 4. **Documentação em paralelo:** Evita perda de contexto
 
 ### Melhorias Futuras
-1. **CI/CD:** Adicionar linting e testes automáticos
+1. **Validação interna:** Automatizar linting e testes nos gates internos pré-push
 2. **Pre-commit hooks:** Evitar commits de código que não compila
 3. **Dependency scanning:** Automatizar detecção de vulnerabilidades
 4. **E2E tests:** Cobrir fluxos críticos (delete VM, snapshot, etc)
