@@ -1,7 +1,7 @@
 services:
   back:
     environment:
-      PROXMOX_API_URL: https://10.20.30.2:8006
+      PROXMOX_API_URL: https://10.10.50.21:8006
       PROXMOX_TLS_CA_PATH: /run/secrets/proxmox_ca.pem
       PROXMOX_TLS_INSECURE_SKIP_VERIFY: "false"
       DOCKER_FALLBACK_SOCKET_PATH: /var/run/docker.sock
