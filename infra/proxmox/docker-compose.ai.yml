@@ -1,0 +1,21 @@
+services:
+  back:
+    environment:
+      PROXMOX_API_URL: https://10.20.30.2:8006
+      PROXMOX_TLS_CA_PATH: /run/secrets/proxmox_ca.pem
+      PROXMOX_TLS_INSECURE_SKIP_VERIFY: "false"
+      DOCKER_FALLBACK_SOCKET_PATH: /var/run/docker.sock
+      HUB_PROXMOX_VMID: "101"
+      HUB_CONTAINER_NAME: wc-hub-back-1
+      HUB_HOST_ID: wc-hub-ai
+      WC_HUB_LOCAL_TARGET_NAME: wc-hub-ai
+      MERGERFS_ROOT: /mnt/drive
+    group_add:
+      - "${DOCKER_GID}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /mnt/prox-ai:/mnt/drive:rw
+
+  front:
+    ports:
+      - "0.0.0.0:${WC_HUB_PORT:-8088}:8080"
