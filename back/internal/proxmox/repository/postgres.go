@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -37,19 +38,24 @@ func (r *Postgres) FinishRun(ctx context.Context, id, status string, resources i
 	return err
 }
 
-func (r *Postgres) Sync(ctx context.Context, snapshot adapter.Snapshot, baseURL string) (int, error) {
+func (r *Postgres) Sync(ctx context.Context, snapshot adapter.Snapshot, clusterName string) (int, error) {
+	clusterName = strings.TrimSpace(clusterName)
+	if clusterName == "" {
+		clusterName = "Proxmox"
+	}
 	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback(ctx)
 	var integrationID, clusterID string
-	config, _ := json.Marshal(map[string]any{"base_url": baseURL, "credential_source": "environment"})
-	err = tx.QueryRow(ctx, `INSERT INTO integrations(name,provider,status,config,last_checked_at) VALUES('Proxmox','proxmox','connected',$1,$2) ON CONFLICT(provider,name) DO UPDATE SET status='connected',config=EXCLUDED.config,last_checked_at=EXCLUDED.last_checked_at,updated_at=now() RETURNING id::text`, config, snapshot.CapturedAt).Scan(&integrationID)
+	config, _ := json.Marshal(map[string]any{"cluster": clusterName, "credential_source": "environment"})
+	integrationName := "Proxmox " + clusterName
+	err = tx.QueryRow(ctx, `INSERT INTO integrations(name,provider,status,config,last_checked_at) VALUES($1,'proxmox','connected',$2,$3) ON CONFLICT(provider,name) DO UPDATE SET status='connected',config=EXCLUDED.config,last_checked_at=EXCLUDED.last_checked_at,updated_at=now() RETURNING id::text`, integrationName, config, snapshot.CapturedAt).Scan(&integrationID)
 	if err != nil {
 		return 0, err
 	}
-	err = tx.QueryRow(ctx, `INSERT INTO clusters(integration_id,name,kind,status,metadata) VALUES($1,'Proxmox','proxmox','online','{}') ON CONFLICT(integration_id,name) DO UPDATE SET status='online' RETURNING id::text`, integrationID).Scan(&clusterID)
+	err = tx.QueryRow(ctx, `INSERT INTO clusters(integration_id,name,kind,status,metadata) VALUES($1,$2,'proxmox','online',$3) ON CONFLICT(integration_id,name) DO UPDATE SET status='online',metadata=EXCLUDED.metadata RETURNING id::text`, integrationID, clusterName, config).Scan(&clusterID)
 	if err != nil {
 		return 0, err
 	}
@@ -58,7 +64,7 @@ func (r *Postgres) Sync(ctx context.Context, snapshot adapter.Snapshot, baseURL 
 	for _, node := range snapshot.Nodes {
 		facts, _ := json.Marshal(map[string]any{"max_cpu": node.MaxCPU, "max_memory": node.MaxMemory, "uptime": node.Uptime, "subscription_level": node.Level})
 		var hostID, nodeID string
-		hostName := "proxmox:" + node.Node
+		hostName := "proxmox:" + clusterName + ":" + node.Node
 		err = tx.QueryRow(ctx, `INSERT INTO hosts(integration_id,name,hostname,scope,status,self_protected,facts,last_seen_at) VALUES($1,$2,$3,'remote',$4,false,$5,$6) ON CONFLICT(name) DO UPDATE SET integration_id=EXCLUDED.integration_id,status=EXCLUDED.status,facts=EXCLUDED.facts,last_seen_at=EXCLUDED.last_seen_at RETURNING id::text`, integrationID, hostName, node.Node, resourceStatus(node.Status), facts, snapshot.CapturedAt).Scan(&hostID)
 		if err != nil {
 			return 0, err
@@ -104,7 +110,8 @@ func (r *Postgres) Sync(ctx context.Context, snapshot adapter.Snapshot, baseURL 
 			name = fmt.Sprintf("ct-%d", ct.VMID)
 		}
 		metadata, _ := json.Marshal(map[string]any{"node": ct.Node, "cpu_ratio": ct.CPU, "memory_used": ct.Memory, "max_memory": ct.MaxMemory, "uptime": ct.Uptime})
-		_, err = tx.Exec(ctx, `INSERT INTO containers(host_id,external_id,name,runtime,status,metadata) VALUES(NULLIF($1,'')::uuid,$2,$3,'proxmox-lxc',$4,$5) ON CONFLICT(runtime,external_id) DO UPDATE SET host_id=EXCLUDED.host_id,name=EXCLUDED.name,status=EXCLUDED.status,metadata=EXCLUDED.metadata`, hostID, fmt.Sprint(ct.VMID), name, resourceStatus(ct.Status), metadata)
+		runtime := "proxmox-lxc:" + clusterName
+		_, err = tx.Exec(ctx, `INSERT INTO containers(host_id,external_id,name,runtime,status,metadata) VALUES(NULLIF($1,'')::uuid,$2,$3,$4,$5,$6) ON CONFLICT(runtime,external_id) DO UPDATE SET host_id=EXCLUDED.host_id,name=EXCLUDED.name,status=EXCLUDED.status,metadata=EXCLUDED.metadata`, hostID, fmt.Sprint(ct.VMID), name, runtime, resourceStatus(ct.Status), metadata)
 		if err != nil {
 			return 0, err
 		}
@@ -142,7 +149,7 @@ func (r *Postgres) Summary(ctx context.Context, configured bool) (Summary, error
 	}
 	_ = r.db.QueryRow(ctx, `SELECT count(*) FROM nodes n JOIN clusters c ON c.id=n.cluster_id WHERE c.kind='proxmox'`).Scan(&result.Nodes)
 	_ = r.db.QueryRow(ctx, `SELECT count(*) FROM virtual_machines vm JOIN nodes n ON n.id=vm.node_id JOIN clusters c ON c.id=n.cluster_id WHERE c.kind='proxmox'`).Scan(&result.VMs)
-	_ = r.db.QueryRow(ctx, `SELECT count(*) FROM containers WHERE runtime='proxmox-lxc'`).Scan(&result.Containers)
+	_ = r.db.QueryRow(ctx, `SELECT count(*) FROM containers WHERE runtime LIKE 'proxmox-lxc:%' OR runtime='proxmox-lxc'`).Scan(&result.Containers)
 	_ = r.db.QueryRow(ctx, `SELECT count(*) FROM infrastructure_storage_pools`).Scan(&result.Storage)
 	return result, nil
 }

@@ -9,34 +9,39 @@ import (
 )
 
 type SyncHandler struct {
-	client  *adapter.Client
+	clients []*adapter.Client
 	repo    *repo.Postgres
-	baseURL string
 }
 
-func NewSyncHandler(client *adapter.Client, repository *repo.Postgres, baseURL string) *SyncHandler {
-	return &SyncHandler{client: client, repo: repository, baseURL: baseURL}
+func NewSyncHandler(clients []*adapter.Client, repository *repo.Postgres) *SyncHandler {
+	return &SyncHandler{clients: clients, repo: repository}
 }
 func (h *SyncHandler) Kind() string { return "proxmox.sync" }
 func (h *SyncHandler) Handle(ctx context.Context, job jobs.Job) error {
-	if h.client == nil {
+	if len(h.clients) == 0 {
 		return fmt.Errorf("Proxmox is not configured")
 	}
 	runID, err := h.repo.StartRun(ctx, job.ID)
 	if err != nil {
 		return err
 	}
-	snapshot, err := h.client.Snapshot(ctx)
-	if err != nil {
-		_ = h.repo.MarkError(ctx, err.Error())
-		_ = h.repo.FinishRun(ctx, runID, "failed", 0, err)
-		return err
+	resources := 0
+	for _, client := range h.clients {
+		if client == nil {
+			continue
+		}
+		snapshot, snapshotErr := client.Snapshot(ctx)
+		if snapshotErr != nil {
+			_ = h.repo.MarkError(ctx, snapshotErr.Error())
+			_ = h.repo.FinishRun(ctx, runID, "failed", resources, snapshotErr)
+			return snapshotErr
+		}
+		synced, syncErr := h.repo.Sync(ctx, snapshot, client.ID())
+		resources += synced
+		if syncErr != nil {
+			_ = h.repo.FinishRun(ctx, runID, "failed", resources, syncErr)
+			return syncErr
+		}
 	}
-	resources, err := h.repo.Sync(ctx, snapshot, h.baseURL)
-	status := "succeeded"
-	if err != nil {
-		status = "failed"
-	}
-	_ = h.repo.FinishRun(ctx, runID, status, resources, err)
-	return err
+	return h.repo.FinishRun(ctx, runID, "succeeded", resources, nil)
 }

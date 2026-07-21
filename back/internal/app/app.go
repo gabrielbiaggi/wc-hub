@@ -305,7 +305,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, fun
 	if cfg.MonitoringEnabled {
 		monitoringadapter.New(application.monitorStore, 15*time.Second).Start(workerCtx)
 	}
-	handlers := []jobdomain.Handler{proxmoxapp.NewSyncHandler(application.proxmoxClient, application.proxmox, cfg.ProxmoxURL), telemetryapp.NewMaintenanceHandler(application.telemetry)}
+	handlers := []jobdomain.Handler{proxmoxapp.NewSyncHandler(application.proxmoxClients, application.proxmox), telemetryapp.NewMaintenanceHandler(application.telemetry)}
 	runner := jobapp.NewRunner(application.jobs, handlers, logger, cfg.WorkerID, cfg.WorkerCount)
 	runner.SetResultHook(func(ctx context.Context, job jobdomain.Job, status string, jobErr error) {
 		reason := ""
