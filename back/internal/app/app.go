@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 	_ "time/tzdata"
@@ -180,12 +181,16 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, fun
 	} else {
 		application.setAdapterError("docker", fmt.Errorf("DOCKER_PROXY_URL and DOCKER_FALLBACK_SOCKET_PATH are not configured"))
 	}
-	client, clientErr := kubernetesadapter.New(kubernetesadapter.Config{Endpoint: cfg.KubernetesURL, TokenPath: cfg.KubernetesToken, CAPath: cfg.KubernetesCA, KubeconfigPath: cfg.KubernetesKubeconfig})
-	if clientErr != nil {
-		logger.Error("Kubernetes adapter disabled", "error", clientErr)
-		application.setAdapterError("kubernetes", clientErr)
+	if cfg.KubernetesURL != "" || cfg.KubernetesKubeconfig != "" || os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
+		client, clientErr := kubernetesadapter.New(kubernetesadapter.Config{Endpoint: cfg.KubernetesURL, TokenPath: cfg.KubernetesToken, CAPath: cfg.KubernetesCA, KubeconfigPath: cfg.KubernetesKubeconfig})
+		if clientErr != nil {
+			logger.Error("Kubernetes adapter disabled", "error", clientErr)
+			application.setAdapterError("kubernetes", clientErr)
+		} else {
+			application.kubernetesClient = client
+		}
 	} else {
-		application.kubernetesClient = client
+		application.setAdapterError("kubernetes", fmt.Errorf("Kubernetes API or kubeconfig is not configured"))
 	}
 	if cfg.CloudflareToken != "" && (len(cfg.CloudflareAccounts) > 0 || len(cfg.CloudflareZones) > 0) {
 		kek, decodeErr := base64.StdEncoding.DecodeString(cfg.EncryptionKey)

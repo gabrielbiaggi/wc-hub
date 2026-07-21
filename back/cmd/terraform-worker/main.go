@@ -54,6 +54,15 @@ type server struct {
 var workspaceName = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,80}$`)
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		client := http.Client{Timeout: 2 * time.Second}
+		resp, err := client.Get("http://127.0.0.1:8090/healthz")
+		if err != nil || resp.StatusCode != http.StatusOK {
+			os.Exit(1)
+		}
+		_ = resp.Body.Close()
+		return
+	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	token := []byte(strings.TrimSpace(os.Getenv("TERRAFORM_WORKER_TOKEN")))
 	if len(token) < 20 {

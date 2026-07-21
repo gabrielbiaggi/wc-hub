@@ -88,7 +88,7 @@ func (r *Resolver) IsSelfProtectedContainer(idOrName string) bool {
 	}
 
 	for _, cid := range r.containerIDs {
-		if target == cid || strings.HasPrefix(target, cid+"-") {
+		if target == cid || strings.HasPrefix(target, cid+"-") || (len(cid) >= 12 && strings.HasPrefix(target, cid)) {
 			return true
 		}
 	}

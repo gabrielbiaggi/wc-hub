@@ -20,10 +20,24 @@ Este documento substitui afirmações absolutas de prontidão presentes nos rela
 ## Limites da evidência
 
 - Por decisão operacional, o GitHub é somente o repositório remoto e não executa CI/CD. Todos os gates devem passar na infraestrutura interna antes do `git push`.
-- Os testes de migrations existentes validam estrutura, mas não substituem um ciclo real clean/upgrade em PostgreSQL. Esse ciclo deve rodar no ambiente de staging.
-- O script de backup valida a geração e leitura do archive; um restore destrutivo deve usar um banco descartável separado.
 - A cobertura OpenAPI garante presença de operações. Schemas e exemplos detalhados ainda podem ser enriquecidos sem alterar o contrato de cobertura.
-- A aprovação final de produção depende de smoke test no staging, credenciais reais, inventário self-target configurado e restore em banco descartável.
+
+## Evidência final de staging local
+
+Executado em 2026-07-21, em uma stack isolada `wc-hub-audit`, sem reutilizar o volume PostgreSQL da instância de desenvolvimento:
+
+- migrations clean: versões `1 -> 9`, schema final com 29 tabelas e `dirty=false`;
+- reversibilidade: `9 -> 0 -> 9` concluída sem erro;
+- upgrade: banco separado migrado até a versão 8 e atualizado `8 -> 9`;
+- backup real: `pg_dump --format=custom` do banco ativo e leitura validada por `pg_restore --list`;
+- restore real: archive restaurado em `wc_hub_audit_restore`, com 29/29 tabelas e 1168/1168 audit logs;
+- smoke production Compose: PostgreSQL, migrations, backend, frontend e Terraform worker iniciaram corretamente; serviços long-running ficaram healthy;
+- HTTP: `/`, `/healthz` e bootstrap status retornaram 200; endpoint protegido sem sessão retornou 401;
+- autenticação: bootstrap 201, overview autenticado 200, mutation sem CSRF 403 e logout com CSRF 204;
+- self-protection: health e overview retornaram `self_protected=true`; container e host aliases foram injetados; o resolver reconhece o ID Docker completo a partir do hostname;
+- runtime: logs finais do backend e Terraform worker sem eventos `ERROR`, panic ou fatal.
+
+Os bancos, containers, redes, volumes e credenciais efêmeras usados pela auditoria foram removidos ao final. O host local é físico (`systemd-detect-virt=none`), portanto não há `HUB_PROXMOX_VMID` aplicável neste ambiente. Em uma futura VM Proxmox, esse valor continua obrigatório no deployment.
 
 ## Configuração obrigatória do self-target
 

@@ -6,6 +6,7 @@ import (
 
 func TestTargetResolver(t *testing.T) {
 	resolver := NewResolver()
+	resolver.containerIDs = append(resolver.containerIDs, "02843a22a2af")
 
 	tests := []struct {
 		name     string
@@ -14,6 +15,7 @@ func TestTargetResolver(t *testing.T) {
 	}{
 		{"container wc-hub", func() bool { return resolver.IsSelfProtectedContainer("wc-hub") }, true},
 		{"canonical docker target", func() bool { return resolver.IsSelfProtectedContainer("docker/container/wc-hub") }, true},
+		{"full docker id from hostname prefix", func() bool { return resolver.IsSelfProtectedContainer("docker/container/02843a22a2af8e46dd7d83ed5f4a7850") }, true},
 		{"container prefix false positive", func() bool { return resolver.IsSelfProtectedContainer("hubspot") }, false},
 		{"container my-app", func() bool { return resolver.IsSelfProtectedContainer("my-app") }, false},
 		{"pod wc-hub-api", func() bool { return resolver.IsSelfProtectedPod("wc-hub-api-79d8f") }, true},
