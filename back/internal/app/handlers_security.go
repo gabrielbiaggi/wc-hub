@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	auditrepo "github.com/webcreations/wc-hub/back/internal/audit/repository"
+	dockerapp "github.com/webcreations/wc-hub/back/internal/dockerapp"
 	security "github.com/webcreations/wc-hub/back/internal/security/domain"
 )
 
@@ -53,6 +54,17 @@ func (a *App) enforcePolicy(w http.ResponseWriter, r *http.Request, req security
 		return false
 	}
 	return true
+}
+
+// policyEnforcerForPlugin adapts enforcePolicy for use in plugins
+func (a *App) policyEnforcerForPlugin(w http.ResponseWriter, r *http.Request, req dockerapp.PolicyRequest) bool {
+	return a.enforcePolicy(w, r, security.ActionRequest{
+		Action:       req.Action,
+		Scope:        security.Scope(req.Scope),
+		TargetName:   req.TargetName,
+		Confirmation: req.Confirmation,
+		TOTPCode:     req.TOTPCode,
+	})
 }
 
 func (a *App) listAudit(w http.ResponseWriter, r *http.Request) {

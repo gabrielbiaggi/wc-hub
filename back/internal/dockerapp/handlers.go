@@ -39,7 +39,23 @@ func (h *Handler) Exec(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request", "O comando Docker é inválido.")
 		return
 	}
-	output, err := controller.Exec(r.Context(), r.PathValue("id"), input.Command)
+
+	id := r.PathValue("id")
+
+	// Self-protection: validate exec command
+	if h.policyEnforcer != nil && len(input.Command) > 0 {
+		if !h.policyEnforcer(w, r, PolicyRequest{
+			Action:       "docker_exec",
+			Scope:        "remote",
+			TargetName:   "docker/container/" + id,
+			Confirmation: r.Header.Get("X-Confirmation"),
+			TOTPCode:     r.Header.Get("X-TOTP-Code"),
+		}) {
+			return // enforcer already wrote response
+		}
+	}
+
+	output, err := controller.Exec(r.Context(), id, input.Command)
 	if err != nil {
 		writeError(w, 502, "docker_exec_failed", "O Docker rejeitou a execução: "+err.Error())
 		return
@@ -48,16 +64,17 @@ func (h *Handler) Exec(w http.ResponseWriter, r *http.Request) {
 }
 
 type Handler struct {
-	reader  Reader
-	initErr string
+	reader         Reader
+	policyEnforcer PolicyEnforcer
+	initErr        string
 }
 
-func NewHandler(reader Reader, initErr ...string) *Handler {
+func NewHandler(reader Reader, policyEnforcer PolicyEnforcer, initErr ...string) *Handler {
 	message := ""
 	if len(initErr) > 0 {
 		message = initErr[0]
 	}
-	return &Handler{reader: reader, initErr: message}
+	return &Handler{reader: reader, policyEnforcer: policyEnforcer, initErr: message}
 }
 
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
@@ -135,11 +152,32 @@ func (h *Handler) ContainerAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, action := r.PathValue("id"), r.PathValue("action")
+
+	// Self-protection: validate destructive actions
+	if h.policyEnforcer != nil && isDestructiveAction(action) {
+		if !h.policyEnforcer(w, r, PolicyRequest{
+			Action:       "docker_" + action,
+			Scope:        "remote",
+			TargetName:   "docker/container/" + id,
+			Confirmation: r.Header.Get("X-Confirmation"),
+			TOTPCode:     r.Header.Get("X-TOTP-Code"),
+		}) {
+			return // enforcer already wrote response
+		}
+	}
+
 	if err := controller.ContainerAction(r.Context(), id, action); err != nil {
 		writeError(w, http.StatusBadGateway, "docker_action_failed", "O Docker rejeitou a ação no container: "+err.Error())
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"container_id": id, "action": action, "status": "accepted"})
+}
+
+func isDestructiveAction(action string) bool {
+	destructive := map[string]bool{
+		"stop": true, "kill": true, "remove": true, "restart": true,
+	}
+	return destructive[action]
 }
 
 func (h *Handler) available(w http.ResponseWriter) bool {
