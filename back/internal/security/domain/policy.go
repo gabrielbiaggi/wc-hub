@@ -55,6 +55,7 @@ var destructiveActions = map[string]struct{}{
 	"delete_host": {}, "delete_vm": {}, "delete_snapshot": {}, "rollback_snapshot": {},
 	"terraform_destroy": {}, "wipe_disk": {},
 	"docker_stop": {}, "docker_kill": {}, "docker_remove": {}, "docker_restart": {}, "docker_exec": {},
+	"k8s_exec": {}, "k8s_deployment_restart": {}, "k8s_deployment_delete": {},
 }
 
 var destructiveCommands = map[string]struct{}{

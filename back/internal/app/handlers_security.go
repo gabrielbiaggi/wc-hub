@@ -5,6 +5,7 @@ import (
 
 	auditrepo "github.com/webcreations/wc-hub/back/internal/audit/repository"
 	dockerapp "github.com/webcreations/wc-hub/back/internal/dockerapp"
+	kubernetesapp "github.com/webcreations/wc-hub/back/internal/kubernetesapp"
 	security "github.com/webcreations/wc-hub/back/internal/security/domain"
 )
 
@@ -58,6 +59,16 @@ func (a *App) enforcePolicy(w http.ResponseWriter, r *http.Request, req security
 
 // policyEnforcerForPlugin adapts enforcePolicy for use in plugins
 func (a *App) policyEnforcerForPlugin(w http.ResponseWriter, r *http.Request, req dockerapp.PolicyRequest) bool {
+	return a.enforcePolicy(w, r, security.ActionRequest{
+		Action:       req.Action,
+		Scope:        security.Scope(req.Scope),
+		TargetName:   req.TargetName,
+		Confirmation: req.Confirmation,
+		TOTPCode:     req.TOTPCode,
+	})
+}
+
+func (a *App) policyEnforcerForK8s(w http.ResponseWriter, r *http.Request, req kubernetesapp.PolicyRequest) bool {
 	return a.enforcePolicy(w, r, security.ActionRequest{
 		Action:       req.Action,
 		Scope:        security.Scope(req.Scope),

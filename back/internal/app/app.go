@@ -380,7 +380,7 @@ func (a *App) Handler() http.Handler {
 		dockerReader = a.dockerClient
 	}
 	dockerapp.MountRoutesWithPolicy(mux, a.protect, a.policyEnforcerForPlugin, dockerReader, a.adapterError("docker"))
-	kubernetesapp.MountRoutes(mux, a.protect, a.kubernetesClient, a.adapterError("kubernetes"))
+	kubernetesapp.MountRoutesWithPolicy(mux, a.protect, a.policyEnforcerForK8s, a.kubernetesClient, a.adapterError("kubernetes"))
 	cloudflareapp.MountRoutes(mux, a.protect, a.cloudflareHandler)
 	githubapp.MountRoutes(mux, a.protect, a.githubClient)
 	terraformapp.MountRoutes(mux, a.protect, a.terraformRunner)
