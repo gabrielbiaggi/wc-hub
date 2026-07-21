@@ -306,10 +306,10 @@ type rrdPoint struct {
 	Time         int64   `json:"time"`
 	CPU          float64 `json:"cpu"`
 	LoadAvg      float64 `json:"loadavg"`
-	MemTotal     int64   `json:"memtotal"`
-	MemAvailable int64   `json:"memavailable"`
-	RootTotal    int64   `json:"roottotal"`
-	RootUsed     int64   `json:"rootused"`
+	MemTotal     float64 `json:"memtotal"`
+	MemAvailable float64 `json:"memavailable"`
+	RootTotal    float64 `json:"roottotal"`
+	RootUsed     float64 `json:"rootused"`
 	NetIn        float64 `json:"netin"`
 	NetOut       float64 `json:"netout"`
 	IOWait       float64 `json:"iowait"`
@@ -340,7 +340,7 @@ func (c *Client) nodeMetrics(ctx context.Context, node string) (NodeMetrics, err
 	if !found {
 		return NodeMetrics{}, fmt.Errorf("RRD returned no complete metric point")
 	}
-	return NodeMetrics{CPU: latest.CPU, Load1: latest.LoadAvg, MemoryTotal: latest.MemTotal, MemoryAvailable: latest.MemAvailable, RootTotal: latest.RootTotal, RootUsed: latest.RootUsed, NetworkInBPS: latest.NetIn, NetworkOutBPS: latest.NetOut, IOWaitRatio: latest.IOWait}, nil
+	return NodeMetrics{CPU: latest.CPU, Load1: latest.LoadAvg, MemoryTotal: int64(latest.MemTotal), MemoryAvailable: int64(latest.MemAvailable), RootTotal: int64(latest.RootTotal), RootUsed: int64(latest.RootUsed), NetworkInBPS: latest.NetIn, NetworkOutBPS: latest.NetOut, IOWaitRatio: latest.IOWait}, nil
 }
 
 func rrdPointHasSample(point rrdPoint) bool {
