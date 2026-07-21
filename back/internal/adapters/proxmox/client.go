@@ -323,13 +323,28 @@ func (c *Client) nodeMetrics(ctx context.Context, node string) (NodeMetrics, err
 	if len(points) == 0 {
 		return NodeMetrics{}, fmt.Errorf("no RRD points returned")
 	}
-	latest := points[0]
-	for _, point := range points[1:] {
-		if point.Time > latest.Time {
+	var latest rrdPoint
+	found := false
+	for _, point := range points {
+		// The newest RRD bucket can be allocated before Proxmox has populated
+		// it, producing a valid timestamp with every metric at zero. Never let
+		// that partial bucket erase the last real observation in the dashboard.
+		if !rrdPointHasSample(point) {
+			continue
+		}
+		if !found || point.Time > latest.Time {
 			latest = point
+			found = true
 		}
 	}
+	if !found {
+		return NodeMetrics{}, fmt.Errorf("RRD returned no complete metric point")
+	}
 	return NodeMetrics{CPU: latest.CPU, Load1: latest.LoadAvg, MemoryTotal: latest.MemTotal, MemoryAvailable: latest.MemAvailable, RootTotal: latest.RootTotal, RootUsed: latest.RootUsed, NetworkInBPS: latest.NetIn, NetworkOutBPS: latest.NetOut, IOWaitRatio: latest.IOWait}, nil
+}
+
+func rrdPointHasSample(point rrdPoint) bool {
+	return point.MemTotal > 0 || point.RootTotal > 0 || point.CPU > 0 || point.LoadAvg > 0 || point.NetIn > 0 || point.NetOut > 0
 }
 
 func (c *Client) CreateQEMU(ctx context.Context, input CreateQEMUInput) error {
