@@ -1,0 +1,932 @@
+openapi: 3.0.3
+info:
+  title: WC-Hub API
+  version: 1.0.0
+  description: |
+    WC-Hub é um control plane multi-cloud para gerenciamento unificado de infraestrutura.
+    
+    **Recursos principais:**
+    - Gestão de VMs/containers (Proxmox, Docker, Kubernetes, OCI)
+    - Infraestrutura como código (Terraform)
+    - Integrations (GitHub, Cloudflare)
+    - RBAC granular com policy enforcement
+    - Audit logging completo
+    - Terminal SSH via WebSocket
+    
+    **Autenticação:**
+    - Session-based authentication com cookies HTTPOnly
+    - TOTP 2FA opcional
+    - Policy enforcement para ações críticas (X-Confirmation + X-TOTP-Code headers)
+    
+  contact:
+    name: WC-Hub Development Team
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://hub.example.com
+    description: Production
+  - url: http://localhost:8080
+    description: Development
+
+tags:
+  - name: auth
+    description: Autenticação e sessões
+  - name: admin
+    description: Administração (RBAC)
+  - name: overview
+    description: Dashboard e visão geral
+  - name: proxmox
+    description: Proxmox VE (VMs, containers, snapshots)
+  - name: docker
+    description: Docker (containers, images)
+  - name: kubernetes
+    description: Kubernetes (pods, deployments)
+  - name: terraform
+    description: Terraform (IaC workflows)
+  - name: github
+    description: GitHub (repos, workflows, actions)
+  - name: cloudflare
+    description: Cloudflare (tunnels, DNS)
+  - name: storage
+    description: Storage (MergerFS file management)
+  - name: oci
+    description: Oracle Cloud Infrastructure
+  - name: monitor
+    description: Monitoramento (uptime checks)
+  - name: backup
+    description: Proxmox Backup Server
+  - name: power
+    description: Wake-on-LAN
+  - name: vnc
+    description: VNC/noVNC console
+  - name: terminal
+    description: SSH Terminal WebSocket
+  - name: operations
+    description: Operações disponíveis
+  - name: jobs
+    description: Agendamento de jobs
+  - name: telemetry
+    description: Telemetria de hosts
+  - name: audit
+    description: Audit logging
+  - name: security
+    description: Policy enforcement
+
+security:
+  - cookieAuth: []
+
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      operationId: healthCheck
+      tags: [overview]
+      security: []
+      responses:
+        '200':
+          description: Service is healthy
+
+  /api/v1/auth/bootstrap-status:
+    get:
+      summary: Verifica se sistema precisa de bootstrap
+      operationId: getBootstrapStatus
+      tags: [auth]
+      security: []
+      responses:
+        '200':
+          description: Status do bootstrap
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  required:
+                    type: boolean
+                    description: Se true, sistema precisa de usuário inicial
+
+  /api/v1/auth/bootstrap:
+    post:
+      summary: Criar primeiro usuário god-admin
+      operationId: bootstrap
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, display_name]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 12
+                display_name:
+                  type: string
+      responses:
+        '201':
+          description: Usuário criado com sucesso
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Bootstrap já realizado
+
+  /api/v1/auth/login:
+    post:
+      summary: Autenticar usuário
+      operationId: login
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                totp_code:
+                  type: string
+                  description: TOTP code se usuário tem 2FA ativo
+      responses:
+        '200':
+          description: Login bem-sucedido
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+                example: session=abc123; HttpOnly; Secure; SameSite=Strict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/auth/session:
+    get:
+      summary: Obter sessão atual
+      operationId: getSession
+      tags: [auth]
+      responses:
+        '200':
+          description: Sessão ativa
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/auth/logout:
+    post:
+      summary: Encerrar sessão
+      operationId: logout
+      tags: [auth]
+      responses:
+        '204':
+          description: Logout bem-sucedido
+
+  /api/v1/auth/totp/enroll:
+    post:
+      summary: Iniciar enrollment TOTP
+      operationId: enrollTOTP
+      tags: [auth]
+      responses:
+        '200':
+          description: QR code e secret para configuração
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  qr_code:
+                    type: string
+                    description: Data URL do QR code
+                  secret:
+                    type: string
+                    description: Secret TOTP em plain text (apenas durante enrollment)
+
+  /api/v1/auth/totp/confirm:
+    post:
+      summary: Confirmar e ativar TOTP
+      operationId: confirmTOTP
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code:
+                  type: string
+                  description: Código TOTP de 6 dígitos
+      responses:
+        '204':
+          description: TOTP ativado com sucesso
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/admin/users:
+    get:
+      summary: Listar usuários
+      operationId: listAdminUsers
+      tags: [admin]
+      responses:
+        '200':
+          description: Lista de usuários
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+    post:
+      summary: Criar usuário
+      operationId: createAdminUser
+      tags: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+      responses:
+        '201':
+          description: Usuário criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+  /api/v1/admin/users/{id}:
+    patch:
+      summary: Atualizar usuário
+      operationId: updateAdminUser
+      tags: [admin]
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        '200':
+          description: Usuário atualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+    delete:
+      summary: Desativar usuário
+      operationId: disableAdminUser
+      tags: [admin]
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      responses:
+        '204':
+          description: Usuário desativado
+
+  /api/v1/admin/roles:
+    get:
+      summary: Listar papéis
+      operationId: listAdminRoles
+      tags: [admin]
+      responses:
+        '200':
+          description: Lista de papéis
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Role'
+    post:
+      summary: Criar papel
+      operationId: createAdminRole
+      tags: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRoleRequest'
+      responses:
+        '201':
+          description: Papel criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+
+  /api/v1/admin/roles/{id}:
+    patch:
+      summary: Atualizar papel
+      operationId: updateAdminRole
+      tags: [admin]
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRoleRequest'
+      responses:
+        '200':
+          description: Papel atualizado
+    delete:
+      summary: Deletar papel
+      operationId: deleteAdminRole
+      tags: [admin]
+      parameters:
+        - $ref: '#/components/parameters/ID'
+      responses:
+        '204':
+          description: Papel deletado
+
+  /api/v1/admin/permissions:
+    get:
+      summary: Listar permissões disponíveis
+      operationId: listAdminPermissions
+      tags: [admin]
+      responses:
+        '200':
+          description: Catálogo de permissões
+          content:
+            application/json:
+              schema:
+                type: object:
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Permission'
+
+  /api/v1/overview:
+    get:
+      summary: Dashboard overview
+      operationId: getOverview
+      tags: [overview]
+      responses:
+        '200':
+          description: Visão geral do sistema
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  clusters:
+                    type: integer
+                  vms:
+                    type: integer
+                  containers:
+                    type: integer
+                  hosts:
+                    type: integer
+
+  /api/v1/modules:
+    get:
+      summary: Listar módulos disponíveis
+      operationId: listModules
+      tags: [overview]
+      responses:
+        '200':
+          description: Módulos habilitados
+
+  /api/v1/integrations:
+    get:
+      summary: Listar integrações
+      operationId: listIntegrations
+      tags: [overview]
+      responses:
+        '200':
+          description: Integrações configuradas
+    post:
+      summary: Criar integração
+      operationId: createIntegration
+      tags: [overview]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, type]
+              properties:
+                name:
+                  type: string
+                type:
+                  type: string
+                  enum: [proxmox, docker, kubernetes, github, cloudflare]
+      responses:
+        '201':
+          description: Integração criada
+
+  /api/v1/audit:
+    get:
+      summary: Listar audit log
+      operationId: listAudit
+      tags: [audit]
+      responses:
+        '200':
+          description: Registros de auditoria
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AuditRecord'
+
+  /api/v1/security/evaluate:
+    post:
+      summary: Avaliar policy para ação crítica
+      operationId: evaluatePolicy
+      tags: [security]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PolicyRequest'
+      responses:
+        '200':
+          description: Ação permitida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PolicyDecision'
+        '403':
+          description: Ação bloqueada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PolicyDecision'
+
+  /api/v1/docker/containers:
+    get:
+      summary: Listar containers Docker
+      operationId: listDockerContainers
+      tags: [docker]
+      responses:
+        '200':
+          description: Lista de containers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DockerContainer'
+
+  /api/v1/docker/containers/{id}/{action}:
+    post:
+      summary: Executar ação em container
+      operationId: dockerContainerAction
+      tags: [docker]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: action
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [start, stop, restart, kill, remove, pause, unpause]
+      requestBody:
+        description: Headers para ações destrutivas (stop, kill, remove, restart)
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '202':
+          description: Ação aceita
+        '403':
+          description: Ação bloqueada por policy
+
+  /api/v1/docker/containers/{id}/exec:
+    post:
+      summary: Executar comando em container
+      operationId: dockerContainerExec
+      tags: [docker]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: X-Confirmation
+          in: header
+          required: true
+          schema:
+            type: string
+            example: "yes"
+        - name: X-TOTP-Code
+          in: header
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [command]
+              properties:
+                command:
+                  type: array
+                  items:
+                    type: string
+                  example: ["ls", "-la", "/app"]
+      responses:
+        '200':
+          description: Comando executado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  output:
+                    type: string
+        '403':
+          description: Ação bloqueada por policy
+
+  /api/v1/kubernetes/overview:
+    get:
+      summary: Overview Kubernetes clusters
+      operationId: kubernetesOverview
+      tags: [kubernetes]
+      responses:
+        '200':
+          description: Overview clusters
+
+  /api/v1/kubernetes/namespaces/{namespace}/pods/{pod}/exec:
+    post:
+      summary: Exec em pod Kubernetes
+      operationId: kubernetesPodExec
+      tags: [kubernetes]
+      parameters:
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: pod
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: X-Confirmation
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-TOTP-Code
+          in: header
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [container, command]
+              properties:
+                container:
+                  type: string
+                command:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Comando executado
+        '403':
+          description: Ação bloqueada por policy
+
+  /api/v1/terraform/runs:
+    get:
+      summary: Listar Terraform runs
+      operationId: listTerraformRuns
+      tags: [terraform]
+      responses:
+        '200':
+          description: Lista de runs
+
+  /api/v1/terraform/destroy:
+    post:
+      summary: Terraform destroy
+      operationId: terraformDestroy
+      tags: [terraform]
+      parameters:
+        - name: X-Confirmation
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-TOTP-Code
+          in: header
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workspace]
+              properties:
+                workspace:
+                  type: string
+      responses:
+        '202':
+          description: Destroy aceito
+        '403':
+          description: Ação bloqueada por policy
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: session
+
+  parameters:
+    ID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+
+  schemas:
+    Session:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        expires_at:
+          type: string
+          format: date-time
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        totp_enabled:
+          type: boolean
+        disabled_at:
+          type: string
+          format: date-time
+          nullable: true
+        roles:
+          type: array
+          items:
+            type: string
+        permissions:
+          type: array
+          items:
+            type: string
+
+    CreateUserRequest:
+      type: object
+      required: [email, password, display_name, role_ids]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 12
+        display_name:
+          type: string
+        role_ids:
+          type: array
+          items:
+            type: string
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        email:
+          type: string
+        display_name:
+          type: string
+        disabled:
+          type: boolean
+        role_ids:
+          type: array
+          items:
+            type: string
+
+    Role:
+      type: object
+      properties:
+        id:
+          type: string
+        slug:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        permissions:
+          type: array
+          items:
+            type: string
+        user_count:
+          type: integer
+
+    CreateRoleRequest:
+      type: object
+      required: [slug, name, permission_ids]
+      properties:
+        slug:
+          type: string
+          pattern: '^[a-z][a-z0-9-]{2,47}$'
+        name:
+          type: string
+        description:
+          type: string
+        permission_ids:
+          type: array
+          items:
+            type: string
+
+    UpdateRoleRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        permission_ids:
+          type: array
+          items:
+            type: string
+
+    Permission:
+      type: object
+      properties:
+        id:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        risk:
+          type: string
+          enum: [safe, dangerous, critical]
+
+    PolicyRequest:
+      type: object
+      required: [action, scope, target_name]
+      properties:
+        action:
+          type: string
+          example: "terraform_destroy"
+        scope:
+          type: string
+          enum: [local, remote]
+        target_name:
+          type: string
+          example: "terraform/workspace/prod"
+        confirmation:
+          type: string
+          example: "yes"
+        totp_code:
+          type: string
+
+    PolicyDecision:
+      type: object
+      properties:
+        allowed:
+          type: boolean
+        risk:
+          type: string
+          enum: [safe, dangerous, critical]
+        reason:
+          type: string
+        requires_confirmation:
+          type: boolean
+        requires_totp:
+          type: boolean
+
+    AuditRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        actor_id:
+          type: string
+        action:
+          type: string
+        scope:
+          type: string
+        resource_type:
+          type: string
+        target_name:
+          type: string
+        risk:
+          type: string
+        decision:
+          type: string
+          enum: [allowed, denied]
+        reason:
+          type: string
+        source_ip:
+          type: string
+        request_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    DockerContainer:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        image:
+          type: string
+        state:
+          type: string
+        status:
+          type: string
+        created:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+
+  responses:
+    BadRequest:
+      description: Requisição inválida
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    
+    Unauthorized:
+      description: Não autenticado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    
+    Forbidden:
+      description: Acesso negado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
