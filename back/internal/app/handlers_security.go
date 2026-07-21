@@ -25,6 +25,36 @@ func (a *App) evaluatePolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, status, decision)
 }
+
+// enforcePolicy avalia uma ação crítica usando o security engine e registra no audit log.
+// Retorna true se permitido, false se bloqueado (já escreve resposta 403).
+// Uso: if !a.enforcePolicy(w, r, security.ActionRequest{...}) { return }
+func (a *App) enforcePolicy(w http.ResponseWriter, r *http.Request, req security.ActionRequest) bool {
+	session := currentSession(r)
+	if session.User.TOTPEnabled {
+		verified, _ := a.auth.VerifyTOTP(r.Context(), session.User.ID, req.TOTPCode)
+		req.TOTPVerified = verified
+	}
+	decision := a.policy.Evaluate(req)
+	_ = a.audit.Append(r.Context(), auditrepo.Record{
+		ActorID:      session.User.ID,
+		Action:       req.Action,
+		Scope:        req.Scope,
+		ResourceType: "action_guard",
+		TargetName:   req.TargetName,
+		Risk:         decision.Risk,
+		Decision:     map[bool]string{true: "allowed", false: "denied"}[decision.Allowed],
+		Reason:       decision.Reason,
+		RequestID:    requestID(r.Context()),
+		SourceIP:     remoteIP(r),
+	})
+	if !decision.Allowed {
+		writeJSON(w, 403, decision)
+		return false
+	}
+	return true
+}
+
 func (a *App) listAudit(w http.ResponseWriter, r *http.Request) {
 	items, err := a.audit.List(r.Context(), 100)
 	if err != nil {

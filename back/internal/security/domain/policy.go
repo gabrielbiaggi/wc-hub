@@ -51,8 +51,9 @@ func NewEngine(commands []string) *Engine {
 }
 
 var destructiveActions = map[string]struct{}{
-	"terminate": {}, "shutdown": {}, "destroy": {}, "reboot": {}, "poweroff": {},
-	"delete_host": {}, "delete_vm": {}, "terraform_destroy": {}, "wipe_disk": {},
+	"terminate": {}, "shutdown": {}, "destroy": {}, "reboot": {}, "poweroff": {}, "stop": {},
+	"delete_host": {}, "delete_vm": {}, "delete_snapshot": {}, "rollback_snapshot": {},
+	"terraform_destroy": {}, "wipe_disk": {},
 }
 
 var destructiveCommands = map[string]struct{}{

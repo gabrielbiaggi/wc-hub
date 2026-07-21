@@ -97,6 +97,22 @@ func (a *App) proxmoxPowerAction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "proxmox_node_not_found", "The Proxmox node was not found in configured clusters.")
 		return
 	}
+
+	// Self-protection: avaliar ações destrutivas (shutdown, reboot) antes de executar
+	actionLower := strings.ToLower(action)
+	if actionLower == "shutdown" || actionLower == "reboot" || actionLower == "stop" {
+		targetName := target.ID() + "/" + node + "/" + kind + "/" + strconv.Itoa(vmid)
+		if !a.enforcePolicy(w, r, security.ActionRequest{
+			Action:       actionLower,
+			Scope:        security.ScopeRemote,
+			TargetName:   targetName,
+			Confirmation: r.Header.Get("X-Confirmation"),
+			TOTPCode:     r.Header.Get("X-TOTP-Code"),
+		}) {
+			return
+		}
+	}
+
 	if err = target.PowerAction(r.Context(), node, kind, vmid, action); err != nil {
 		writeError(w, 502, "proxmox_action_failed", "Proxmox rejeitou a ação de energia: "+err.Error())
 		return
@@ -186,6 +202,19 @@ func (a *App) proxmoxDeleteGuest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "proxmox_cluster_not_found", "O cluster Proxmox não foi encontrado.")
 		return
 	}
+
+	// Self-protection: avaliar ação antes de executar
+	targetName := cluster + "/" + node + "/" + kind + "/" + strconv.Itoa(vmid)
+	if !a.enforcePolicy(w, r, security.ActionRequest{
+		Action:       "delete_vm",
+		Scope:        security.ScopeRemote,
+		TargetName:   targetName,
+		Confirmation: r.Header.Get("X-Confirmation"),
+		TOTPCode:     r.Header.Get("X-TOTP-Code"),
+	}) {
+		return
+	}
+
 	if err = target.DeleteGuest(r.Context(), node, kind, vmid, r.URL.Query().Get("purge") == "true"); err != nil {
 		writeError(w, 502, "proxmox_delete_failed", "O Proxmox rejeitou a exclusão: "+err.Error())
 		return

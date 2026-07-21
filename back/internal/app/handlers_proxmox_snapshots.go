@@ -2,6 +2,7 @@ package app
 
 import (
 	proxmox "github.com/webcreations/wc-hub/back/internal/adapters/proxmox"
+	security "github.com/webcreations/wc-hub/back/internal/security/domain"
 	"net/http"
 	"strconv"
 )
@@ -52,7 +53,21 @@ func (a *App) proxmoxDeleteSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_snapshot_target", "Destino inválido.")
 		return
 	}
-	if e := c.DeleteGuestSnapshot(r.Context(), n, k, id, r.PathValue("name")); e != nil {
+
+	// Self-protection: snapshots são críticos para recovery
+	snapshotName := r.PathValue("name")
+	targetName := c.ID() + "/" + n + "/" + k + "/" + strconv.Itoa(id) + "/snapshot/" + snapshotName
+	if !a.enforcePolicy(w, r, security.ActionRequest{
+		Action:       "delete_snapshot",
+		Scope:        security.ScopeRemote,
+		TargetName:   targetName,
+		Confirmation: r.Header.Get("X-Confirmation"),
+		TOTPCode:     r.Header.Get("X-TOTP-Code"),
+	}) {
+		return
+	}
+
+	if e := c.DeleteGuestSnapshot(r.Context(), n, k, id, snapshotName); e != nil {
 		writeError(w, 502, "proxmox_snapshot_delete_failed", e.Error())
 		return
 	}
@@ -64,7 +79,21 @@ func (a *App) proxmoxRollbackSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_snapshot_target", "Destino inválido.")
 		return
 	}
-	if e := c.RollbackGuestSnapshot(r.Context(), n, k, id, r.PathValue("name")); e != nil {
+
+	// Self-protection: rollback pode causar perda de dados
+	snapshotName := r.PathValue("name")
+	targetName := c.ID() + "/" + n + "/" + k + "/" + strconv.Itoa(id) + "/snapshot/" + snapshotName
+	if !a.enforcePolicy(w, r, security.ActionRequest{
+		Action:       "rollback_snapshot",
+		Scope:        security.ScopeRemote,
+		TargetName:   targetName,
+		Confirmation: r.Header.Get("X-Confirmation"),
+		TOTPCode:     r.Header.Get("X-TOTP-Code"),
+	}) {
+		return
+	}
+
+	if e := c.RollbackGuestSnapshot(r.Context(), n, k, id, snapshotName); e != nil {
 		writeError(w, 502, "proxmox_snapshot_rollback_failed", e.Error())
 		return
 	}
