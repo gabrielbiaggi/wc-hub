@@ -19,6 +19,7 @@ Este documento substitui afirmações absolutas de prontidão presentes nos rela
 
 ## Limites da evidência
 
+- O workflow remoto criado no GitHub foi recusado antes de executar qualquer step com a anotação `The job was not started because your account is locked due to a billing issue.`. Os mesmos gates foram executados localmente, mas a conta GitHub precisa ser regularizada para fornecer evidência remota e permitir branch protection efetiva.
 - Os testes de migrations existentes validam estrutura, mas não substituem um ciclo real clean/upgrade em PostgreSQL. Esse ciclo deve rodar no ambiente de staging.
 - O script de backup valida a geração e leitura do archive; um restore destrutivo deve usar um banco descartável separado.
 - A cobertura OpenAPI garante presença de operações. Schemas e exemplos detalhados ainda podem ser enriquecidos sem alterar o contrato de cobertura.
