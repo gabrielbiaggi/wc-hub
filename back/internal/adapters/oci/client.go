@@ -260,19 +260,19 @@ func (c *Client) Snapshot(ctx context.Context) (Snapshot, error) {
 		}
 		computeClient, clientErr := core.NewComputeClientWithConfigurationProvider(c.provider)
 		if clientErr == nil {
-			clientErr = computeClient.SetRegion(regionName)
+			computeClient.SetRegion(regionName)
 		}
 		networkClient, networkErr := core.NewVirtualNetworkClientWithConfigurationProvider(c.provider)
 		if networkErr == nil {
-			networkErr = networkClient.SetRegion(regionName)
+			networkClient.SetRegion(regionName)
 		}
 		databaseClient, databaseErr := database.NewDatabaseClientWithConfigurationProvider(c.provider)
 		if databaseErr == nil {
-			databaseErr = databaseClient.SetRegion(regionName)
+			databaseClient.SetRegion(regionName)
 		}
 		blockstorageClient, blockErr := core.NewBlockstorageClientWithConfigurationProvider(c.provider)
 		if blockErr == nil {
-			blockErr = blockstorageClient.SetRegion(regionName)
+			blockstorageClient.SetRegion(regionName)
 		}
 		if clientErr != nil || networkErr != nil || databaseErr != nil || blockErr != nil {
 			return Snapshot{}, fmt.Errorf("configure OCI regional clients for %s: %w", regionName, errors.Join(clientErr, networkErr, databaseErr, blockErr))
@@ -468,9 +468,7 @@ func (c *Client) LaunchInstance(ctx context.Context, input LaunchInstanceInput) 
 		return "", fmt.Errorf("create OCI compute client: %w", err)
 	}
 	if region := strings.TrimSpace(input.Region); region != "" {
-		if err := client.SetRegion(region); err != nil {
-			return "", fmt.Errorf("configure OCI compute region %s: %w", region, err)
-		}
+		client.SetRegion(region)
 	}
 	metadata := map[string]string{}
 	if strings.TrimSpace(input.SSHAuthorizedKey) != "" {
@@ -501,9 +499,7 @@ func (c *Client) CreateAutonomousDatabase(ctx context.Context, input CreateAuton
 		return "", err
 	}
 	if region := strings.TrimSpace(input.Region); region != "" {
-		if err := client.SetRegion(region); err != nil {
-			return "", fmt.Errorf("configure OCI database region %s: %w", region, err)
-		}
+		client.SetRegion(region)
 	}
 	details := database.CreateAutonomousDatabaseDetails{CompartmentId: common.String(input.CompartmentID), DisplayName: common.String(input.DisplayName), DbName: common.String(input.DBName), AdminPassword: common.String(input.AdminPassword), DbWorkload: workload, IsFreeTier: common.Bool(input.FreeTier), IsAutoScalingEnabled: common.Bool(input.AutoScaling), LicenseModel: database.CreateAutonomousDatabaseBaseLicenseModelLicenseIncluded}
 	if input.ComputeCount > 0 {
@@ -540,9 +536,7 @@ func (c *Client) InstanceAction(ctx context.Context, instanceID, action, region 
 		return fmt.Errorf("create OCI compute client: %w", err)
 	}
 	if region = strings.TrimSpace(region); region != "" {
-		if err := client.SetRegion(region); err != nil {
-			return fmt.Errorf("configure OCI compute region %s: %w", region, err)
-		}
+		client.SetRegion(region)
 	}
 	_, err = client.InstanceAction(ctx, core.InstanceActionRequest{InstanceId: common.String(instanceID), Action: mapped})
 	if err != nil {
