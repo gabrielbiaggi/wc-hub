@@ -22,6 +22,8 @@ import {
   Square,
   Trash2,
   Undo2,
+  FileText,
+  Monitor,
 } from "lucide-vue-next";
 import Button from "@/components/ui/Button.vue";
 import StatusBadge from "@/components/ui/StatusBadge.vue";
@@ -29,20 +31,24 @@ import ActionGuardModal from "@/components/ActionGuardModal.vue";
 import { usePermissions } from "@/composables/usePermissions";
 import {
   cloneProxmoxGuest,
+  convertToProxmoxTemplate,
   createProxmoxBackup,
   createProxmoxFirewallRule,
   createProxmoxLXC,
   createProxmoxQEMU,
   createProxmoxSnapshot,
+  createProxmoxVNCProxyTicket,
   deleteProxmoxFirewallRule,
   deleteProxmoxGuest,
   deleteProxmoxSnapshot,
+  deleteProxmoxStorageContent,
   getJobs,
   getProxmoxGuestFirewallRules,
   getProxmoxInventory,
   getProxmoxNodeBackups,
   getProxmoxNodeNetwork,
   getProxmoxSnapshots,
+  getProxmoxStorageContent,
   getProxmoxSummary,
   migrateProxmoxGuest,
   resizeProxmoxDisk,
@@ -57,6 +63,8 @@ import {
   type ProxmoxNetworkInterface,
   type ProxmoxQEMUInput,
   type ProxmoxSnapshot,
+  type ProxmoxStorageContentItem,
+  type ProxmoxVNCTicket,
   buildActionHeaders,
 } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api_error";
@@ -467,6 +475,77 @@ const createBackup = useMutation({
     );
   },
 });
+
+const storageContentTarget = ref<{ cluster: string; node: string; storage: string } | null>(null);
+const storageContentQuery = useQuery({
+  queryKey: computed(() => [
+    "proxmox-storage-content",
+    storageContentTarget.value?.cluster,
+    storageContentTarget.value?.node,
+    storageContentTarget.value?.storage,
+  ]),
+  queryFn: () => {
+    const t = storageContentTarget.value;
+    if (!t) return Promise.resolve([]);
+    return getProxmoxStorageContent(t.cluster, t.node, t.storage);
+  },
+  enabled: computed(() => !!storageContentTarget.value),
+  refetchInterval: false,
+});
+const deleteStorageContentMut = useMutation({
+  mutationFn: (volid: string) => {
+    const t = storageContentTarget.value;
+    if (!t) throw new Error("Storage não selecionado");
+    return deleteProxmoxStorageContent(t.cluster, t.node, t.storage, volid);
+  },
+  onSuccess: () => {
+    setTimeout(
+      () => client.invalidateQueries({ queryKey: ["proxmox-storage-content"] }),
+      800,
+    );
+  },
+});
+const openStorageContent = (cluster: string, node: string, storage: string) => {
+  storageContentTarget.value = { cluster, node, storage };
+};
+
+const convertTemplateMut = useMutation({
+  mutationFn: (guest: ProxmoxGuest) =>
+    convertToProxmoxTemplate(guest.cluster, guest.node, guest.vmid),
+  onSuccess: () => {
+    setTimeout(
+      () => client.invalidateQueries({ queryKey: ["proxmox-inventory"] }),
+      1500,
+    );
+  },
+});
+const convertGuestToTemplate = (guest: ProxmoxGuest) => {
+  if (
+    window.confirm(
+      `Converter ${guest.type.toUpperCase()} ${guest.vmid} (${guest.name}) em Template?\n\nEsta ação é irreversível e tornará a VM um modelo somente leitura.`,
+    )
+  ) {
+    convertTemplateMut.mutate(guest);
+  }
+};
+
+const vncTicket = ref<ProxmoxVNCTicket | null>(null);
+const vncModalGuest = ref<ProxmoxGuest | null>(null);
+const vncTicketMut = useMutation({
+  mutationFn: (guest: ProxmoxGuest) =>
+    createProxmoxVNCProxyTicket(guest.cluster, guest.node, guest.type, guest.vmid),
+  onSuccess: (data, guest) => {
+    vncModalGuest.value = guest;
+    vncTicket.value = data;
+  },
+});
+const openVNCProxy = (guest: ProxmoxGuest) => {
+  vncTicketMut.mutate(guest);
+};
+const closeVNCModal = () => {
+  vncModalGuest.value = null;
+  vncTicket.value = null;
+};
 const lastJob = computed(() =>
   jobs.data.value?.find((job) => job.kind === "proxmox.sync"),
 );
@@ -1072,7 +1151,15 @@ const backupGuest = (guest: ProxmoxGuest) => {
                 </p>
               </div>
               <div class="flex flex-wrap justify-end gap-2">
-                <Button variant="outline" @click="openSnapshots(guest)"
+                <Button variant="outline" @click="openVNCProxy(guest)"
+                  ><Monitor class="h-3.5 w-3.5" />VNC Console</Button
+                ><Button
+                  v-if="guest.type === 'qemu'"
+                  variant="outline"
+                  :disabled="!canManage || convertTemplateMut.isPending.value"
+                  @click="convertGuestToTemplate(guest)"
+                  ><FileText class="h-3.5 w-3.5" />Template</Button
+                ><Button variant="outline" @click="openSnapshots(guest)"
                   ><Camera class="h-3.5 w-3.5" />Snapshots</Button
                 ><Button variant="outline" @click="openFirewall(guest)"
                   ><Shield class="h-3.5 w-3.5" />Firewall</Button
@@ -1156,16 +1243,21 @@ const backupGuest = (guest: ProxmoxGuest) => {
                 :status="store.active ? 'healthy' : 'critical'"
                 :label="store.status"
               />
-              <div class="font-mono text-xs text-muted">
-                {{ formatBytes(store.used) }} /
-                {{ formatBytes(store.total) }} ({{
-                  store.total
-                    ? ((store.used / store.total) * 100).toFixed(1)
-                    : 0
-                }}%)
-                <p class="mt-1 text-emerald-300">
-                  Disponível {{ formatBytes(store.avail) }}
-                </p>
+              <div class="flex flex-col items-end justify-between gap-2">
+                <div class="font-mono text-xs text-muted text-right">
+                  {{ formatBytes(store.used) }} /
+                  {{ formatBytes(store.total) }} ({{
+                    store.total
+                      ? ((store.used / store.total) * 100).toFixed(1)
+                      : 0
+                  }}%)
+                  <p class="mt-1 text-emerald-300">
+                    Disponível {{ formatBytes(store.avail) }}
+                  </p>
+                </div>
+                <Button variant="outline" @click="openStorageContent(store.cluster, store.node, store.storage)">
+                  <HardDrive class="h-3.5 w-3.5" />Ver Conteúdo
+                </Button>
               </div>
             </div>
           </div>
@@ -1747,5 +1839,76 @@ const backupGuest = (guest: ProxmoxGuest) => {
       @cancel="guardedAction = null"
       @confirm="confirmGuardedAction"
     />
+
+    <!-- Datastore Content Modal -->
+    <div
+      v-if="storageContentTarget"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4"
+      @click.self="storageContentTarget = null"
+    >
+      <article class="w-full max-w-4xl max-h-[85vh] flex flex-col rounded-xl border border-line bg-panel shadow-2xl">
+        <header class="flex items-center justify-between border-b border-line p-5">
+          <div>
+            <h2 class="text-base font-semibold text-white">Conteúdo do Datastore · {{ storageContentTarget.storage }}</h2>
+            <p class="mt-1 font-mono text-xs text-muted">{{ storageContentTarget.cluster }} / {{ storageContentTarget.node }}</p>
+          </div>
+          <Button variant="outline" size="sm" @click="storageContentTarget = null">Fechar</Button>
+        </header>
+        <div class="flex-1 overflow-y-auto p-5">
+          <div v-if="storageContentQuery.isLoading.value" class="p-8 text-center text-sm text-muted">Carregando conteúdo do storage...</div>
+          <div v-else-if="storageContentQuery.isError.value" class="p-8 text-center text-sm text-danger">Falha ao carregar conteúdo do storage.</div>
+          <div v-else-if="!storageContentQuery.data.value?.length" class="p-8 text-center text-sm text-muted">Nenhum arquivo encontrado neste storage.</div>
+          <div v-else class="divide-y divide-line/60">
+            <div v-for="item in storageContentQuery.data.value" :key="item.volid" class="flex flex-col gap-2 py-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p class="font-mono text-xs font-medium text-slate-200">{{ item.volid }}</p>
+                <p class="mt-1 font-mono text-[10px] text-muted">
+                  Tipo: <span class="text-signal">{{ item.content }}</span> · Tamanho: {{ formatBytes(item.size) }} {{ item.format ? '· Formato: ' + item.format : '' }}
+                </p>
+                <p v-if="item.notes" class="mt-1 text-xs text-slate-400">{{ item.notes }}</p>
+              </div>
+              <Button
+                variant="danger"
+                size="sm"
+                :disabled="!canManage || deleteStorageContentMut.isPending.value"
+                @click="deleteStorageContentMut.mutate(item.volid)"
+              >
+                <Trash2 class="h-3.5 w-3.5" />Excluir
+              </Button>
+            </div>
+          </div>
+        </div>
+      </article>
+    </div>
+
+    <!-- VNC Proxy Ticket Modal -->
+    <div
+      v-if="vncModalGuest && vncTicket"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4"
+      @click.self="closeVNCModal"
+    >
+      <article class="w-full max-w-lg rounded-xl border border-line bg-panel p-6 shadow-2xl">
+        <header class="flex items-center justify-between border-b border-line pb-4">
+          <div>
+            <h2 class="text-base font-semibold text-white">VNC Proxy Ticket Nativo</h2>
+            <p class="mt-1 font-mono text-xs text-muted">{{ vncModalGuest.type.toUpperCase() }} {{ vncModalGuest.vmid }} ({{ vncModalGuest.name }})</p>
+          </div>
+          <Button variant="outline" size="sm" @click="closeVNCModal">Fechar</Button>
+        </header>
+        <div class="mt-5 space-y-3 font-mono text-xs">
+          <div class="rounded-lg border border-line/60 bg-slate-950 p-3">
+            <span class="text-muted">Porta Proxmox VNC:</span>
+            <p class="mt-1 text-signal font-semibold">{{ vncTicket.port }}</p>
+          </div>
+          <div class="rounded-lg border border-line/60 bg-slate-950 p-3">
+            <span class="text-muted">Ticket VNC (PVE Auth):</span>
+            <p class="mt-1 break-all text-xs text-slate-300">{{ vncTicket.ticket }}</p>
+          </div>
+          <p class="text-[10px] text-muted leading-4">
+            Ticket gerado com sucesso pela API do Proxmox VE. Válido para WebSocket NoVNC nativo na porta {{ vncTicket.port }}.
+          </p>
+        </div>
+      </article>
+    </div>
   </div>
 </template>

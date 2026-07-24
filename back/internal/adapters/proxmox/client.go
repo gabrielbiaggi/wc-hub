@@ -767,6 +767,123 @@ func consoleSameOrigin(r *http.Request) bool {
 	parsed, err := url.Parse(origin)
 	return err == nil && strings.EqualFold(parsed.Host, r.Host)
 }
+type StorageContentItem struct {
+	VolID   string `json:"volid"`
+	Content string `json:"content"`
+	Size    int64  `json:"size"`
+	Format  string `json:"format,omitempty"`
+	Ctime   int64  `json:"ctime,omitempty"`
+	Notes   string `json:"notes,omitempty"`
+}
+
+func (c *Client) GetStorageContent(ctx context.Context, node, storage string) ([]StorageContentItem, error) {
+	if !nodeNamePattern.MatchString(node) || storage == "" {
+		return nil, fmt.Errorf("invalid storage content parameters")
+	}
+	var out []StorageContentItem
+	err := c.get(ctx, fmt.Sprintf("/api2/json/nodes/%s/storage/%s/content", url.PathEscape(node), url.PathEscape(storage)), &out)
+	return out, err
+}
+
+func (c *Client) DeleteStorageContent(ctx context.Context, node, storage, volumeID string) error {
+	if !nodeNamePattern.MatchString(node) || storage == "" || volumeID == "" {
+		return fmt.Errorf("invalid storage content delete parameters")
+	}
+	return c.request(ctx, http.MethodDelete, fmt.Sprintf("/api2/json/nodes/%s/storage/%s/content/%s", url.PathEscape(node), url.PathEscape(storage), url.PathEscape(volumeID)), nil)
+}
+
+type TaskStatus struct {
+	UPID       string `json:"upid"`
+	Node       string `json:"node"`
+	Status     string `json:"status"`
+	ExitStatus string `json:"exitstatus,omitempty"`
+	PID        int    `json:"pid,omitempty"`
+	StartTime  int64  `json:"starttime,omitempty"`
+}
+
+func (c *Client) GetTaskStatus(ctx context.Context, node, upid string) (*TaskStatus, error) {
+	if !nodeNamePattern.MatchString(node) || upid == "" {
+		return nil, fmt.Errorf("invalid task status parameters")
+	}
+	var status TaskStatus
+	err := c.get(ctx, fmt.Sprintf("/api2/json/nodes/%s/tasks/%s/status", url.PathEscape(node), url.PathEscape(upid)), &status)
+	if err != nil {
+		return nil, err
+	}
+	return &status, nil
+}
+
+type TaskLogLine struct {
+	N int    `json:"n"`
+	T string `json:"t"`
+}
+
+func (c *Client) GetTaskLog(ctx context.Context, node, upid string) ([]string, error) {
+	if !nodeNamePattern.MatchString(node) || upid == "" {
+		return nil, fmt.Errorf("invalid task log parameters")
+	}
+	var lines []TaskLogLine
+	err := c.get(ctx, fmt.Sprintf("/api2/json/nodes/%s/tasks/%s/log", url.PathEscape(node), url.PathEscape(upid)), &lines)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(lines))
+	for _, l := range lines {
+		out = append(out, l.T)
+	}
+	return out, nil
+}
+
+func (c *Client) ConvertToTemplate(ctx context.Context, node string, vmid int) error {
+	if !nodeNamePattern.MatchString(node) || vmid < 1 {
+		return fmt.Errorf("invalid guest template parameters")
+	}
+	return c.requestForm(ctx, http.MethodPost, fmt.Sprintf("/api2/json/nodes/%s/qemu/%d/template", url.PathEscape(node), vmid), nil, nil)
+}
+
+type AgentInterface struct {
+	Name            string `json:"name"`
+	HardwareAddress string `json:"hardware-address,omitempty"`
+	IPAddresses     []struct {
+		IPAddressType string `json:"ip-address-type"`
+		IPAddress     string `json:"ip-address"`
+		Prefix        int    `json:"prefix"`
+	} `json:"ip-addresses,omitempty"`
+}
+
+func (c *Client) GetQEMUAgentInterfaces(ctx context.Context, node string, vmid int) ([]AgentInterface, error) {
+	if !nodeNamePattern.MatchString(node) || vmid < 1 {
+		return nil, fmt.Errorf("invalid QEMU agent parameters")
+	}
+	var result struct {
+		Result []AgentInterface `json:"result"`
+	}
+	if err := c.get(ctx, fmt.Sprintf("/api2/json/nodes/%s/qemu/%d/agent/network-get-interfaces", url.PathEscape(node), vmid), &result); err != nil {
+		return nil, err
+	}
+	return result.Result, nil
+}
+
+type VNCTicket struct {
+	Ticket string `json:"ticket"`
+	Port   string `json:"port"`
+	UPID   string `json:"upid"`
+	Cert   string `json:"cert,omitempty"`
+	User   string `json:"user,omitempty"`
+}
+
+func (c *Client) CreateVNCProxy(ctx context.Context, node, kind string, vmid int) (*VNCTicket, error) {
+	if !nodeNamePattern.MatchString(node) || (kind != "qemu" && kind != "lxc") || vmid < 1 {
+		return nil, fmt.Errorf("invalid vnc proxy parameters")
+	}
+	var ticket VNCTicket
+	err := c.requestForm(ctx, http.MethodPost, fmt.Sprintf("/api2/json/nodes/%s/%s/%d/vncproxy", url.PathEscape(node), kind, vmid), url.Values{"websocket": {"1"}}, &ticket)
+	if err != nil {
+		return nil, err
+	}
+	return &ticket, nil
+}
+
 func (c *Client) get(ctx context.Context, path string, destination any) error {
 	return c.request(ctx, http.MethodGet, path, destination)
 }

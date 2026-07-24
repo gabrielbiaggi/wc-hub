@@ -61,6 +61,7 @@ import (
 	terminalrepo "github.com/webcreations/wc-hub/back/internal/terminal/repository"
 	terraformapp "github.com/webcreations/wc-hub/back/internal/terraformapp"
 	vncapp "github.com/webcreations/wc-hub/back/internal/vncapp"
+	workers "github.com/webcreations/wc-hub/back/internal/workers"
 )
 
 type contextKey string
@@ -382,8 +383,13 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/firewall/rules", a.protect("proxmox.read", a.proxmoxGuestFirewallRules))
 	mux.HandleFunc("POST /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/firewall/rules", a.protect("proxmox.manage", a.proxmoxCreateFirewallRule))
 	mux.HandleFunc("DELETE /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/firewall/rules/{pos}", a.protect("proxmox.manage", a.proxmoxDeleteFirewallRule))
-	mux.HandleFunc("GET /api/v1/proxmox/nodes/{node}/backups", a.protect("proxmox.read", a.proxmoxNodeBackups))
-	mux.HandleFunc("POST /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/backup", a.protect("proxmox.manage", a.proxmoxCreateBackup))
+	mux.HandleFunc("GET /api/v1/proxmox/nodes/{node}/storage/{storage}/content", a.protect("proxmox.read", a.proxmoxStorageContent))
+	mux.HandleFunc("DELETE /api/v1/proxmox/nodes/{node}/storage/{storage}/content", a.protect("proxmox.manage", a.proxmoxDeleteStorageContent))
+	mux.HandleFunc("GET /api/v1/proxmox/nodes/{node}/tasks/{upid}/status", a.protect("proxmox.read", a.proxmoxTaskStatus))
+	mux.HandleFunc("GET /api/v1/proxmox/nodes/{node}/tasks/{upid}/log", a.protect("proxmox.read", a.proxmoxTaskLog))
+	mux.HandleFunc("POST /api/v1/proxmox/nodes/{node}/qemu/{vmid}/template", a.protect("proxmox.manage", a.proxmoxConvertToTemplate))
+	mux.HandleFunc("GET /api/v1/proxmox/nodes/{node}/qemu/{vmid}/agent/interfaces", a.protect("proxmox.read", a.proxmoxGuestAgentInterfaces))
+	mux.HandleFunc("POST /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/vncproxy", a.protect("proxmox.read", a.proxmoxVNCProxyTicket))
 	mux.HandleFunc("GET /api/v1/jobs", a.protect("jobs.read", a.listJobs))
 	mux.HandleFunc("POST /api/v1/jobs", a.protect("jobs.manage", a.createJob))
 	mux.HandleFunc("POST /api/v1/agents/hosts/{host_id}/token", a.protect("agents.manage", a.provisionAgentToken))
@@ -419,6 +425,8 @@ func (a *App) Handler() http.Handler {
 		session, _ := ctx.Value(sessionContextKey).(authdomain.Session)
 		_ = a.audit.Append(ctx, auditrepo.Record{ActorID: session.User.ID, Action: action, Scope: security.ScopeRemote, ResourceType: "power_target", TargetName: target, Risk: security.RiskCritical, Decision: "allowed", Reason: reason})
 	})
+	workerRepo := workers.NewPostgresRepository(a.db)
+	workers.NewBootstrapHandler(workerRepo).MountRoutes(mux, a.protect)
 	return a.middleware(mux)
 }
 
@@ -481,7 +489,7 @@ func (a *App) middleware(next http.Handler) http.Handler {
 		if a.cfg.Environment == "development" {
 			w.Header().Set("Access-Control-Allow-Origin", a.cfg.PublicURL)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-CSRF-Token")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-CSRF-Token, X-Confirmation, X-TOTP-Code")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		}
 		if r.Method == "OPTIONS" {

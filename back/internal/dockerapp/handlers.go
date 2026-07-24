@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
+	"time"
 
 	dockeradapter "github.com/webcreations/wc-hub/back/internal/adapters/docker"
 )
@@ -203,3 +205,139 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 func writeError(w http.ResponseWriter, status int, code, message string) {
 	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": message}})
 }
+
+type StreamController interface {
+	PullImageStream(ctx context.Context, image string, logWriter func(string)) error
+	InspectContainer(ctx context.Context, id string) (*dockeradapter.ContainerInspect, error)
+	CloneStack(ctx context.Context, containerID, suffix string) (string, error)
+}
+
+func (h *Handler) UpdateStream(w http.ResponseWriter, r *http.Request) {
+	if !h.available(w) {
+		return
+	}
+	client, ok := h.reader.(StreamController)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "docker_stream_unavailable", "Docker streaming client is not configured.")
+		return
+	}
+
+	id := r.PathValue("id")
+	targetImage := r.URL.Query().Get("image")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "sse_unsupported", "Streaming SSE não é suportado pelo servidor.")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	sendLog := func(text, msgType string) {
+		payload, _ := json.Marshal(map[string]string{"text": text, "type": msgType})
+		_, _ = w.Write([]byte("event: log\ndata: " + string(payload) + "\n\n"))
+		flusher.Flush()
+	}
+
+	sendLog("Iniciando processo de auto-update do container "+id+"...", "info")
+
+	inspect, err := client.InspectContainer(r.Context(), id)
+	if err != nil {
+		sendLog("Falha ao inspecionar container: "+err.Error(), "error")
+		return
+	}
+
+	if targetImage == "" {
+		targetImage = inspect.Config.Image
+	}
+
+	oldImage := inspect.Config.Image
+	sendLog("Baixando nova imagem: "+targetImage, "info")
+
+	err = client.PullImageStream(r.Context(), targetImage, func(logMsg string) {
+		sendLog(logMsg, "info")
+	})
+	if err != nil {
+		sendLog("Erro durante o pull da imagem: "+err.Error(), "error")
+		return
+	}
+
+	sendLog("Imagem baixada com sucesso. Reiniciando container...", "info")
+
+	if controller, ok := h.reader.(Controller); ok {
+		if err := controller.ContainerAction(r.Context(), id, "restart"); err != nil {
+			sendLog("Erro ao reiniciar container: "+err.Error(), "error")
+			return
+		}
+	}
+
+	// Healthcheck verification phase: confirm the container is running after restart.
+	healthOK := false
+	for i := 0; i < 5; i++ {
+		time.Sleep(2 * time.Second)
+		if ins, err := client.InspectContainer(r.Context(), id); err == nil {
+			if ins.State.Running {
+				healthOK = true
+				break
+			}
+		}
+	}
+
+	if !healthOK {
+		sendLog("ALERTA: Healthcheck falhou nos primeiros 10s. Executando ROLLBACK AUTOMÁTICO para "+oldImage+"...", "warning")
+		if err := client.PullImageStream(r.Context(), oldImage, nil); err == nil {
+			if controller, ok := h.reader.(Controller); ok {
+				_ = controller.ContainerAction(r.Context(), id, "restart")
+			}
+			sendLog("Rollback concluído com sucesso. Container restaurado para a versão anterior.", "warning")
+		} else {
+			sendLog("CRÍTICO: Falha no rollback automático: "+err.Error(), "error")
+		}
+		return
+	}
+
+	sendLog("Auto-update concluído com sucesso! Container saudável.", "success")
+	_, _ = w.Write([]byte("event: complete\ndata: {\"status\":\"ok\"}\n\n"))
+	flusher.Flush()
+}
+
+func (h *Handler) CloneStack(w http.ResponseWriter, r *http.Request) {
+	if !h.available(w) {
+		return
+	}
+	client, ok := h.reader.(StreamController)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "docker_clone_unavailable", "Docker clone client is not configured.")
+		return
+	}
+
+	var req struct {
+		ContainerID string `json:"container_id"`
+		Suffix      string `json:"suffix"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.ContainerID) == "" {
+		writeError(w, http.StatusBadRequest, "invalid_payload", "Payload inválido. container_id é obrigatório.")
+		return
+	}
+
+	if req.Suffix == "" {
+		req.Suffix = "staging"
+	}
+
+	newContainerName, err := client.CloneStack(r.Context(), req.ContainerID, req.Suffix)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "clone_failed", "Falha ao clonar stack: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"status":          "created",
+		"cloned_from":     req.ContainerID,
+		"new_stack_name":  newContainerName,
+		"environment":     req.Suffix,
+	})
+}
+

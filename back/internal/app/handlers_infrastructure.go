@@ -351,6 +351,169 @@ func (a *App) hostTelemetry(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{"items": items})
 }
+
+func (a *App) proxmoxStorageContent(w http.ResponseWriter, r *http.Request) {
+	if len(a.proxmoxClients) == 0 {
+		writeError(w, 409, "proxmox_unconfigured", "Proxmox não configurado: "+a.adapterError("proxmox"))
+		return
+	}
+	node := r.PathValue("node")
+	storage := r.PathValue("storage")
+	client := a.proxmoxClientFor(r.URL.Query().Get("cluster"))
+	if client == nil && len(a.proxmoxClients) > 0 {
+		client = a.proxmoxClients[0]
+	}
+	if client == nil {
+		writeError(w, 404, "proxmox_cluster_not_found", "Cluster não encontrado")
+		return
+	}
+	items, err := client.GetStorageContent(r.Context(), node, storage)
+	if err != nil {
+		writeError(w, 502, "proxmox_storage_content_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"items": items})
+}
+
+func (a *App) proxmoxDeleteStorageContent(w http.ResponseWriter, r *http.Request) {
+	if len(a.proxmoxClients) == 0 {
+		writeError(w, 409, "proxmox_unconfigured", "Proxmox não configurado: "+a.adapterError("proxmox"))
+		return
+	}
+	node := r.PathValue("node")
+	storage := r.PathValue("storage")
+	volid := r.URL.Query().Get("volid")
+	if volid == "" {
+		writeError(w, 400, "invalid_request", "volid é obrigatório")
+		return
+	}
+	client := a.proxmoxClientFor(r.URL.Query().Get("cluster"))
+	if client == nil && len(a.proxmoxClients) > 0 {
+		client = a.proxmoxClients[0]
+	}
+	if client == nil {
+		writeError(w, 404, "proxmox_cluster_not_found", "Cluster não encontrado")
+		return
+	}
+	if err := client.DeleteStorageContent(r.Context(), node, storage, volid); err != nil {
+		writeError(w, 502, "proxmox_delete_content_failed", err.Error())
+		return
+	}
+	session := currentSession(r)
+	_ = a.audit.Append(r.Context(), auditrepo.Record{ActorID: session.User.ID, Action: "proxmox.storage.delete_content", Scope: security.ScopeRemote, ResourceType: "storage_content", ResourceID: volid, TargetName: node + "/" + storage, Risk: security.RiskDangerous, Decision: "allowed", RequestID: requestID(r.Context()), SourceIP: remoteIP(r)})
+	writeJSON(w, 200, map[string]any{"status": "deleted", "volid": volid})
+}
+
+func (a *App) proxmoxTaskStatus(w http.ResponseWriter, r *http.Request) {
+	node := r.PathValue("node")
+	upid := r.PathValue("upid")
+	client := a.proxmoxClientFor(r.URL.Query().Get("cluster"))
+	if client == nil && len(a.proxmoxClients) > 0 {
+		client = a.proxmoxClients[0]
+	}
+	if client == nil {
+		writeError(w, 404, "proxmox_cluster_not_found", "Cluster não encontrado")
+		return
+	}
+	status, err := client.GetTaskStatus(r.Context(), node, upid)
+	if err != nil {
+		writeError(w, 502, "proxmox_task_status_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, status)
+}
+
+func (a *App) proxmoxTaskLog(w http.ResponseWriter, r *http.Request) {
+	node := r.PathValue("node")
+	upid := r.PathValue("upid")
+	client := a.proxmoxClientFor(r.URL.Query().Get("cluster"))
+	if client == nil && len(a.proxmoxClients) > 0 {
+		client = a.proxmoxClients[0]
+	}
+	if client == nil {
+		writeError(w, 404, "proxmox_cluster_not_found", "Cluster não encontrado")
+		return
+	}
+	lines, err := client.GetTaskLog(r.Context(), node, upid)
+	if err != nil {
+		writeError(w, 502, "proxmox_task_log_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"lines": lines})
+}
+
+func (a *App) proxmoxConvertToTemplate(w http.ResponseWriter, r *http.Request) {
+	node := r.PathValue("node")
+	vmid, err := strconv.Atoi(r.PathValue("vmid"))
+	if err != nil {
+		writeError(w, 400, "invalid_vmid", "VMID inválido")
+		return
+	}
+	client := a.proxmoxClientFor(r.URL.Query().Get("cluster"))
+	if client == nil && len(a.proxmoxClients) > 0 {
+		client = a.proxmoxClients[0]
+	}
+	if client == nil {
+		writeError(w, 404, "proxmox_cluster_not_found", "Cluster não encontrado")
+		return
+	}
+	if err := client.ConvertToTemplate(r.Context(), node, vmid); err != nil {
+		writeError(w, 502, "proxmox_template_failed", err.Error())
+		return
+	}
+	session := currentSession(r)
+	_ = a.audit.Append(r.Context(), auditrepo.Record{ActorID: session.User.ID, Action: "proxmox.template.create", Scope: security.ScopeRemote, ResourceType: "qemu", ResourceID: strconv.Itoa(vmid), TargetName: node, Risk: security.RiskDangerous, Decision: "allowed", RequestID: requestID(r.Context()), SourceIP: remoteIP(r)})
+	writeJSON(w, 200, map[string]any{"status": "accepted", "vmid": vmid})
+}
+
+func (a *App) proxmoxGuestAgentInterfaces(w http.ResponseWriter, r *http.Request) {
+	node := r.PathValue("node")
+	vmid, err := strconv.Atoi(r.PathValue("vmid"))
+	if err != nil {
+		writeError(w, 400, "invalid_vmid", "VMID inválido")
+		return
+	}
+	client := a.proxmoxClientFor(r.URL.Query().Get("cluster"))
+	if client == nil && len(a.proxmoxClients) > 0 {
+		client = a.proxmoxClients[0]
+	}
+	if client == nil {
+		writeError(w, 404, "proxmox_cluster_not_found", "Cluster não encontrado")
+		return
+	}
+	ifaces, err := client.GetQEMUAgentInterfaces(r.Context(), node, vmid)
+	if err != nil {
+		writeError(w, 502, "proxmox_agent_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"interfaces": ifaces})
+}
+
+func (a *App) proxmoxVNCProxyTicket(w http.ResponseWriter, r *http.Request) {
+	node := r.PathValue("node")
+	kind := r.PathValue("kind")
+	vmid, err := strconv.Atoi(r.PathValue("vmid"))
+	if err != nil {
+		writeError(w, 400, "invalid_vmid", "VMID inválido")
+		return
+	}
+	client := a.proxmoxClientFor(r.URL.Query().Get("cluster"))
+	if client == nil && len(a.proxmoxClients) > 0 {
+		client = a.proxmoxClients[0]
+	}
+	if client == nil {
+		writeError(w, 404, "proxmox_cluster_not_found", "Cluster não encontrado")
+		return
+	}
+	ticket, err := client.CreateVNCProxy(r.Context(), node, kind, vmid)
+	if err != nil {
+		writeError(w, 502, "proxmox_vnc_failed", err.Error())
+		return
+	}
+	session := currentSession(r)
+	_ = a.audit.Append(r.Context(), auditrepo.Record{ActorID: session.User.ID, Action: "proxmox.vnc.ticket", Scope: security.ScopeRemote, ResourceType: kind, ResourceID: strconv.Itoa(vmid), TargetName: node, Risk: security.RiskSafe, Decision: "allowed", RequestID: requestID(r.Context()), SourceIP: remoteIP(r)})
+	writeJSON(w, 200, ticket)
+}
 func (a *App) createTerminalTicket(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		HostID string `json:"host_id"`

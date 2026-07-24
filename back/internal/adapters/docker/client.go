@@ -649,3 +649,115 @@ func sanitize(body []byte) string {
 	}
 	return strconv.QuoteToASCII(value)
 }
+
+func (c *Client) PullImageStream(ctx context.Context, image string, logWriter func(string)) error {
+	if !c.Configured() {
+		return errors.New("Docker adapter is not configured")
+	}
+	path := "/images/create?fromImage=" + url.QueryEscape(image)
+	response, err := c.do(ctx, http.MethodPost, path, nil, http.Header{"Accept": []string{"application/json"}})
+	if err != nil {
+		return fmt.Errorf("Docker pull request failed: %w", err)
+	}
+	defer response.Body.Close()
+
+	decoder := json.NewDecoder(response.Body)
+	for decoder.More() {
+		var msg struct {
+			Status   string `json:"status"`
+			Progress string `json:"progress"`
+			Error    string `json:"error"`
+		}
+		if err := decoder.Decode(&msg); err != nil {
+			break
+		}
+		if msg.Error != "" {
+			return fmt.Errorf("Docker pull error: %s", msg.Error)
+		}
+		out := msg.Status
+		if msg.Progress != "" {
+			out += " " + msg.Progress
+		}
+		if out != "" && logWriter != nil {
+			logWriter(out)
+		}
+	}
+	return nil
+}
+
+type ContainerInspect struct {
+	ID     string `json:"Id"`
+	Name   string `json:"Name"`
+	Config struct {
+		Image  string            `json:"Image"`
+		Env    []string          `json:"Env"`
+		Cmd    []string          `json:"Cmd"`
+		Labels map[string]string `json:"Labels"`
+	} `json:"Config"`
+	State struct {
+		Status  string `json:"Status"`
+		Running bool   `json:"Running"`
+	} `json:"State"`
+	HostConfig struct {
+		Binds        []string `json:"Binds"`
+		PortBindings map[string][]struct {
+			HostPort string `json:"HostPort"`
+		} `json:"PortBindings"`
+	} `json:"HostConfig"`
+}
+
+func (c *Client) InspectContainer(ctx context.Context, id string) (*ContainerInspect, error) {
+	var item ContainerInspect
+	path := "/containers/" + url.PathEscape(id) + "/json"
+	if err := c.get(ctx, path, &item); err != nil {
+		return nil, err
+	}
+	return &item, nil
+}
+
+func (c *Client) CloneStack(ctx context.Context, containerID, suffix string) (string, error) {
+	inspect, err := c.InspectContainer(ctx, containerID)
+	if err != nil {
+		return "", fmt.Errorf("inspect container failed: %w", err)
+	}
+
+	cleanName := strings.TrimPrefix(inspect.Name, "/")
+	if suffix == "" {
+		suffix = "staging"
+	}
+	newContainerName := suffix + "-" + cleanName
+
+	// Create payload — passed directly to postRaw (which marshals internally).
+	payload := map[string]any{
+		"Image": inspect.Config.Image,
+		"Cmd":   inspect.Config.Cmd,
+		"Env":   append(inspect.Config.Env, "ENV_SUFFIX="+suffix),
+		"Labels": map[string]string{
+			"com.wc-hub.cloned-from":   cleanName,
+			"com.wc-hub.cloned-suffix": suffix,
+		},
+	}
+
+	path := "/containers/create?name=" + url.QueryEscape(newContainerName)
+	resp, err := c.postRaw(ctx, path, payload)
+	if err != nil {
+		// If container already exists, retry with a timestamp suffix.
+		newContainerName = fmt.Sprintf("%s-%s-%d", suffix, cleanName, time.Now().Unix())
+		path = "/containers/create?name=" + url.QueryEscape(newContainerName)
+		resp, err = c.postRaw(ctx, path, payload)
+		if err != nil {
+			return "", fmt.Errorf("create cloned container failed: %w", err)
+		}
+	}
+
+	var created struct {
+		ID string `json:"Id"`
+	}
+	_ = json.Unmarshal(resp, &created)
+	if created.ID != "" {
+		_ = c.ContainerAction(ctx, created.ID, "start")
+	}
+
+	return newContainerName, nil
+}
+

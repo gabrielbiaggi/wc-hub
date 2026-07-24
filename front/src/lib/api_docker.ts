@@ -111,3 +111,33 @@ export const execDockerContainer = async (
       { headers, timeout: 45_000 },
     )
   ).data;
+
+export const cloneDockerStack = async (container_id: string, suffix: string) =>
+  (
+    await api.post<{ status: string; new_stack_name: string }>(
+      "/v1/docker/stacks/clone",
+      { container_id, suffix },
+    )
+  ).data;
+
+export interface WorkerNode {
+  id: string;
+  name: string;
+  hardware_fingerprint: string;
+  public_key: string;
+  ip_address: string;
+  status: "pending_approval" | "approved" | "rejected";
+  approved_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export const getPendingWorkers = async () =>
+  (await api.get<{ items: WorkerNode[] }>("/v1/workers/pending")).data.items;
+
+export const approveWorker = async (id: string) =>
+  (await api.post<WorkerNode>(`/v1/workers/${encodeURIComponent(id)}/approve`)).data;
+
+export const rejectWorker = async (id: string) =>
+  (await api.post<WorkerNode>(`/v1/workers/${encodeURIComponent(id)}/reject`)).data;
+

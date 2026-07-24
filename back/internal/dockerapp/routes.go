@@ -32,4 +32,6 @@ func MountRoutesWithPolicy(mux *http.ServeMux, authMiddleware AuthMiddleware, po
 	mux.HandleFunc("GET /api/v1/docker/stats", authMiddleware(ReadPermission, handler.Stats))
 	mux.HandleFunc("POST /api/v1/docker/containers/{id}/{action}", authMiddleware("docker.manage", handler.ContainerAction))
 	mux.HandleFunc("POST /api/v1/docker/containers/{id}/exec", authMiddleware("docker.manage", handler.Exec))
+	mux.HandleFunc("GET /api/v1/docker/containers/{id}/update-stream", authMiddleware("docker.manage", handler.UpdateStream))
+	mux.HandleFunc("POST /api/v1/docker/stacks/clone", authMiddleware("docker.clone", handler.CloneStack))
 }

@@ -577,6 +577,131 @@ export const createProxmoxBackup = async (
       { params: { cluster } },
     )
   ).data;
+
+export interface ProxmoxStorageContentItem {
+  volid: string;
+  content: string;
+  size: number;
+  format?: string;
+  ctime?: number;
+  notes?: string;
+}
+
+export const getProxmoxStorageContent = async (
+  cluster: string,
+  node: string,
+  storage: string,
+): Promise<ProxmoxStorageContentItem[]> =>
+  (
+    await api.get<{ items: ProxmoxStorageContentItem[] }>(
+      `/v1/proxmox/nodes/${encodeURIComponent(node)}/storage/${encodeURIComponent(storage)}/content`,
+      { params: { cluster } },
+    )
+  ).data.items;
+
+export const deleteProxmoxStorageContent = async (
+  cluster: string,
+  node: string,
+  storage: string,
+  volid: string,
+) =>
+  (
+    await api.delete(
+      `/v1/proxmox/nodes/${encodeURIComponent(node)}/storage/${encodeURIComponent(storage)}/content`,
+      { params: { cluster, volid } },
+    )
+  ).data;
+
+export interface ProxmoxTaskStatus {
+  upid: string;
+  node: string;
+  status: string;
+  exitstatus?: string;
+  pid?: number;
+  starttime?: number;
+}
+
+export const getProxmoxTaskStatus = async (
+  cluster: string,
+  node: string,
+  upid: string,
+): Promise<ProxmoxTaskStatus> =>
+  (
+    await api.get<ProxmoxTaskStatus>(
+      `/v1/proxmox/nodes/${encodeURIComponent(node)}/tasks/${encodeURIComponent(upid)}/status`,
+      { params: { cluster } },
+    )
+  ).data;
+
+export const getProxmoxTaskLog = async (
+  cluster: string,
+  node: string,
+  upid: string,
+): Promise<string[]> =>
+  (
+    await api.get<{ lines: string[] }>(
+      `/v1/proxmox/nodes/${encodeURIComponent(node)}/tasks/${encodeURIComponent(upid)}/log`,
+      { params: { cluster } },
+    )
+  ).data.lines;
+
+export const convertToProxmoxTemplate = async (
+  cluster: string,
+  node: string,
+  vmid: number,
+) =>
+  (
+    await api.post(
+      `/v1/proxmox/nodes/${encodeURIComponent(node)}/qemu/${vmid}/template`,
+      {},
+      { params: { cluster } },
+    )
+  ).data;
+
+export interface ProxmoxAgentInterface {
+  name: string;
+  "hardware-address"?: string;
+  "ip-addresses"?: {
+    "ip-address-type": string;
+    "ip-address": string;
+    prefix: number;
+  }[];
+}
+
+export const getProxmoxGuestAgentInterfaces = async (
+  cluster: string,
+  node: string,
+  vmid: number,
+): Promise<ProxmoxAgentInterface[]> =>
+  (
+    await api.get<{ interfaces: ProxmoxAgentInterface[] }>(
+      `/v1/proxmox/nodes/${encodeURIComponent(node)}/qemu/${vmid}/agent/interfaces`,
+      { params: { cluster } },
+    )
+  ).data.interfaces;
+
+export interface ProxmoxVNCTicket {
+  ticket: string;
+  port: string;
+  upid: string;
+  cert?: string;
+  user?: string;
+}
+
+export const createProxmoxVNCProxyTicket = async (
+  cluster: string,
+  node: string,
+  kind: "qemu" | "lxc",
+  vmid: number,
+): Promise<ProxmoxVNCTicket> =>
+  (
+    await api.post<ProxmoxVNCTicket>(
+      `/v1/proxmox/nodes/${encodeURIComponent(node)}/${kind}/${vmid}/vncproxy`,
+      {},
+      { params: { cluster } },
+    )
+  ).data;
+
 export interface DockerHealth {
   reachable: boolean;
   source?: string;
