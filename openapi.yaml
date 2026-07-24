@@ -2376,6 +2376,294 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/docker/containers/{id}/update-stream:
+    get:
+      summary: GET /api/v1/docker/containers/{id}/update-stream
+      operationId: get_docker_containers_id_update_stream
+      tags: [docker]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/docker/stacks/clone:
+    post:
+      summary: POST /api/v1/docker/stacks/clone
+      operationId: post_docker_stacks_clone
+      tags: [docker]
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/proxmox/cluster/log:
+    get:
+      summary: GET /api/v1/proxmox/cluster/log
+      operationId: get_proxmox_cluster_log
+      tags: [proxmox]
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/proxmox/nodes/{node}/qemu/{vmid}/agent/interfaces:
+    get:
+      summary: GET /api/v1/proxmox/nodes/{node}/qemu/{vmid}/agent/interfaces
+      operationId: get_proxmox_nodes_node_qemu_vmid_agent_interfaces
+      tags: [proxmox]
+      parameters:
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: vmid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/proxmox/nodes/{node}/qemu/{vmid}/cloud-init:
+    put:
+      summary: PUT /api/v1/proxmox/nodes/{node}/qemu/{vmid}/cloud-init
+      operationId: put_proxmox_nodes_node_qemu_vmid_cloud_init
+      tags: [proxmox]
+      parameters:
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: vmid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/proxmox/nodes/{node}/qemu/{vmid}/template:
+    post:
+      summary: POST /api/v1/proxmox/nodes/{node}/qemu/{vmid}/template
+      operationId: post_proxmox_nodes_node_qemu_vmid_template
+      tags: [proxmox]
+      parameters:
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: vmid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/proxmox/nodes/{node}/services:
+    get:
+      summary: GET /api/v1/proxmox/nodes/{node}/services
+      operationId: get_proxmox_nodes_node_services
+      tags: [proxmox]
+      parameters:
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/proxmox/nodes/{node}/services/{service}/restart:
+    post:
+      summary: POST /api/v1/proxmox/nodes/{node}/services/{service}/restart
+      operationId: post_proxmox_nodes_node_services_service_restart
+      tags: [proxmox]
+      parameters:
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: service
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/proxmox/nodes/{node}/storage/{storage}/content:
+    get:
+      summary: GET /api/v1/proxmox/nodes/{node}/storage/{storage}/content
+      operationId: get_proxmox_nodes_node_storage_storage_content
+      tags: [proxmox]
+      parameters:
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: storage
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+    delete:
+      summary: DELETE /api/v1/proxmox/nodes/{node}/storage/{storage}/content
+      operationId: delete_proxmox_nodes_node_storage_storage_content
+      tags: [proxmox]
+      parameters:
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: storage
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/proxmox/nodes/{node}/tasks/{upid}/log:
+    get:
+      summary: GET /api/v1/proxmox/nodes/{node}/tasks/{upid}/log
+      operationId: get_proxmox_nodes_node_tasks_upid_log
+      tags: [proxmox]
+      parameters:
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: upid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/proxmox/nodes/{node}/tasks/{upid}/status:
+    get:
+      summary: GET /api/v1/proxmox/nodes/{node}/tasks/{upid}/status
+      operationId: get_proxmox_nodes_node_tasks_upid_status
+      tags: [proxmox]
+      parameters:
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: upid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/vncproxy:
+    post:
+      summary: POST /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/vncproxy
+      operationId: post_proxmox_nodes_node_kind_vmid_vncproxy
+      tags: [proxmox]
+      parameters:
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: vmid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/workers:
+    get:
+      summary: GET /api/v1/workers
+      operationId: get_workers
+      tags: [workers]
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/workers/bootstrap:
+    post:
+      summary: POST /api/v1/workers/bootstrap
+      operationId: post_workers_bootstrap
+      tags: [workers]
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/workers/pending:
+    get:
+      summary: GET /api/v1/workers/pending
+      operationId: get_workers_pending
+      tags: [workers]
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/workers/{id}/approve:
+    post:
+      summary: POST /api/v1/workers/{id}/approve
+      operationId: post_workers_id_approve
+      tags: [workers]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/workers/{id}/reject:
+    post:
+      summary: POST /api/v1/workers/{id}/reject
+      operationId: post_workers_id_reject
+      tags: [workers]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
   /api/v1/storage/browse:
     get:
       summary: GET /api/v1/storage/browse
