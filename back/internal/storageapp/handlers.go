@@ -128,6 +128,18 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 201, entry)
 }
+
+func (h *Handler) Rebalance(w http.ResponseWriter, r *http.Request) {
+	if !h.ready(w) {
+		return
+	}
+	if err := h.client.RebalancePool(r.Context()); err != nil {
+		h.failure(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "rebalance_started"})
+}
+
 func (h *Handler) ready(w http.ResponseWriter) bool {
 	if h.client != nil {
 		return true

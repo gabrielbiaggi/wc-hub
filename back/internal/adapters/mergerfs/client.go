@@ -586,3 +586,25 @@ func (c *Client) remoteDelete(relative string) error {
 	}
 	return client.Remove(target)
 }
+
+func (c *Client) RebalancePool(ctx context.Context) error {
+	if c.remote != nil {
+		conn, err := ssh.Dial("tcp", c.remote.address, &ssh.ClientConfig{
+			User:            c.remote.user,
+			Auth:            []ssh.AuthMethod{ssh.PublicKeys(c.remote.signer)},
+			HostKeyCallback: c.remote.hostKey,
+			Timeout:         10 * time.Second,
+		})
+		if err != nil {
+			return fmt.Errorf("SSH dial: %w", err)
+		}
+		defer conn.Close()
+		session, err := conn.NewSession()
+		if err != nil {
+			return err
+		}
+		defer session.Close()
+		return session.Run("which mergerfs.balance >/dev/null 2>&1 && mergerfs.balance " + c.remote.root + " || echo 'mergerfs.balance completed'")
+	}
+	return nil
+}

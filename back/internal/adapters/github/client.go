@@ -227,7 +227,7 @@ func (c *Client) RunAction(ctx context.Context, fullName string, runID int64, ac
 	if action != "rerun" && action != "cancel" {
 		return errors.New("unsupported GitHub workflow action")
 	}
-	return c.request(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/actions/runs/%d/%s", fullName, runID, action), nil)
+	return c.requestJSON(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/actions/runs/%d/%s", fullName, runID, action), nil, nil)
 }
 
 func (c *Client) Commits(ctx context.Context, fullName string) ([]Commit, error) {
@@ -310,11 +310,7 @@ func (c *Client) repositoryAllowed(fullName string) bool {
 	return false
 }
 func (c *Client) get(ctx context.Context, path string, destination any) error {
-	return c.request(ctx, http.MethodGet, path, destination)
-}
-
-func (c *Client) request(ctx context.Context, method, path string, destination any) error {
-	return c.requestJSON(ctx, method, path, nil, destination)
+	return c.requestJSON(ctx, http.MethodGet, path, nil, destination)
 }
 
 func (c *Client) requestJSON(ctx context.Context, method, path string, payload any, destination any) error {
@@ -353,13 +349,57 @@ func (c *Client) requestJSON(ctx context.Context, method, path string, payload a
 		return err
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("GitHub API returned %d", response.StatusCode)
+		return fmt.Errorf("GitHub API error: status %d", response.StatusCode)
 	}
 	if destination == nil || len(body) == 0 {
 		return nil
 	}
-	if err = json.Unmarshal(body, destination); err != nil {
-		return fmt.Errorf("decode GitHub response: %w", err)
+	return json.Unmarshal(body, destination)
+}
+
+type CreateReleaseInput struct {
+	TagName         string `json:"tag_name"`
+	TargetCommitish string `json:"target_commitish,omitempty"`
+	Name            string `json:"name"`
+	Body            string `json:"body"`
+	Draft           bool   `json:"draft"`
+	Prerelease      bool   `json:"prerelease"`
+}
+
+func (c *Client) CreateRelease(ctx context.Context, fullName string, input CreateReleaseInput) (Release, error) {
+	if !c.repositoryAllowed(fullName) {
+		return Release{}, errors.New("repository not allowlisted")
 	}
-	return nil
+	var res Release
+	err := c.requestJSON(ctx, http.MethodPost, "/repos/"+fullName+"/releases", input, &res)
+	return res, err
+}
+
+func (c *Client) DeleteRelease(ctx context.Context, fullName string, releaseID int64) error {
+	if !c.repositoryAllowed(fullName) {
+		return errors.New("repository not allowlisted")
+	}
+	return c.requestJSON(ctx, http.MethodDelete, fmt.Sprintf("/repos/%s/releases/%d", fullName, releaseID), nil, nil)
+}
+
+func (c *Client) GetWorkflowRunLogs(ctx context.Context, fullName string, runID int64) (string, error) {
+	if !c.repositoryAllowed(fullName) {
+		return "", errors.New("repository not allowlisted")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("https://api.github.com/repos/%s/actions/runs/%d/logs", fullName, runID), nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+string(c.token))
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.Header.Get("Location") != "" {
+		return "Download URL dos logs ZIP: " + resp.Header.Get("Location"), nil
+	}
+	b, _ := io.ReadAll(resp.Body)
+	return string(b), nil
 }

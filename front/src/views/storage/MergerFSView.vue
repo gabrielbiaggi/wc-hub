@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ChevronRight, Download, File, Folder, FolderPlus, HardDrive, Pencil, RefreshCw, Search, ShieldCheck, Trash2, Upload } from 'lucide-vue-next'
 import Button from '@/components/ui/Button.vue'
 import { browseStorage, createStorageDirectory, deleteStorageEntry, indexStorage, renameStorageEntry, storageStreamURL, uploadStorageFile, type StorageEntry } from '@/lib/api_storage'
+import { rebalanceMergerFSPool } from '@/lib/api'
 
 const path = ref('')
 const input = ref<HTMLInputElement>()
@@ -13,6 +14,10 @@ const query = useQuery({ queryKey, queryFn: () => browseStorage(path.value) })
 const indexed = ref<number|null>(null)
 const indexing = ref(false)
 const crumbs = computed(() => path.value.split('/').filter(Boolean))
+const rebalanceMut = useMutation({
+  mutationFn: () => rebalanceMergerFSPool(),
+  onSuccess: () => alert('Rotina de rebalanceamento do pool MergerFS iniciada com sucesso!'),
+})
 const mutation = useMutation({
   mutationFn: async(payload:{operation:'mkdir'|'upload'|'rename'|'delete';entry?:StorageEntry;file?:File;name?:string})=>{
     if(payload.operation==='mkdir')return createStorageDirectory(path.value,payload.name??'')
@@ -34,7 +39,7 @@ const selectedFile=()=>{const file=input.value?.files?.[0];if(file)mutation.muta
 
 <template>
   <div class="mx-auto max-w-[1500px] space-y-5">
-    <header class="flex flex-col justify-between gap-4 md:flex-row md:items-end"><div><div class="flex items-center gap-2 font-mono text-[10px] uppercase text-signal"><ShieldCheck class="h-3.5 w-3.5"/>raiz gravável e restrita</div><h1 class="mt-3 text-3xl font-semibold">Navegador MergerFS</h1><p class="mt-2 text-sm text-muted">Navegação, envio, organização, indexação e transmissão dentro da raiz autorizada.</p></div><div class="flex flex-wrap gap-2"><input ref="input" type="file" class="hidden" @change="selectedFile"/><Button variant="outline" :disabled="mutation.isPending.value" @click="input?.click()"><Upload class="h-4 w-4"/>Enviar arquivo</Button><Button variant="outline" :disabled="mutation.isPending.value" @click="mkdir"><FolderPlus class="h-4 w-4"/>Nova pasta</Button><Button variant="outline" :disabled="indexing" @click="runIndex"><Search class="h-4 w-4"/>{{indexing?'Indexando…':'Indexar'}}</Button><Button variant="outline" @click="query.refetch()"><RefreshCw class="h-4 w-4"/>Atualizar</Button></div></header>
+    <header class="flex flex-col justify-between gap-4 md:flex-row md:items-end"><div><div class="flex items-center gap-2 font-mono text-[10px] uppercase text-signal"><ShieldCheck class="h-3.5 w-3.5"/>raiz gravável e restrita</div><h1 class="mt-3 text-3xl font-semibold">Navegador MergerFS</h1><p class="mt-2 text-sm text-muted">Navegação, envio, organização, indexação e transmissão dentro da raiz autorizada.</p></div><div class="flex flex-wrap gap-2"><input ref="input" type="file" class="hidden" @change="selectedFile"/><Button variant="outline" :disabled="rebalanceMut.isPending.value" @click="rebalanceMut.mutate()"><RefreshCw class="h-4 w-4"/>Rebalancear Pool</Button><Button variant="outline" :disabled="mutation.isPending.value" @click="input?.click()"><Upload class="h-4 w-4"/>Enviar arquivo</Button><Button variant="outline" :disabled="mutation.isPending.value" @click="mkdir"><FolderPlus class="h-4 w-4"/>Nova pasta</Button><Button variant="outline" :disabled="indexing" @click="runIndex"><Search class="h-4 w-4"/>{{indexing?'Indexando…':'Indexar'}}</Button><Button variant="outline" @click="query.refetch()"><RefreshCw class="h-4 w-4"/>Atualizar</Button></div></header>
     <div v-if="indexed!==null" class="rounded-xl border border-signal/15 bg-signal/[.04] p-3 text-xs text-signal">{{indexed}} entradas indexadas.</div>
     <div v-if="query.isError.value||mutation.isError.value" class="rounded-xl border border-danger/20 bg-danger/5 p-4 text-sm text-danger">A operação de armazenamento falhou. Pastas só podem ser excluídas quando vazias e todos os caminhos devem permanecer dentro da raiz.</div>
     <section class="overflow-hidden rounded-xl border border-line bg-panel/65">

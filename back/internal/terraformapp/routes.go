@@ -29,4 +29,5 @@ func MountRoutesWithPolicy(mux *http.ServeMux, auth AuthMiddleware, policyEnforc
 	mux.HandleFunc("POST /api/v1/terraform/apply", auth("terraform.apply", h.Apply))
 	mux.HandleFunc("POST /api/v1/terraform/destroy", auth("terraform.apply", h.Destroy))
 	mux.HandleFunc("POST /api/v1/terraform/output", auth("terraform.read", h.Output))
+	mux.HandleFunc("GET /api/v1/terraform/state", auth("terraform.read", h.State))
 }

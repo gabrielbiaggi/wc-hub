@@ -20,13 +20,59 @@ import {
 import Button from "@/components/ui/Button.vue";
 import StatusBadge from "@/components/ui/StatusBadge.vue";
 import {
+  createGitHubRelease,
+  deleteGitHubRelease,
   getGitHubOverview,
+  getGitHubWorkflowRunLogs,
   githubRunAction,
   githubWorkflowAction,
   type GitHubProject,
   type GitHubWorkflowRun,
 } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api_error";
+
+const selectedRunForLogs = ref<{ repo: string; runId: number } | null>(null);
+const runLogsOutput = ref("");
+const runLogsLoading = ref(false);
+
+const openRunLogs = async (repo: string, runId: number) => {
+  selectedRunForLogs.value = { repo, runId };
+  runLogsOutput.value = "Carregando logs de execução...";
+  runLogsLoading.value = true;
+  try {
+    const res = await getGitHubWorkflowRunLogs(repo, runId);
+    runLogsOutput.value = res.logs || "Nenhum log encontrado para esta execução.";
+  } catch (err: any) {
+    runLogsOutput.value = "Erro ao buscar logs: " + (err.message || String(err));
+  } finally {
+    runLogsLoading.value = false;
+  }
+};
+
+const releaseRepo = ref("");
+const releaseTagName = ref("");
+const releaseTitle = ref("");
+const releaseBody = ref("");
+const createReleaseMut = useMutation({
+  mutationFn: () => createGitHubRelease(releaseRepo.value, {
+    tag_name: releaseTagName.value,
+    name: releaseTitle.value || releaseTagName.value,
+    body: releaseBody.value,
+    draft: false,
+    prerelease: false,
+  }),
+  onSuccess: () => {
+    releaseTagName.value = "";
+    releaseTitle.value = "";
+    releaseBody.value = "";
+    client.invalidateQueries({ queryKey: ["github-overview"] });
+  },
+});
+
+const deleteReleaseMut = useMutation({
+  mutationFn: (input: { repo: string; releaseId: number }) => deleteGitHubRelease(input.repo, input.releaseId),
+  onSuccess: () => client.invalidateQueries({ queryKey: ["github-overview"] }),
+});
 
 const client = useQueryClient();
 const overview = useQuery({
@@ -363,6 +409,13 @@ const getRunStatus = (run: GitHubWorkflowRun): "healthy" | "critical" | "warning
                 </div>
                 <div class="flex gap-1">
                   <Button
+                    variant="outline"
+                    size="sm"
+                    title="Ver logs da execução"
+                    @click="openRunLogs(project.full_name, run.id)"
+                    >Logs</Button
+                  >
+                  <Button
                     v-if="run.status !== 'completed'"
                     variant="danger"
                     size="sm"
@@ -387,6 +440,29 @@ const getRunStatus = (run: GitHubWorkflowRun): "healthy" | "critical" | "warning
                 Nenhum run recente.
               </p>
             </div>
+          </div>
+        </div>
+
+        <div class="border-t border-line/60 bg-panel p-5 space-y-4">
+          <h3 class="flex items-center gap-2 text-sm font-medium">
+            <Tag class="h-4 w-4 text-signal" />Releases & Tags
+          </h3>
+          <form class="grid gap-3 md:grid-cols-[140px_180px_1fr_auto]" @submit.prevent="releaseRepo = project.full_name; createReleaseMut.mutate()">
+            <input v-model="releaseTagName" required placeholder="Tag (ex: v1.2.0)" class="rounded-lg border border-line bg-slate-950 p-2 text-xs font-mono text-slate-200" />
+            <input v-model="releaseTitle" placeholder="Título da Release" class="rounded-lg border border-line bg-slate-950 p-2 text-xs text-slate-200" />
+            <input v-model="releaseBody" placeholder="Descrição/Changelog" class="rounded-lg border border-line bg-slate-950 p-2 text-xs text-slate-200" />
+            <Button type="submit" :disabled="!releaseTagName.trim() || createReleaseMut.isPending.value"><Plus class="h-4 w-4" />Criar Release</Button>
+          </form>
+
+          <div class="space-y-2">
+            <div v-for="rel in project.releases" :key="rel.id" class="flex items-center justify-between p-3 rounded-lg border border-line bg-slate-950/40">
+              <div>
+                <p class="text-sm font-medium text-slate-200">{{ rel.name || rel.tag_name }} <span class="font-mono text-xs text-signal">({{ rel.tag_name }})</span></p>
+                <p class="text-[10px] text-muted">Publicado em: {{ formatDate(rel.published_at) }}</p>
+              </div>
+              <Button variant="danger" size="sm" :disabled="deleteReleaseMut.isPending.value" @click="deleteReleaseMut.mutate({ repo: project.full_name, releaseId: rel.id })"><Trash2 class="h-3.5 w-3.5" /></Button>
+            </div>
+            <p v-if="!project.releases?.length" class="text-xs text-muted">Nenhuma release publicada neste repositório.</p>
           </div>
         </div>
         <div class="grid gap-px bg-line/60 lg:grid-cols-2">
@@ -464,6 +540,27 @@ const getRunStatus = (run: GitHubWorkflowRun): "healthy" | "critical" | "warning
       >
         Nenhum repositório configurado.
       </p>
+    </div>
+
+    <div
+      v-if="selectedRunForLogs"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+      @click.self="selectedRunForLogs = null"
+    >
+      <article class="w-full max-w-4xl overflow-hidden rounded-xl border border-line bg-panel shadow-2xl">
+        <header class="flex items-center justify-between border-b border-line p-4">
+          <div>
+            <h3 class="text-sm font-medium text-slate-100">Logs de Execução (Action Run #{{ selectedRunForLogs.runId }})</h3>
+            <p class="text-xs text-muted">{{ selectedRunForLogs.repo }}</p>
+          </div>
+          <Button variant="outline" size="sm" @click="selectedRunForLogs = null">Fechar</Button>
+        </header>
+        <div class="p-5">
+          <div class="max-h-[70vh] overflow-y-auto rounded-lg border border-line bg-slate-950 p-4 font-mono text-xs text-slate-200 whitespace-pre-wrap break-words">
+            {{ runLogsOutput }}
+          </div>
+        </div>
+      </article>
     </div>
   </div>
 </template>

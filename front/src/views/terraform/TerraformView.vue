@@ -6,7 +6,7 @@ import Button from '@/components/ui/Button.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import ActionGuardModal from '@/components/ActionGuardModal.vue'
 import { buildActionHeaders } from '@/lib/api'
-import { getTerraformRuns, startTerraformRun, type TerraformOperation } from '@/lib/api_terraform'
+import { getTerraformRuns, getTerraformState, startTerraformRun, type TerraformOperation } from '@/lib/api_terraform'
 import { usePermissions } from '@/composables/usePermissions'
 
 const queryClient = useQueryClient()
@@ -20,8 +20,28 @@ const canManage = computed(() => hasPermission('terraform.manage') || canApply.v
 const query = useQuery({ queryKey: ['terraform-runs'], queryFn: getTerraformRuns, refetchInterval: 5000 })
 const runs = computed(() => query.data.value?.items ?? [])
 const selected = computed(() => runs.value.find((item) => item.id === selectedID.value) ?? runs.value[0])
+
+const varsList = ref<{ key: string; value: string }[]>([])
+const addVar = () => varsList.value.push({ key: '', value: '' })
+const removeVar = (index: number) => varsList.value.splice(index, 1)
+
+const stateWorkspace = ref('')
+const stateQuery = useQuery({
+  queryKey: ['terraform-state', stateWorkspace],
+  queryFn: () => getTerraformState(stateWorkspace.value),
+  enabled: computed(() => !!stateWorkspace.value),
+})
+
+const getVarsObject = () => {
+  const obj: Record<string, string> = {}
+  varsList.value.forEach((v) => {
+    if (v.key.trim()) obj[v.key.trim()] = v.value
+  })
+  return Object.keys(obj).length ? obj : undefined
+}
+
 const mutation = useMutation({
-  mutationFn: (input: { operation: TerraformOperation; headers?: Record<string,string> }) => startTerraformRun(input.operation, workspace.value, input.headers),
+  mutationFn: (input: { operation: TerraformOperation; headers?: Record<string,string> }) => startTerraformRun(input.operation, workspace.value, getVarsObject(), input.headers),
   onSuccess: (run) => {
     selectedID.value = run.id
     void queryClient.invalidateQueries({ queryKey: ['terraform-runs'] })
@@ -53,23 +73,55 @@ const confirmGuardedRun = (payload: { confirmation:string; totpCode:string }) =>
       <p class="mt-2 text-sm text-muted">Validação, plano, outputs, aplicação e destruição executados fora da API, com estado isolado e espaços de trabalho permitidos.</p>
     </header>
 
-    <section class="rounded-xl border border-line bg-panel/65 p-5">
-      <div class="grid gap-4 md:grid-cols-[1fr_auto_auto_auto_auto_auto]">
+    <section class="rounded-xl border border-line bg-panel/65 p-5 space-y-4">
+      <div class="grid gap-4 md:grid-cols-[1fr_auto_auto_auto_auto_auto_auto]">
         <label class="text-xs text-muted">Espaço de trabalho
           <select v-model="workspace" class="field">
             <option value="" disabled>Selecione um espaço de trabalho</option>
             <option v-for="item in query.data.value?.workspaces" :key="item" :value="item">{{ item }}</option>
           </select>
         </label>
+        <Button class="self-end" variant="outline" :disabled="!workspace" @click="stateWorkspace = workspace"><FileCode2 class="h-4 w-4" />Inspetor de State</Button>
         <Button class="self-end" variant="outline" :disabled="!canManage || !workspace || mutation.isPending.value" @click="run('validate')"><FileCode2 class="h-4 w-4" />Validar</Button>
         <Button class="self-end" :disabled="!canManage || !workspace || mutation.isPending.value" @click="run('plan')"><Play class="h-4 w-4" />Planejar</Button>
         <Button class="self-end" variant="outline" :disabled="!canManage || !workspace || mutation.isPending.value" @click="run('output')"><ListTree class="h-4 w-4" />Outputs</Button>
         <Button class="self-end" variant="danger" :disabled="!canApply || !workspace || mutation.isPending.value" @click="run('apply')"><Rocket class="h-4 w-4" />Aplicar</Button>
         <Button class="self-end" variant="danger" :disabled="!canApply || !workspace || mutation.isPending.value" @click="run('destroy')"><Skull class="h-4 w-4" />Destruir</Button>
       </div>
+
+      <!-- Injeção de Variáveis (-var) -->
+      <div class="border-t border-line/60 pt-3 space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-medium text-slate-300">Variáveis de Execução (-var)</span>
+          <Button variant="outline" size="sm" @click="addVar"><Plus class="h-3 w-3" />Adicionar Variável</Button>
+        </div>
+        <div v-for="(v, idx) in varsList" :key="idx" class="flex items-center gap-2">
+          <input v-model="v.key" placeholder="Nome da variável (ex: instance_type)" class="flex-1 rounded-lg border border-line bg-slate-950 p-1.5 text-xs font-mono text-slate-200" />
+          <input v-model="v.value" placeholder="Valor" class="flex-1 rounded-lg border border-line bg-slate-950 p-1.5 text-xs font-mono text-slate-200" />
+          <Button variant="danger" size="sm" @click="removeVar(idx)">X</Button>
+        </div>
+      </div>
+
       <p v-if="query.isError.value" class="mt-4 text-xs text-danger">O worker Terraform não está disponível.</p>
       <p v-else-if="mutation.isError.value" class="mt-4 text-xs text-danger">O worker recusou a solicitação. Confirme o espaço de trabalho e as credenciais efêmeras.</p>
     </section>
+
+    <!-- State Inspector Modal -->
+    <div v-if="stateWorkspace" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" @click.self="stateWorkspace = ''">
+      <article class="w-full max-w-4xl overflow-hidden rounded-xl border border-line bg-panel shadow-2xl">
+        <header class="flex items-center justify-between border-b border-line p-4">
+          <div>
+            <h3 class="text-sm font-medium text-slate-100">Inspector de State File (terraform.tfstate)</h3>
+            <p class="text-xs text-muted">Workspace: {{ stateWorkspace }}</p>
+          </div>
+          <Button variant="outline" size="sm" @click="stateWorkspace = ''">Fechar</Button>
+        </header>
+        <div class="p-5">
+          <p v-if="stateQuery.isLoading.value" class="text-xs text-muted">Carregando arquivo de estado...</p>
+          <pre v-else class="max-h-[70vh] overflow-y-auto rounded-lg border border-line bg-slate-950 p-4 font-mono text-xs text-slate-200 whitespace-pre-wrap break-words">{{ JSON.stringify(stateQuery.data.value, null, 2) }}</pre>
+        </div>
+      </article>
+    </div>
 
     <section v-if="selected" class="grid gap-3 sm:grid-cols-3">
       <article class="rounded-xl border border-signal/20 bg-signal/[.04] p-5"><Plus class="h-4 w-4 text-signal" /><p class="mt-4 font-mono text-3xl">{{ selected.summary.add }}</p><p class="text-xs text-muted">A criar</p></article>

@@ -12,6 +12,10 @@ import Button from "@/components/ui/Button.vue";
 import StatusBadge from "@/components/ui/StatusBadge.vue";
 import { apiErrorMessage } from "@/lib/api_error";
 import { getBackupOverview } from "@/lib/api_backup";
+import { restoreProxmoxBackup } from "@/lib/api";
+import { useMutation } from "@tanstack/vue-query";
+import { ref } from "vue";
+
 const query = useQuery({
   queryKey: ["backup-overview"],
   queryFn: getBackupOverview,
@@ -26,6 +30,29 @@ const errorMessage = computed(() =>
       )
     : "",
 );
+
+const showRestoreModal = ref(false);
+const restoreNode = ref("");
+const restoreStorage = ref("pbs");
+const restoreArchive = ref("");
+const restoreVMID = ref<number | undefined>(undefined);
+const restoreForce = ref(false);
+
+const restoreMutation = useMutation({
+  mutationFn: () =>
+    restoreProxmoxBackup(
+      restoreNode.value,
+      restoreStorage.value,
+      restoreArchive.value,
+      restoreVMID.value!,
+      restoreForce.value,
+    ),
+  onSuccess: () => {
+    alert("Processo de restauração de backup iniciado no Proxmox VE!");
+    showRestoreModal.value = false;
+  },
+});
+
 const bytes = (n = 0) => {
   const u = ["B", "KB", "MB", "GB", "TB"];
   const i = n ? Math.min(Math.floor(Math.log(n) / Math.log(1024)), 4) : 0;
@@ -53,10 +80,46 @@ const bytes = (n = 0) => {
           Proxmox Backup Server.
         </p>
       </div>
-      <Button variant="outline" @click="query.refetch"
-        ><RefreshCw class="h-4 w-4" />Atualizar</Button
-      >
+      <div class="flex items-center gap-2">
+        <Button variant="outline" @click="showRestoreModal = true"><Archive class="h-4 w-4" />Restaurar PBS para Proxmox</Button>
+        <Button variant="outline" @click="query.refetch"><RefreshCw class="h-4 w-4" />Atualizar</Button>
+      </div>
     </header>
+
+    <div v-if="showRestoreModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" @click.self="showRestoreModal = false">
+      <article class="w-full max-w-lg overflow-hidden rounded-xl border border-line bg-panel p-6 shadow-2xl space-y-4">
+        <h3 class="text-lg font-medium text-slate-100">Restaurar Snapshot PBS no Proxmox VE</h3>
+        <p class="text-xs text-muted">Forneça as informações do snapshot e do nó de destino para disparar o restore.</p>
+
+        <form class="space-y-3" @submit.prevent="restoreMutation.mutate()">
+          <div>
+            <label class="text-xs text-muted block mb-1">Nó Proxmox VE Destino</label>
+            <input v-model="restoreNode" required placeholder="ex: pve-node-1" class="w-full rounded-lg border border-line bg-slate-950 p-2 text-xs text-slate-200" />
+          </div>
+          <div>
+            <label class="text-xs text-muted block mb-1">Storage PBS de Origem</label>
+            <input v-model="restoreStorage" required placeholder="ex: pbs-backup" class="w-full rounded-lg border border-line bg-slate-950 p-2 text-xs text-slate-200" />
+          </div>
+          <div>
+            <label class="text-xs text-muted block mb-1">Arquivo Snapshot / Volid PBS</label>
+            <input v-model="restoreArchive" required placeholder="ex: pbs-backup:backup/vm/100/2026-07-24T12:00:00Z" class="w-full rounded-lg border border-line bg-slate-950 p-2 text-xs font-mono text-slate-200" />
+          </div>
+          <div>
+            <label class="text-xs text-muted block mb-1">Novo VMID / Target VMID</label>
+            <input v-model.number="restoreVMID" type="number" required placeholder="ex: 105" class="w-full rounded-lg border border-line bg-slate-950 p-2 text-xs font-mono text-slate-200" />
+          </div>
+          <div class="flex items-center gap-2 pt-2">
+            <input v-model="restoreForce" type="checkbox" id="forceRestore" class="rounded border-line" />
+            <label for="forceRestore" class="text-xs text-slate-300">Sobrescrever se o VMID já existir (Force)</label>
+          </div>
+
+          <div class="flex justify-end gap-2 pt-4 border-t border-line">
+            <Button variant="outline" type="button" @click="showRestoreModal = false">Cancelar</Button>
+            <Button type="submit" :disabled="!restoreNode || !restoreStorage || !restoreArchive || !restoreVMID || restoreMutation.isPending.value">Disparar Restauração</Button>
+          </div>
+        </form>
+      </article>
+    </div>
     <div
       v-if="errorMessage"
       class="rounded-xl border border-danger/30 bg-danger/5 p-4 text-sm text-danger"

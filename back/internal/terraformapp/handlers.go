@@ -11,8 +11,9 @@ type Handler struct {
 	runner         *terraformadapter.Runner
 	policyEnforcer PolicyEnforcer
 }
-type request struct {
-	Workspace string `json:"workspace"`
+type runRequest struct {
+	Workspace string            `json:"workspace"`
+	Vars      map[string]string `json:"vars,omitempty"`
 }
 
 func (h *Handler) Runs(w http.ResponseWriter, r *http.Request) {
@@ -27,6 +28,25 @@ func (h *Handler) Runs(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{"items": runs, "workspaces": h.runner.Workspaces()})
 }
+
+func (h *Handler) State(w http.ResponseWriter, r *http.Request) {
+	if h.runner == nil {
+		writeError(w, 503, "terraform_unconfigured", "Terraform ephemeral worker is not configured.")
+		return
+	}
+	workspace := strings.TrimSpace(r.URL.Query().Get("workspace"))
+	if workspace == "" {
+		writeError(w, 400, "invalid_request", "Parâmetro workspace é obrigatório.")
+		return
+	}
+	st, err := h.runner.GetState(r.Context(), workspace)
+	if err != nil {
+		writeError(w, 502, "terraform_state_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, st)
+}
+
 func (h *Handler) Validate(w http.ResponseWriter, r *http.Request) { h.start(w, r, "validate") }
 func (h *Handler) Plan(w http.ResponseWriter, r *http.Request)     { h.start(w, r, "plan") }
 func (h *Handler) Apply(w http.ResponseWriter, r *http.Request)    { h.start(w, r, "apply") }
@@ -37,8 +57,8 @@ func (h *Handler) start(w http.ResponseWriter, r *http.Request, operation string
 		writeError(w, 503, "terraform_unconfigured", "Terraform ephemeral worker is not configured.")
 		return
 	}
-	var req request
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+	var req runRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16384)).Decode(&req); err != nil {
 		writeError(w, 400, "invalid_request", "Workspace is required.")
 		return
 	}
@@ -56,7 +76,7 @@ func (h *Handler) start(w http.ResponseWriter, r *http.Request, operation string
 		}
 	}
 
-	run, err := h.runner.Start(r.Context(), operation, req.Workspace)
+	run, err := h.runner.StartWithVars(r.Context(), operation, req.Workspace, req.Vars)
 	if err != nil {
 		if strings.Contains(err.Error(), "allowlisted") {
 			writeError(w, 400, "terraform_request_rejected", "Terraform operation or workspace is not allowlisted.")

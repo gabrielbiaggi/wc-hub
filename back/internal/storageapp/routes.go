@@ -16,4 +16,5 @@ func MountRoutes(mux *http.ServeMux, auth AuthMiddleware, client *mergerfsadapte
 	mux.HandleFunc("POST /api/v1/storage/upload", auth("storage.write", h.Upload))
 	mux.HandleFunc("PATCH /api/v1/storage/entry", auth("storage.write", h.Rename))
 	mux.HandleFunc("DELETE /api/v1/storage/entry", auth("storage.write", h.Delete))
+	mux.HandleFunc("POST /api/v1/storage/rebalance", auth("storage.write", h.Rebalance))
 }

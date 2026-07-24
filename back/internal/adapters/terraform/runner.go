@@ -93,16 +93,35 @@ func (r *Runner) Workspaces() []string {
 	return values
 }
 func (r *Runner) Start(ctx context.Context, operation, workspace string) (Run, error) {
+	return r.StartWithVars(ctx, operation, workspace, nil)
+}
+
+func (r *Runner) StartWithVars(ctx context.Context, operation, workspace string, vars map[string]string) (Run, error) {
 	if operation != "validate" && operation != "plan" && operation != "apply" && operation != "destroy" && operation != "output" {
 		return Run{}, errors.New("Terraform operation is not allowlisted")
 	}
 	if _, ok := r.workspaces[workspace]; !ok {
 		return Run{}, errors.New("Terraform workspace is not allowlisted")
 	}
+	payload := map[string]any{
+		"operation": operation,
+		"workspace": workspace,
+		"vars":      vars,
+	}
 	var run Run
-	err := r.request(ctx, http.MethodPost, "/v1/runs", map[string]string{"operation": operation, "workspace": workspace}, &run)
+	err := r.request(ctx, http.MethodPost, "/v1/runs", payload, &run)
 	return run, err
 }
+
+func (r *Runner) GetState(ctx context.Context, workspace string) (map[string]any, error) {
+	if _, ok := r.workspaces[workspace]; !ok {
+		return nil, errors.New("Terraform workspace is not allowlisted")
+	}
+	var result map[string]any
+	err := r.request(ctx, http.MethodGet, "/v1/state?workspace="+url.QueryEscape(workspace), nil, &result)
+	return result, err
+}
+
 func (r *Runner) List(ctx context.Context) ([]Run, error) {
 	result := struct {
 		Items []Run `json:"items"`

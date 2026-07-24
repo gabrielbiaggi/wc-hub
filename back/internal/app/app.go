@@ -387,6 +387,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/proxmox/nodes/{node}/storage/{storage}/content", a.protect("proxmox.manage", a.proxmoxDeleteStorageContent))
 	mux.HandleFunc("GET /api/v1/proxmox/nodes/{node}/backups", a.protect("proxmox.read", a.proxmoxNodeBackups))
 	mux.HandleFunc("POST /api/v1/proxmox/nodes/{node}/{kind}/{vmid}/backup", a.protect("proxmox.manage", a.proxmoxCreateBackup))
+	mux.HandleFunc("POST /api/v1/proxmox/nodes/{node}/restore", a.protect("proxmox.manage", a.proxmoxRestoreBackup))
 	mux.HandleFunc("GET /api/v1/proxmox/nodes/{node}/tasks/{upid}/status", a.protect("proxmox.read", a.proxmoxTaskStatus))
 	mux.HandleFunc("GET /api/v1/proxmox/nodes/{node}/tasks/{upid}/log", a.protect("proxmox.read", a.proxmoxTaskLog))
 	mux.HandleFunc("POST /api/v1/proxmox/nodes/{node}/qemu/{vmid}/template", a.protect("proxmox.manage", a.proxmoxConvertToTemplate))

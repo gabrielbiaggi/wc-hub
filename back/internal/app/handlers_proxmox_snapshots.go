@@ -400,3 +400,34 @@ func (a *App) proxmoxCreateBackup(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 202, map[string]string{"status": "accepted"})
 }
+
+func (a *App) proxmoxRestoreBackup(w http.ResponseWriter, r *http.Request) {
+	node := r.PathValue("node")
+	if node == "" {
+		writeError(w, 400, "invalid_node", "Node inválido.")
+		return
+	}
+	c := a.proxmoxClient
+	if c == nil {
+		writeError(w, 503, "proxmox_unconfigured", "Proxmox não configurado.")
+		return
+	}
+	var in struct {
+		Storage string `json:"storage"`
+		Archive string `json:"archive"`
+		VMID    int    `json:"vmid"`
+		Force   bool   `json:"force"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if in.Storage == "" || in.Archive == "" || in.VMID <= 0 {
+		writeError(w, 400, "missing_params", "Storage, Archive e VMID são obrigatórios.")
+		return
+	}
+	if e := c.RestoreGuestBackup(r.Context(), node, in.Storage, in.Archive, in.VMID, in.Force); e != nil {
+		writeError(w, 502, "proxmox_restore_failed", e.Error())
+		return
+	}
+	writeJSON(w, 202, map[string]string{"status": "accepted"})
+}

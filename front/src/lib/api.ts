@@ -578,6 +578,25 @@ export const createProxmoxBackup = async (
     )
   ).data;
 
+export const restoreProxmoxBackup = async (
+  node: string,
+  storage: string,
+  archive: string,
+  vmid: number,
+  force?: boolean,
+) =>
+  (
+    await api.post(`/v1/proxmox/nodes/${encodeURIComponent(node)}/restore`, {
+      storage,
+      archive,
+      vmid,
+      force,
+    })
+  ).data;
+
+export const rebalanceMergerFSPool = async () =>
+  (await api.post<{ status: string }>('/v1/storage/rebalance')).data;
+
 export interface ProxmoxStorageContentItem {
   volid: string;
   content: string;

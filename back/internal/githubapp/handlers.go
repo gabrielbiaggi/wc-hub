@@ -142,6 +142,60 @@ func (h *Handler) UpdateWorkflowFile(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 202, map[string]string{"status": "accepted"})
 }
+
+func (h *Handler) WorkflowRunLogs(w http.ResponseWriter, r *http.Request) {
+	if h.client == nil {
+		writeError(w, 503, "github_unconfigured", "GitHub is not configured.")
+		return
+	}
+	runID, err := strconv.ParseInt(r.PathValue("run_id"), 10, 64)
+	if err != nil || runID <= 0 {
+		writeError(w, 400, "invalid_request", "Run ID inválido.")
+		return
+	}
+	logs, err := h.client.GetWorkflowRunLogs(r.Context(), repoFromPath(r), runID)
+	if err != nil {
+		writeError(w, 502, "github_logs_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"logs": logs})
+}
+
+func (h *Handler) CreateRelease(w http.ResponseWriter, r *http.Request) {
+	if h.client == nil {
+		writeError(w, 503, "github_unconfigured", "GitHub is not configured.")
+		return
+	}
+	var input githubadapter.CreateReleaseInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || strings.TrimSpace(input.TagName) == "" {
+		writeError(w, 400, "invalid_request", "Tag Name é obrigatório.")
+		return
+	}
+	rel, err := h.client.CreateRelease(r.Context(), repoFromPath(r), input)
+	if err != nil {
+		writeError(w, 502, "create_release_failed", err.Error())
+		return
+	}
+	writeJSON(w, 201, rel)
+}
+
+func (h *Handler) DeleteRelease(w http.ResponseWriter, r *http.Request) {
+	if h.client == nil {
+		writeError(w, 503, "github_unconfigured", "GitHub is not configured.")
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, 400, "invalid_request", "Release ID inválido.")
+		return
+	}
+	if err := h.client.DeleteRelease(r.Context(), repoFromPath(r), id); err != nil {
+		writeError(w, 502, "delete_release_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "deleted"})
+}
+
 func repoFromPath(r *http.Request) string {
 	return strings.TrimSpace(r.PathValue("owner")) + "/" + strings.TrimSpace(r.PathValue("repo"))
 }

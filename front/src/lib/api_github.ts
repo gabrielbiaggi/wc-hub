@@ -122,3 +122,20 @@ export const updateGitHubWorkflowFile = async (repository: string, input: { path
     content_base64: btoa(binary),
   })).data
 }
+
+export const getGitHubWorkflowRunLogs = async (repository: string, runID: number) =>
+  (await api.get<{ logs: string }>(`/v1/github/repos/${repositoryPath(repository)}/actions/runs/${runID}/logs`)).data
+
+export interface CreateGitHubReleaseInput {
+  tag_name: string
+  name: string
+  body: string
+  draft: boolean
+  prerelease: boolean
+}
+
+export const createGitHubRelease = async (repository: string, input: CreateGitHubReleaseInput) =>
+  (await api.post<GitHubRelease>(`/v1/github/repos/${repositoryPath(repository)}/releases`, input)).data
+
+export const deleteGitHubRelease = async (repository: string, releaseID: number) =>
+  (await api.delete<{ status: string }>(`/v1/github/repos/${repositoryPath(repository)}/releases/${releaseID}`)).data
