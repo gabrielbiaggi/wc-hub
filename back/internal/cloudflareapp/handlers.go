@@ -47,6 +47,24 @@ type ZoneAdministrator interface {
 	PurgeCache(context.Context, string) error
 	ListRulesets(context.Context, string) ([]cloudflareadapter.Ruleset, error)
 }
+type WorkersManager interface {
+	ListWorkers(context.Context, string) ([]cloudflareadapter.WorkerScript, error)
+	UploadWorker(context.Context, string, string, string) error
+	DeleteWorker(context.Context, string, string) error
+}
+type KVManager interface {
+	ListKVNamespaces(context.Context, string) ([]cloudflareadapter.KVNamespace, error)
+	CreateKVNamespace(context.Context, string, string) (string, error)
+	DeleteKVNamespace(context.Context, string, string) error
+}
+type WAFManager interface {
+	ListWAFRules(context.Context, string) ([]cloudflareadapter.WAFRule, error)
+	CreateWAFRule(context.Context, string, cloudflareadapter.CreateWAFRuleInput) (string, error)
+	DeleteWAFRule(context.Context, string, string) error
+}
+type AnalyticsManager interface {
+	GetZoneAnalytics(context.Context, string) (cloudflareadapter.ZoneAnalytics, error)
+}
 
 // AuditEvent is intentionally provider-neutral so the global application can
 // translate it into its hash-chained audit repository without this plugin
@@ -544,12 +562,16 @@ func (h *Handler) Rulesets(w http.ResponseWriter, request *http.Request) {
 
 func (h *Handler) ListWorkers(w http.ResponseWriter, r *http.Request) {
 	accountID := r.PathValue("account_id")
-	client, ok := h.reader.(*cloudflareadapter.Client)
-	if !ok || client == nil {
-		writeError(w, 503, "cloudflare_unavailable", "Cloudflare adapter client unavailable.")
+	if _, allowed := h.allowedAccounts[accountID]; !allowed || !h.reader.AccountAllowed(accountID) {
+		writeError(w, 403, "account_not_allowed", "A conta Cloudflare solicitada não está autorizada.")
 		return
 	}
-	items, err := client.ListWorkers(r.Context(), accountID)
+	manager, ok := h.reader.(WorkersManager)
+	if !ok {
+		writeError(w, 503, "cloudflare_workers_unavailable", "A gestão de Workers não está disponível.")
+		return
+	}
+	items, err := manager.ListWorkers(r.Context(), accountID)
 	if err != nil {
 		writeError(w, 502, "cloudflare_workers_failed", err.Error())
 		return
@@ -560,9 +582,13 @@ func (h *Handler) ListWorkers(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) UploadWorker(w http.ResponseWriter, r *http.Request) {
 	accountID := r.PathValue("account_id")
 	name := r.PathValue("name")
-	client, ok := h.reader.(*cloudflareadapter.Client)
-	if !ok || client == nil {
-		writeError(w, 503, "cloudflare_unavailable", "Cloudflare adapter client unavailable.")
+	if _, allowed := h.allowedAccounts[accountID]; !allowed || !h.reader.AccountAllowed(accountID) {
+		writeError(w, 403, "account_not_allowed", "A conta Cloudflare solicitada não está autorizada.")
+		return
+	}
+	manager, ok := h.reader.(WorkersManager)
+	if !ok {
+		writeError(w, 503, "cloudflare_workers_unavailable", "A gestão de Workers não está disponível.")
 		return
 	}
 	var input struct {
@@ -572,36 +598,48 @@ func (h *Handler) UploadWorker(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request", "Código JavaScript do Worker é obrigatório.")
 		return
 	}
-	if err := client.UploadWorker(r.Context(), accountID, name, input.Code); err != nil {
+	if err := manager.UploadWorker(r.Context(), accountID, name, input.Code); err != nil {
+		h.emit(r.Context(), AuditEvent{Action: "cloudflare.worker.upload", ResourceType: "cloudflare_worker", TargetName: name, Decision: "failed", Reason: err.Error()})
 		writeError(w, 502, "upload_worker_failed", err.Error())
 		return
 	}
+	h.emit(r.Context(), AuditEvent{Action: "cloudflare.worker.upload", ResourceType: "cloudflare_worker", TargetName: name, Decision: "allowed", Payload: map[string]any{"account_id": accountID}})
 	writeJSON(w, 200, map[string]string{"status": "uploaded", "name": name})
 }
 
 func (h *Handler) DeleteWorker(w http.ResponseWriter, r *http.Request) {
 	accountID := r.PathValue("account_id")
 	name := r.PathValue("name")
-	client, ok := h.reader.(*cloudflareadapter.Client)
-	if !ok || client == nil {
-		writeError(w, 503, "cloudflare_unavailable", "Cloudflare adapter client unavailable.")
+	if _, allowed := h.allowedAccounts[accountID]; !allowed || !h.reader.AccountAllowed(accountID) {
+		writeError(w, 403, "account_not_allowed", "A conta Cloudflare solicitada não está autorizada.")
 		return
 	}
-	if err := client.DeleteWorker(r.Context(), accountID, name); err != nil {
+	manager, ok := h.reader.(WorkersManager)
+	if !ok {
+		writeError(w, 503, "cloudflare_workers_unavailable", "A gestão de Workers não está disponível.")
+		return
+	}
+	if err := manager.DeleteWorker(r.Context(), accountID, name); err != nil {
+		h.emit(r.Context(), AuditEvent{Action: "cloudflare.worker.delete", ResourceType: "cloudflare_worker", TargetName: name, Decision: "failed", Reason: err.Error()})
 		writeError(w, 502, "delete_worker_failed", err.Error())
 		return
 	}
+	h.emit(r.Context(), AuditEvent{Action: "cloudflare.worker.delete", ResourceType: "cloudflare_worker", TargetName: name, Decision: "allowed", Payload: map[string]any{"account_id": accountID}})
 	writeJSON(w, 200, map[string]string{"status": "deleted", "name": name})
 }
 
 func (h *Handler) ListKVNamespaces(w http.ResponseWriter, r *http.Request) {
 	accountID := r.PathValue("account_id")
-	client, ok := h.reader.(*cloudflareadapter.Client)
-	if !ok || client == nil {
-		writeError(w, 503, "cloudflare_unavailable", "Cloudflare adapter client unavailable.")
+	if _, allowed := h.allowedAccounts[accountID]; !allowed || !h.reader.AccountAllowed(accountID) {
+		writeError(w, 403, "account_not_allowed", "A conta Cloudflare solicitada não está autorizada.")
 		return
 	}
-	items, err := client.ListKVNamespaces(r.Context(), accountID)
+	manager, ok := h.reader.(KVManager)
+	if !ok {
+		writeError(w, 503, "cloudflare_kv_unavailable", "A gestão de KV Namespaces não está disponível.")
+		return
+	}
+	items, err := manager.ListKVNamespaces(r.Context(), accountID)
 	if err != nil {
 		writeError(w, 502, "cloudflare_kv_failed", err.Error())
 		return
@@ -611,9 +649,13 @@ func (h *Handler) ListKVNamespaces(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) CreateKVNamespace(w http.ResponseWriter, r *http.Request) {
 	accountID := r.PathValue("account_id")
-	client, ok := h.reader.(*cloudflareadapter.Client)
-	if !ok || client == nil {
-		writeError(w, 503, "cloudflare_unavailable", "Cloudflare adapter client unavailable.")
+	if _, allowed := h.allowedAccounts[accountID]; !allowed || !h.reader.AccountAllowed(accountID) {
+		writeError(w, 403, "account_not_allowed", "A conta Cloudflare solicitada não está autorizada.")
+		return
+	}
+	manager, ok := h.reader.(KVManager)
+	if !ok {
+		writeError(w, 503, "cloudflare_kv_unavailable", "A gestão de KV Namespaces não está disponível.")
 		return
 	}
 	var input struct {
@@ -623,37 +665,49 @@ func (h *Handler) CreateKVNamespace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request", "Título do KV Namespace é obrigatório.")
 		return
 	}
-	id, err := client.CreateKVNamespace(r.Context(), accountID, input.Title)
+	id, err := manager.CreateKVNamespace(r.Context(), accountID, input.Title)
 	if err != nil {
+		h.emit(r.Context(), AuditEvent{Action: "cloudflare.kv.create", ResourceType: "cloudflare_kv_namespace", TargetName: input.Title, Decision: "failed", Reason: err.Error()})
 		writeError(w, 502, "create_kv_failed", err.Error())
 		return
 	}
+	h.emit(r.Context(), AuditEvent{Action: "cloudflare.kv.create", ResourceType: "cloudflare_kv_namespace", TargetName: input.Title, Decision: "allowed", Payload: map[string]any{"account_id": accountID, "id": id}})
 	writeJSON(w, 201, map[string]string{"status": "created", "id": id, "title": input.Title})
 }
 
 func (h *Handler) DeleteKVNamespace(w http.ResponseWriter, r *http.Request) {
 	accountID := r.PathValue("account_id")
 	id := r.PathValue("id")
-	client, ok := h.reader.(*cloudflareadapter.Client)
-	if !ok || client == nil {
-		writeError(w, 503, "cloudflare_unavailable", "Cloudflare adapter client unavailable.")
+	if _, allowed := h.allowedAccounts[accountID]; !allowed || !h.reader.AccountAllowed(accountID) {
+		writeError(w, 403, "account_not_allowed", "A conta Cloudflare solicitada não está autorizada.")
 		return
 	}
-	if err := client.DeleteKVNamespace(r.Context(), accountID, id); err != nil {
+	manager, ok := h.reader.(KVManager)
+	if !ok {
+		writeError(w, 503, "cloudflare_kv_unavailable", "A gestão de KV Namespaces não está disponível.")
+		return
+	}
+	if err := manager.DeleteKVNamespace(r.Context(), accountID, id); err != nil {
+		h.emit(r.Context(), AuditEvent{Action: "cloudflare.kv.delete", ResourceType: "cloudflare_kv_namespace", TargetName: id, Decision: "failed", Reason: err.Error()})
 		writeError(w, 502, "delete_kv_failed", err.Error())
 		return
 	}
+	h.emit(r.Context(), AuditEvent{Action: "cloudflare.kv.delete", ResourceType: "cloudflare_kv_namespace", TargetName: id, Decision: "allowed", Payload: map[string]any{"account_id": accountID}})
 	writeJSON(w, 200, map[string]string{"status": "deleted", "id": id})
 }
 
 func (h *Handler) ListWAFRules(w http.ResponseWriter, r *http.Request) {
 	zoneID := r.PathValue("zone_id")
-	client, ok := h.reader.(*cloudflareadapter.Client)
-	if !ok || client == nil {
-		writeError(w, 503, "cloudflare_unavailable", "Cloudflare adapter client unavailable.")
+	if _, allowed := h.allowedZones[zoneID]; !allowed || !h.reader.ZoneAllowed(zoneID) {
+		writeError(w, 403, "zone_not_allowed", "A zona solicitada não está autorizada.")
 		return
 	}
-	items, err := client.ListWAFRules(r.Context(), zoneID)
+	manager, ok := h.reader.(WAFManager)
+	if !ok {
+		writeError(w, 503, "cloudflare_waf_unavailable", "A gestão de regras WAF não está disponível.")
+		return
+	}
+	items, err := manager.ListWAFRules(r.Context(), zoneID)
 	if err != nil {
 		writeError(w, 502, "cloudflare_waf_failed", err.Error())
 		return
@@ -663,9 +717,13 @@ func (h *Handler) ListWAFRules(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) CreateWAFRule(w http.ResponseWriter, r *http.Request) {
 	zoneID := r.PathValue("zone_id")
-	client, ok := h.reader.(*cloudflareadapter.Client)
-	if !ok || client == nil {
-		writeError(w, 503, "cloudflare_unavailable", "Cloudflare adapter client unavailable.")
+	if _, allowed := h.allowedZones[zoneID]; !allowed || !h.reader.ZoneAllowed(zoneID) {
+		writeError(w, 403, "zone_not_allowed", "A zona solicitada não está autorizada.")
+		return
+	}
+	manager, ok := h.reader.(WAFManager)
+	if !ok {
+		writeError(w, 503, "cloudflare_waf_unavailable", "A gestão de regras WAF não está disponível.")
 		return
 	}
 	var input cloudflareadapter.CreateWAFRuleInput
@@ -673,37 +731,49 @@ func (h *Handler) CreateWAFRule(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request", "Dados da regra WAF são inválidos.")
 		return
 	}
-	id, err := client.CreateWAFRule(r.Context(), zoneID, input)
+	id, err := manager.CreateWAFRule(r.Context(), zoneID, input)
 	if err != nil {
+		h.emit(r.Context(), AuditEvent{Action: "cloudflare.waf.create", ResourceType: "cloudflare_waf_rule", TargetName: input.Description, Decision: "failed", Reason: err.Error()})
 		writeError(w, 502, "create_waf_failed", err.Error())
 		return
 	}
+	h.emit(r.Context(), AuditEvent{Action: "cloudflare.waf.create", ResourceType: "cloudflare_waf_rule", TargetName: input.Description, Decision: "allowed", Payload: map[string]any{"zone_id": zoneID, "id": id, "action": input.Action}})
 	writeJSON(w, 201, map[string]string{"status": "created", "id": id})
 }
 
 func (h *Handler) DeleteWAFRule(w http.ResponseWriter, r *http.Request) {
 	zoneID := r.PathValue("zone_id")
 	id := r.PathValue("id")
-	client, ok := h.reader.(*cloudflareadapter.Client)
-	if !ok || client == nil {
-		writeError(w, 503, "cloudflare_unavailable", "Cloudflare adapter client unavailable.")
+	if _, allowed := h.allowedZones[zoneID]; !allowed || !h.reader.ZoneAllowed(zoneID) {
+		writeError(w, 403, "zone_not_allowed", "A zona solicitada não está autorizada.")
 		return
 	}
-	if err := client.DeleteWAFRule(r.Context(), zoneID, id); err != nil {
+	manager, ok := h.reader.(WAFManager)
+	if !ok {
+		writeError(w, 503, "cloudflare_waf_unavailable", "A gestão de regras WAF não está disponível.")
+		return
+	}
+	if err := manager.DeleteWAFRule(r.Context(), zoneID, id); err != nil {
+		h.emit(r.Context(), AuditEvent{Action: "cloudflare.waf.delete", ResourceType: "cloudflare_waf_rule", TargetName: id, Decision: "failed", Reason: err.Error()})
 		writeError(w, 502, "delete_waf_failed", err.Error())
 		return
 	}
+	h.emit(r.Context(), AuditEvent{Action: "cloudflare.waf.delete", ResourceType: "cloudflare_waf_rule", TargetName: id, Decision: "allowed", Payload: map[string]any{"zone_id": zoneID}})
 	writeJSON(w, 200, map[string]string{"status": "deleted", "id": id})
 }
 
 func (h *Handler) ZoneAnalytics(w http.ResponseWriter, r *http.Request) {
 	zoneID := r.PathValue("zone_id")
-	client, ok := h.reader.(*cloudflareadapter.Client)
-	if !ok || client == nil {
-		writeError(w, 503, "cloudflare_unavailable", "Cloudflare adapter client unavailable.")
+	if _, allowed := h.allowedZones[zoneID]; !allowed || !h.reader.ZoneAllowed(zoneID) {
+		writeError(w, 403, "zone_not_allowed", "A zona solicitada não está autorizada.")
 		return
 	}
-	analytics, err := client.GetZoneAnalytics(r.Context(), zoneID)
+	manager, ok := h.reader.(AnalyticsManager)
+	if !ok {
+		writeError(w, 503, "cloudflare_analytics_unavailable", "O analytics da zona não está disponível.")
+		return
+	}
+	analytics, err := manager.GetZoneAnalytics(r.Context(), zoneID)
 	if err != nil {
 		writeError(w, 502, "cloudflare_analytics_failed", err.Error())
 		return

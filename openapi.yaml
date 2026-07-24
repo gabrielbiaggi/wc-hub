@@ -1506,6 +1506,170 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/cloudflare/accounts/{account_id}/workers:
+    get:
+      summary: GET /api/v1/cloudflare/accounts/{account_id}/workers
+      operationId: get_cloudflare_accounts_account_id_workers
+      tags: [cloudflare]
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/cloudflare/accounts/{account_id}/workers/{name}:
+    put:
+      summary: PUT /api/v1/cloudflare/accounts/{account_id}/workers/{name}
+      operationId: put_cloudflare_accounts_account_id_workers_name
+      tags: [cloudflare]
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+    delete:
+      summary: DELETE /api/v1/cloudflare/accounts/{account_id}/workers/{name}
+      operationId: delete_cloudflare_accounts_account_id_workers_name
+      tags: [cloudflare]
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/cloudflare/accounts/{account_id}/kv:
+    get:
+      summary: GET /api/v1/cloudflare/accounts/{account_id}/kv
+      operationId: get_cloudflare_accounts_account_id_kv
+      tags: [cloudflare]
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+    post:
+      summary: POST /api/v1/cloudflare/accounts/{account_id}/kv
+      operationId: post_cloudflare_accounts_account_id_kv
+      tags: [cloudflare]
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/cloudflare/accounts/{account_id}/kv/{id}:
+    delete:
+      summary: DELETE /api/v1/cloudflare/accounts/{account_id}/kv/{id}
+      operationId: delete_cloudflare_accounts_account_id_kv_id
+      tags: [cloudflare]
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/cloudflare/zones/{zone_id}/waf:
+    get:
+      summary: GET /api/v1/cloudflare/zones/{zone_id}/waf
+      operationId: get_cloudflare_zones_zone_id_waf
+      tags: [cloudflare]
+      parameters:
+        - name: zone_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+    post:
+      summary: POST /api/v1/cloudflare/zones/{zone_id}/waf
+      operationId: post_cloudflare_zones_zone_id_waf
+      tags: [cloudflare]
+      parameters:
+        - name: zone_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/cloudflare/zones/{zone_id}/waf/{id}:
+    delete:
+      summary: DELETE /api/v1/cloudflare/zones/{zone_id}/waf/{id}
+      operationId: delete_cloudflare_zones_zone_id_waf_id
+      tags: [cloudflare]
+      parameters:
+        - name: zone_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/cloudflare/zones/{zone_id}/analytics:
+    get:
+      summary: GET /api/v1/cloudflare/zones/{zone_id}/analytics
+      operationId: get_cloudflare_zones_zone_id_analytics
+      tags: [cloudflare]
+      parameters:
+        - name: zone_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
   /api/v1/github/overview:
     get:
       summary: GET /api/v1/github/overview
