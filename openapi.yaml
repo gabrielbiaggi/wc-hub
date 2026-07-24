@@ -1916,6 +1916,151 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/oci/images:
+    get:
+      summary: GET /api/v1/oci/images
+      operationId: get_oci_images
+      tags: [oci]
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/oci/shapes:
+    get:
+      summary: GET /api/v1/oci/shapes
+      operationId: get_oci_shapes
+      tags: [oci]
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/oci/instances/{id}:
+    delete:
+      summary: DELETE /api/v1/oci/instances/{id}
+      operationId: delete_oci_instances_id
+      tags: [oci]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/oci/autonomous-databases/{id}/{action}:
+    post:
+      summary: POST /api/v1/oci/autonomous-databases/{id}/{action}
+      operationId: post_oci_autonomous_databases_id_action
+      tags: [oci]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: action
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/oci/db-systems/{id}/{action}:
+    post:
+      summary: POST /api/v1/oci/db-systems/{id}/{action}
+      operationId: post_oci_db_systems_id_action
+      tags: [oci]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: action
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/oci/vcns:
+    post:
+      summary: POST /api/v1/oci/vcns
+      operationId: post_oci_vcns
+      tags: [oci]
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/oci/vcns/{id}:
+    delete:
+      summary: DELETE /api/v1/oci/vcns/{id}
+      operationId: delete_oci_vcns_id
+      tags: [oci]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/oci/subnets:
+    post:
+      summary: POST /api/v1/oci/subnets
+      operationId: post_oci_subnets
+      tags: [oci]
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/oci/subnets/{id}:
+    delete:
+      summary: DELETE /api/v1/oci/subnets/{id}
+      operationId: delete_oci_subnets_id
+      tags: [oci]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/oci/volumes:
+    post:
+      summary: POST /api/v1/oci/volumes
+      operationId: post_oci_volumes
+      tags: [oci]
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/oci/volumes/{id}:
+    delete:
+      summary: DELETE /api/v1/oci/volumes/{id}
+      operationId: delete_oci_volumes_id
+      tags: [oci]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
   /api/v1/operations/catalog:
     get:
       summary: GET /api/v1/operations/catalog
