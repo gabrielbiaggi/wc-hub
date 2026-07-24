@@ -26,6 +26,8 @@ export interface OCIInstance {
   compartment_id: string;
   ocpus: number;
   memory_gb: number;
+  public_ip?: string;
+  private_ip?: string;
   time_created?: string;
   tags?: Record<string, string>;
 }
@@ -117,6 +119,74 @@ export const runOCIInstanceAction = async (
       { timeout: 60_000 },
     )
   ).data;
+export const terminateOCIInstance = async (
+  instanceId: string,
+  region?: string,
+) =>
+  (
+    await api.delete<{ status: string; instance_id: string }>(
+      `/v1/oci/instances/${encodeURIComponent(instanceId)}`,
+      { params: { region }, timeout: 60_000 },
+    )
+  ).data;
+
+export interface OCIImageSummary {
+  id: string;
+  display_name: string;
+  operating_system: string;
+  operating_system_version: string;
+}
+export const getOCIImages = async (
+  compartment_id?: string,
+  region?: string,
+): Promise<OCIImageSummary[]> =>
+  (
+    await api.get<{ items: OCIImageSummary[] }>("/v1/oci/images", {
+      params: { compartment_id, region },
+    })
+  ).data.items;
+
+export interface OCIShapeSummary {
+  name: string;
+  ocpus: number;
+  memory_gb: number;
+}
+export const getOCIShapes = async (
+  compartment_id?: string,
+  region?: string,
+): Promise<OCIShapeSummary[]> =>
+  (
+    await api.get<{ items: OCIShapeSummary[] }>("/v1/oci/shapes", {
+      params: { compartment_id, region },
+    })
+  ).data.items;
+
+export const runOCIAutonomousDatabaseAction = async (
+  dbId: string,
+  action: "start" | "stop" | "restart" | "delete",
+  region?: string,
+) =>
+  (
+    await api.post<{ status: string; database_id: string }>(
+      `/v1/oci/autonomous-databases/${encodeURIComponent(dbId)}/${action}`,
+      {},
+      { params: { region }, timeout: 60_000 },
+    )
+  ).data;
+
+export const runOCIDBSystemAction = async (
+  dbId: string,
+  action: "start" | "stop" | "reboot" | "delete",
+  region?: string,
+) =>
+  (
+    await api.post<{ status: string; dbsystem_id: string }>(
+      `/v1/oci/db-systems/${encodeURIComponent(dbId)}/${action}`,
+      {},
+      { params: { region }, timeout: 60_000 },
+    )
+  ).data;
+
 export interface OCILaunchInstanceInput {
   region: string;
   compartment_id: string;
@@ -158,5 +228,60 @@ export const createOCIAutonomousDatabase = async (
       "/v1/oci/autonomous-databases",
       input,
       { timeout: 60_000 },
+    )
+  ).data;
+
+export interface OCICreateVCNInput {
+  region: string;
+  compartment_id: string;
+  display_name: string;
+  cidr_block: string;
+  dns_label: string;
+}
+export const createOCIVCN = async (input: OCICreateVCNInput) =>
+  (await api.post<{ status: string; vcn_id: string }>("/v1/oci/vcns", input)).data;
+
+export const deleteOCIVCN = async (vcnId: string, region?: string) =>
+  (
+    await api.delete<{ status: string; vcn_id: string }>(
+      `/v1/oci/vcns/${encodeURIComponent(vcnId)}`,
+      { params: { region } },
+    )
+  ).data;
+
+export interface OCICreateSubnetInput {
+  region: string;
+  compartment_id: string;
+  vcn_id: string;
+  display_name: string;
+  cidr_block: string;
+  private: boolean;
+}
+export const createOCISubnet = async (input: OCICreateSubnetInput) =>
+  (await api.post<{ status: string; subnet_id: string }>("/v1/oci/subnets", input)).data;
+
+export const deleteOCISubnet = async (subnetId: string, region?: string) =>
+  (
+    await api.delete<{ status: string; subnet_id: string }>(
+      `/v1/oci/subnets/${encodeURIComponent(subnetId)}`,
+      { params: { region } },
+    )
+  ).data;
+
+export interface OCICreateVolumeInput {
+  region: string;
+  compartment_id: string;
+  availability_domain: string;
+  display_name: string;
+  size_gb: number;
+}
+export const createOCIBlockVolume = async (input: OCICreateVolumeInput) =>
+  (await api.post<{ status: string; volume_id: string }>("/v1/oci/volumes", input)).data;
+
+export const deleteOCIBlockVolume = async (volumeId: string, region?: string) =>
+  (
+    await api.delete<{ status: string; volume_id: string }>(
+      `/v1/oci/volumes/${encodeURIComponent(volumeId)}`,
+      { params: { region } },
     )
   ).data;

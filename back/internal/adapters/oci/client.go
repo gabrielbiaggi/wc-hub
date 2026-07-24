@@ -65,6 +65,8 @@ type Instance struct {
 	CompartmentID      string            `json:"compartment_id"`
 	OCPUs              float32           `json:"ocpus"`
 	MemoryGB           float32           `json:"memory_gb"`
+	PublicIP           string            `json:"public_ip,omitempty"`
+	PrivateIP          string            `json:"private_ip,omitempty"`
 	TimeCreated        *common.SDKTime   `json:"time_created,omitempty"`
 	Tags               map[string]string `json:"tags,omitempty"`
 }
@@ -304,6 +306,17 @@ func (c *Client) Snapshot(ctx context.Context) (Snapshot, error) {
 							mapped.OCPUs = float32Value(item.ShapeConfig.Ocpus)
 							mapped.MemoryGB = float32Value(item.ShapeConfig.MemoryInGBs)
 						}
+						if vnicAttachments, vnicErr := computeClient.ListVnicAttachments(ctx, core.ListVnicAttachmentsRequest{CompartmentId: common.String(compartmentID), InstanceId: item.Id}); vnicErr == nil {
+							for _, att := range vnicAttachments.Items {
+								if att.LifecycleState == core.VnicAttachmentLifecycleStateAttached && att.VnicId != nil {
+									if vnicResp, getVnicErr := networkClient.GetVnic(ctx, core.GetVnicRequest{VnicId: att.VnicId}); getVnicErr == nil {
+										mapped.PublicIP = stringValue(vnicResp.Vnic.PublicIp)
+										mapped.PrivateIP = stringValue(vnicResp.Vnic.PrivateIp)
+										break
+									}
+								}
+							}
+						}
 						bundle.instances = append(bundle.instances, mapped)
 					}
 					if !hasNextPage(instances.OpcNextPage) {
@@ -535,12 +548,297 @@ func (c *Client) InstanceAction(ctx context.Context, instanceID, action, region 
 	if err != nil {
 		return fmt.Errorf("create OCI compute client: %w", err)
 	}
-	if region = strings.TrimSpace(region); region != "" {
-		client.SetRegion(region)
-	}
 	_, err = client.InstanceAction(ctx, core.InstanceActionRequest{InstanceId: common.String(instanceID), Action: mapped})
 	if err != nil {
 		return fmt.Errorf("OCI instance action: %w", err)
 	}
 	return nil
+}
+
+func (c *Client) TerminateInstance(ctx context.Context, instanceID, region string) error {
+	if !strings.HasPrefix(instanceID, "ocid1.instance.") {
+		return fmt.Errorf("invalid OCI instance OCID")
+	}
+	client, err := core.NewComputeClientWithConfigurationProvider(c.provider)
+	if err != nil {
+		return err
+	}
+	if region = strings.TrimSpace(region); region != "" {
+		client.SetRegion(region)
+	}
+	_, err = client.TerminateInstance(ctx, core.TerminateInstanceRequest{InstanceId: common.String(instanceID), PreserveBootVolume: common.Bool(false)})
+	return err
+}
+
+type ImageSummary struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name"`
+	OS          string `json:"operating_system"`
+	OSVersion   string `json:"operating_system_version"`
+}
+
+func (c *Client) ListImages(ctx context.Context, compartmentID, region string) ([]ImageSummary, error) {
+	client, err := core.NewComputeClientWithConfigurationProvider(c.provider)
+	if err != nil {
+		return nil, err
+	}
+	if region = strings.TrimSpace(region); region != "" {
+		client.SetRegion(region)
+	}
+	if compartmentID == "" {
+		compartmentID = c.tenancy
+	}
+	resp, err := client.ListImages(ctx, core.ListImagesRequest{CompartmentId: common.String(compartmentID), Limit: common.Int(100)})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]ImageSummary, 0, len(resp.Items))
+	for _, item := range resp.Items {
+		items = append(items, ImageSummary{
+			ID:          stringValue(item.Id),
+			DisplayName: stringValue(item.DisplayName),
+			OS:          stringValue(item.OperatingSystem),
+			OSVersion:   stringValue(item.OperatingSystemVersion),
+		})
+	}
+	return items, nil
+}
+
+type ShapeSummary struct {
+	Name     string  `json:"name"`
+	Ocpus    float32 `json:"ocpus"`
+	MemoryGB float32 `json:"memory_gb"`
+}
+
+func (c *Client) ListShapes(ctx context.Context, compartmentID, region string) ([]ShapeSummary, error) {
+	client, err := core.NewComputeClientWithConfigurationProvider(c.provider)
+	if err != nil {
+		return nil, err
+	}
+	if region = strings.TrimSpace(region); region != "" {
+		client.SetRegion(region)
+	}
+	if compartmentID == "" {
+		compartmentID = c.tenancy
+	}
+	resp, err := client.ListShapes(ctx, core.ListShapesRequest{CompartmentId: common.String(compartmentID), Limit: common.Int(100)})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]ShapeSummary, 0, len(resp.Items))
+	for _, item := range resp.Items {
+		shape := ShapeSummary{Name: stringValue(item.Shape)}
+		if item.Ocpus != nil {
+			shape.Ocpus = float32(*item.Ocpus)
+		}
+		if item.MemoryInGBs != nil {
+			shape.MemoryGB = float32(*item.MemoryInGBs)
+		}
+		items = append(items, shape)
+	}
+	return items, nil
+}
+
+func (c *Client) AutonomousDatabaseAction(ctx context.Context, dbID, action, region string) error {
+	if !strings.HasPrefix(dbID, "ocid1.autonomousdatabase.") {
+		return fmt.Errorf("invalid Autonomous Database OCID")
+	}
+	client, err := database.NewDatabaseClientWithConfigurationProvider(c.provider)
+	if err != nil {
+		return err
+	}
+	if region = strings.TrimSpace(region); region != "" {
+		client.SetRegion(region)
+	}
+	switch strings.ToLower(action) {
+	case "start":
+		_, err = client.StartAutonomousDatabase(ctx, database.StartAutonomousDatabaseRequest{AutonomousDatabaseId: common.String(dbID)})
+	case "stop":
+		_, err = client.StopAutonomousDatabase(ctx, database.StopAutonomousDatabaseRequest{AutonomousDatabaseId: common.String(dbID)})
+	case "restart":
+		_, err = client.RestartAutonomousDatabase(ctx, database.RestartAutonomousDatabaseRequest{AutonomousDatabaseId: common.String(dbID)})
+	case "delete", "terminate":
+		_, err = client.DeleteAutonomousDatabase(ctx, database.DeleteAutonomousDatabaseRequest{AutonomousDatabaseId: common.String(dbID)})
+	default:
+		return fmt.Errorf("unsupported Autonomous Database action: %s", action)
+	}
+	return err
+}
+
+func (c *Client) DBSystemAction(ctx context.Context, dbID, action, region string) error {
+	client, err := database.NewDatabaseClientWithConfigurationProvider(c.provider)
+	if err != nil {
+		return err
+	}
+	if region = strings.TrimSpace(region); region != "" {
+		client.SetRegion(region)
+	}
+	if strings.ToLower(action) == "terminate" || strings.ToLower(action) == "delete" {
+		_, err = client.TerminateDbSystem(ctx, database.TerminateDbSystemRequest{DbSystemId: common.String(dbID)})
+		return err
+	}
+
+	actions := map[string]database.DbNodeActionActionEnum{
+		"start":     database.DbNodeActionActionStart,
+		"stop":      database.DbNodeActionActionStop,
+		"softreset": database.DbNodeActionActionSoftreset,
+		"reboot":    database.DbNodeActionActionSoftreset,
+	}
+	nodeAction, ok := actions[strings.ToLower(action)]
+	if !ok {
+		return fmt.Errorf("unsupported DB System action: %s", action)
+	}
+
+	nodes, err := client.ListDbNodes(ctx, database.ListDbNodesRequest{
+		CompartmentId: common.String(c.tenancy),
+		DbSystemId:    common.String(dbID),
+	})
+	if err != nil {
+		return fmt.Errorf("list db nodes for db system: %w", err)
+	}
+	for _, node := range nodes.Items {
+		if node.Id != nil {
+			if _, err := client.DbNodeAction(ctx, database.DbNodeActionRequest{DbNodeId: node.Id, Action: nodeAction}); err != nil {
+				return fmt.Errorf("db node action %s: %w", action, err)
+			}
+		}
+	}
+	return nil
+}
+
+type CreateVCNInput struct {
+	Region        string `json:"region"`
+	CompartmentID string `json:"compartment_id"`
+	DisplayName   string `json:"display_name"`
+	CIDRBlock     string `json:"cidr_block"`
+	DNSLabel      string `json:"dns_label"`
+}
+
+func (c *Client) CreateVCN(ctx context.Context, input CreateVCNInput) (string, error) {
+	client, err := core.NewVirtualNetworkClientWithConfigurationProvider(c.provider)
+	if err != nil {
+		return "", err
+	}
+	if region := strings.TrimSpace(input.Region); region != "" {
+		client.SetRegion(region)
+	}
+	if input.CompartmentID == "" {
+		input.CompartmentID = c.tenancy
+	}
+	resp, err := client.CreateVcn(ctx, core.CreateVcnRequest{
+		CreateVcnDetails: core.CreateVcnDetails{
+			CompartmentId: common.String(input.CompartmentID),
+			DisplayName:   common.String(input.DisplayName),
+			CidrBlock:     common.String(input.CIDRBlock),
+			DnsLabel:      common.String(input.DNSLabel),
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	return stringValue(resp.Vcn.Id), nil
+}
+
+func (c *Client) DeleteVCN(ctx context.Context, vcnID, region string) error {
+	client, err := core.NewVirtualNetworkClientWithConfigurationProvider(c.provider)
+	if err != nil {
+		return err
+	}
+	if region = strings.TrimSpace(region); region != "" {
+		client.SetRegion(region)
+	}
+	_, err = client.DeleteVcn(ctx, core.DeleteVcnRequest{VcnId: common.String(vcnID)})
+	return err
+}
+
+type CreateSubnetInput struct {
+	Region        string `json:"region"`
+	CompartmentID string `json:"compartment_id"`
+	VCNID         string `json:"vcn_id"`
+	DisplayName   string `json:"display_name"`
+	CIDRBlock     string `json:"cidr_block"`
+	Private       bool   `json:"private"`
+}
+
+func (c *Client) CreateSubnet(ctx context.Context, input CreateSubnetInput) (string, error) {
+	client, err := core.NewVirtualNetworkClientWithConfigurationProvider(c.provider)
+	if err != nil {
+		return "", err
+	}
+	if region := strings.TrimSpace(input.Region); region != "" {
+		client.SetRegion(region)
+	}
+	if input.CompartmentID == "" {
+		input.CompartmentID = c.tenancy
+	}
+	resp, err := client.CreateSubnet(ctx, core.CreateSubnetRequest{
+		CreateSubnetDetails: core.CreateSubnetDetails{
+			CompartmentId:          common.String(input.CompartmentID),
+			VcnId:                  common.String(input.VCNID),
+			DisplayName:            common.String(input.DisplayName),
+			CidrBlock:              common.String(input.CIDRBlock),
+			ProhibitPublicIpOnVnic: common.Bool(input.Private),
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	return stringValue(resp.Subnet.Id), nil
+}
+
+func (c *Client) DeleteSubnet(ctx context.Context, subnetID, region string) error {
+	client, err := core.NewVirtualNetworkClientWithConfigurationProvider(c.provider)
+	if err != nil {
+		return err
+	}
+	if region = strings.TrimSpace(region); region != "" {
+		client.SetRegion(region)
+	}
+	_, err = client.DeleteSubnet(ctx, core.DeleteSubnetRequest{SubnetId: common.String(subnetID)})
+	return err
+}
+
+type CreateVolumeInput struct {
+	Region             string `json:"region"`
+	CompartmentID      string `json:"compartment_id"`
+	AvailabilityDomain string `json:"availability_domain"`
+	DisplayName        string `json:"display_name"`
+	SizeGB             int64  `json:"size_gb"`
+}
+
+func (c *Client) CreateBlockVolume(ctx context.Context, input CreateVolumeInput) (string, error) {
+	client, err := core.NewBlockstorageClientWithConfigurationProvider(c.provider)
+	if err != nil {
+		return "", err
+	}
+	if region := strings.TrimSpace(input.Region); region != "" {
+		client.SetRegion(region)
+	}
+	if input.CompartmentID == "" {
+		input.CompartmentID = c.tenancy
+	}
+	resp, err := client.CreateVolume(ctx, core.CreateVolumeRequest{
+		CreateVolumeDetails: core.CreateVolumeDetails{
+			CompartmentId:      common.String(input.CompartmentID),
+			AvailabilityDomain: common.String(input.AvailabilityDomain),
+			DisplayName:        common.String(input.DisplayName),
+			SizeInGBs:          common.Int64(input.SizeGB),
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	return stringValue(resp.Volume.Id), nil
+}
+
+func (c *Client) DeleteBlockVolume(ctx context.Context, volumeID, region string) error {
+	client, err := core.NewBlockstorageClientWithConfigurationProvider(c.provider)
+	if err != nil {
+		return err
+	}
+	if region = strings.TrimSpace(region); region != "" {
+		client.SetRegion(region)
+	}
+	_, err = client.DeleteVolume(ctx, core.DeleteVolumeRequest{VolumeId: common.String(volumeID)})
+	return err
 }

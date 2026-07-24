@@ -17,19 +17,36 @@ import {
   RotateCcw,
   ShieldCheck,
   Square,
+  Trash2,
   Waypoints,
 } from "lucide-vue-next";
 import Button from "@/components/ui/Button.vue";
 import StatusBadge from "@/components/ui/StatusBadge.vue";
 import {
   createOCIAutonomousDatabase,
+  createOCIBlockVolume,
+  createOCISubnet,
+  createOCIVCN,
+  deleteOCIBlockVolume,
+  deleteOCISubnet,
+  deleteOCIVCN,
+  getOCIImages,
   getOCIOverview,
+  getOCIShapes,
   launchOCIInstance,
+  runOCIAutonomousDatabaseAction,
+  runOCIDBSystemAction,
   runOCIInstanceAction,
+  terminateOCIInstance,
   type OCICreateAutonomousDatabaseInput,
-  type OCILaunchInstanceInput,
+  type OCICreateSubnetInput,
+  type OCICreateVCNInput,
+  type OCICreateVolumeInput,
+  type OCIImageSummary,
   type OCIInstance,
   type OCIInstanceAction,
+  type OCILaunchInstanceInput,
+  type OCIShapeSummary,
 } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api_error";
 
@@ -149,6 +166,111 @@ const provisionDatabase = () => {
   )
     databaseMutation.mutate();
 };
+
+const terminateMutation = useMutation({
+  mutationFn: (instance: OCIInstance) =>
+    terminateOCIInstance(instance.id, instance.region),
+  onSuccess: () =>
+    setTimeout(
+      () => client.invalidateQueries({ queryKey: ["oci-overview"] }),
+      2000,
+    ),
+});
+const terminateInstance = (instance: OCIInstance) => {
+  const confirmation = `DELETAR ${instance.display_name}`;
+  if (
+    window.prompt(
+      `Ação IRREVERSÍVEL na OCI! Esta VM será destruída. Digite exatamente: ${confirmation}`,
+    ) === confirmation
+  ) {
+    terminateMutation.mutate(instance);
+  }
+};
+
+const autoDbActionMutation = useMutation({
+  mutationFn: (input: { id: string; action: "start" | "stop" | "restart" | "delete"; region?: string }) =>
+    runOCIAutonomousDatabaseAction(input.id, input.action, input.region),
+  onSuccess: () =>
+    setTimeout(
+      () => client.invalidateQueries({ queryKey: ["oci-overview"] }),
+      1800,
+    ),
+});
+const executeAutoDb = (id: string, name: string, action: "start" | "stop" | "restart" | "delete", region?: string) => {
+  const phrase = `${action.toUpperCase()} ${name}`;
+  if (window.prompt(`Ação no Autonomous DB. Digite: ${phrase}`) === phrase) {
+    autoDbActionMutation.mutate({ id, action, region });
+  }
+};
+
+const dbSystemActionMutation = useMutation({
+  mutationFn: (input: { id: string; action: "start" | "stop" | "reboot" | "delete"; region?: string }) =>
+    runOCIDBSystemAction(input.id, input.action, input.region),
+  onSuccess: () =>
+    setTimeout(
+      () => client.invalidateQueries({ queryKey: ["oci-overview"] }),
+      1800,
+    ),
+});
+const executeDbSystem = (id: string, name: string, action: "start" | "stop" | "reboot" | "delete", region?: string) => {
+  const phrase = `${action.toUpperCase()} ${name}`;
+  if (window.prompt(`Ação no DB System. Digite: ${phrase}`) === phrase) {
+    dbSystemActionMutation.mutate({ id, action, region });
+  }
+};
+
+const imagesQuery = useQuery({
+  queryKey: computed(() => ["oci-images", launchForm.value.compartment_id, launchForm.value.region]),
+  queryFn: () => getOCIImages(launchForm.value.compartment_id, launchForm.value.region),
+  enabled: computed(() => tab.value === "provision"),
+});
+const shapesQuery = useQuery({
+  queryKey: computed(() => ["oci-shapes", launchForm.value.compartment_id, launchForm.value.region]),
+  queryFn: () => getOCIShapes(launchForm.value.compartment_id, launchForm.value.region),
+  enabled: computed(() => tab.value === "provision"),
+});
+
+const vcnForm = ref<OCICreateVCNInput>({ region: "", compartment_id: "", display_name: "", cidr_block: "10.0.0.0/16", dns_label: "vcnhub" });
+const createVcnMut = useMutation({
+  mutationFn: () => createOCIVCN(vcnForm.value),
+  onSuccess: () => {
+    client.invalidateQueries({ queryKey: ["oci-overview"] });
+  },
+});
+const deleteVcnMut = useMutation({
+  mutationFn: (id: string) => deleteOCIVCN(id),
+  onSuccess: () => {
+    client.invalidateQueries({ queryKey: ["oci-overview"] });
+  },
+});
+
+const subnetForm = ref<OCICreateSubnetInput>({ region: "", compartment_id: "", vcn_id: "", display_name: "", cidr_block: "10.0.1.0/24", private: false });
+const createSubnetMut = useMutation({
+  mutationFn: () => createOCISubnet(subnetForm.value),
+  onSuccess: () => {
+    client.invalidateQueries({ queryKey: ["oci-overview"] });
+  },
+});
+const deleteSubnetMut = useMutation({
+  mutationFn: (id: string) => deleteOCISubnet(id),
+  onSuccess: () => {
+    client.invalidateQueries({ queryKey: ["oci-overview"] });
+  },
+});
+
+const volumeForm = ref<OCICreateVolumeInput>({ region: "", compartment_id: "", availability_domain: "", display_name: "", size_gb: 50 });
+const createVolumeMut = useMutation({
+  mutationFn: () => createOCIBlockVolume(volumeForm.value),
+  onSuccess: () => {
+    client.invalidateQueries({ queryKey: ["oci-overview"] });
+  },
+});
+const deleteVolumeMut = useMutation({
+  mutationFn: (id: string) => deleteOCIBlockVolume(id),
+  onSuccess: () => {
+    client.invalidateQueries({ queryKey: ["oci-overview"] });
+  },
+});
 </script>
 
 <template>
@@ -304,7 +426,8 @@ const provisionDatabase = () => {
             </div>
             <p class="mt-2 font-mono text-[9px] text-muted">
               {{ instance.region || "região não informada" }} · {{ instance.shape }} · {{ instance.availability_domain }} ·
-              {{ instance.fault_domain || "sem domínio de falha" }}
+              <span v-if="instance.public_ip" class="text-signal font-semibold">IP Público: {{ instance.public_ip }}</span>
+              <span v-if="instance.private_ip" class="ml-2 text-slate-300">IP Privado: {{ instance.private_ip }}</span>
             </p>
             <p
               class="mt-1 truncate font-mono text-[9px] text-muted"
@@ -354,6 +477,11 @@ const provisionDatabase = () => {
                 @click="execute(instance, 'stop')"
                 ><Square class="h-3.5 w-3.5" />Parar</Button
               ></template
+            ><Button
+              variant="danger"
+              :disabled="terminateMutation.isPending.value"
+              @click="terminateInstance(instance)"
+              ><Trash2 class="h-3.5 w-3.5" />Excluir</Button
             >
           </div>
         </div>
@@ -369,7 +497,7 @@ const provisionDatabase = () => {
         <article
           v-for="database in overview.data.value?.autonomous_databases"
           :key="database.id"
-          class="grid gap-3 bg-panel p-5 lg:grid-cols-[1fr_180px_180px]"
+          class="grid gap-3 bg-panel p-5 lg:grid-cols-[1fr_180px_180px_200px]"
         >
           <div>
             <div class="flex items-center gap-2">
@@ -398,11 +526,16 @@ const provisionDatabase = () => {
           <p class="text-xs text-muted">
             {{ database.free_tier ? "Camada gratuita" : "Licença incluída" }}
           </p>
+          <div class="flex flex-wrap items-center justify-end gap-2">
+            <Button v-if="database.lifecycle_state === 'STOPPED'" variant="outline" size="sm" @click="executeAutoDb(database.id, database.display_name || database.db_name, 'start')"><Play class="h-3.5 w-3.5" />Iniciar</Button>
+            <Button v-if="database.lifecycle_state === 'AVAILABLE'" variant="outline" size="sm" @click="executeAutoDb(database.id, database.display_name || database.db_name, 'stop')"><Square class="h-3.5 w-3.5" />Parar</Button>
+            <Button variant="danger" size="sm" @click="executeAutoDb(database.id, database.display_name || database.db_name, 'delete')"><Trash2 class="h-3.5 w-3.5" />Excluir</Button>
+          </div>
         </article>
         <article
           v-for="system in overview.data.value?.db_systems"
           :key="system.id"
-          class="grid gap-3 bg-panel p-5 lg:grid-cols-[1fr_180px_180px]"
+          class="grid gap-3 bg-panel p-5 lg:grid-cols-[1fr_180px_180px_200px]"
         >
           <div>
             <p class="text-sm text-slate-200">{{ system.display_name }}</p>
@@ -421,6 +554,11 @@ const provisionDatabase = () => {
             {{ system.shape }} · {{ system.cpu_core_count }} CPU ·
             {{ system.memory_gb }} GB
           </p>
+          <div class="flex flex-wrap items-center justify-end gap-2">
+            <Button v-if="system.lifecycle_state === 'STOPPED'" variant="outline" size="sm" @click="executeDbSystem(system.id, system.display_name, 'start')"><Play class="h-3.5 w-3.5" />Iniciar</Button>
+            <Button v-if="system.lifecycle_state === 'AVAILABLE'" variant="outline" size="sm" @click="executeDbSystem(system.id, system.display_name, 'stop')"><Square class="h-3.5 w-3.5" />Parar</Button>
+            <Button variant="danger" size="sm" @click="executeDbSystem(system.id, system.display_name, 'delete')"><Trash2 class="h-3.5 w-3.5" />Excluir</Button>
+          </div>
         </article>
         <p
           v-if="
@@ -451,21 +589,53 @@ const provisionDatabase = () => {
             </p>
           </div>
           <div class="grid gap-3 md:grid-cols-2">
-            <label
-              v-for="field in [
-                { k: 'display_name', l: 'Nome' },
-                { k: 'shape', l: 'Shape' },
-                { k: 'image_id', l: 'OCID da imagem' },
-                { k: 'ssh_authorized_key', l: 'Chave pública SSH' },
-              ]"
-              :key="field.k"
-              class="text-xs text-muted"
-              >{{ field.l
-              }}<input
-                v-model="(launchForm as any)[field.k]"
+            <label class="text-xs text-muted"
+              >Nome da Instância<input
+                v-model="launchForm.display_name"
                 required
                 class="mt-1 w-full rounded-lg border border-line bg-slate-950 p-2 text-slate-200" /></label
             ><label class="text-xs text-muted"
+              >Chave Pública SSH<input
+                v-model="launchForm.ssh_authorized_key"
+                placeholder="ssh-rsa AAAA..."
+                class="mt-1 w-full rounded-lg border border-line bg-slate-950 p-2 text-slate-200" /></label
+            ><label class="text-xs text-muted"
+              >Imagem (Catálogo OCI)
+              <select
+                v-model="launchForm.image_id"
+                class="mt-1 w-full rounded-lg border border-line bg-slate-950 p-2 text-slate-200"
+              >
+                <option value="" disabled>Selecione uma imagem do catálogo</option>
+                <option
+                  v-for="img in imagesQuery.data.value"
+                  :key="img.id"
+                  :value="img.id"
+                >
+                  {{ img.display_name }} ({{ img.operating_system }} {{ img.operating_system_version }})
+                </option>
+              </select>
+              <input
+                v-model="launchForm.image_id"
+                placeholder="Ou cole o OCID da imagem (ocid1.image...)"
+                class="mt-1 w-full rounded-lg border border-line bg-slate-950 p-2 text-xs text-slate-300"
+              />
+            </label
+            ><label class="text-xs text-muted"
+              >Shape (Catálogo OCI)
+              <select
+                v-model="launchForm.shape"
+                class="mt-1 w-full rounded-lg border border-line bg-slate-950 p-2 text-slate-200"
+              >
+                <option value="VM.Standard.E4.Flex">VM.Standard.E4.Flex (Padrão)</option>
+                <option
+                  v-for="sh in shapesQuery.data.value"
+                  :key="sh.name"
+                  :value="sh.name"
+                >
+                  {{ sh.name }}
+                </option>
+              </select>
+            </label><label class="text-xs text-muted"
               >Compartimento<select
                 v-model="launchForm.compartment_id"
                 required
