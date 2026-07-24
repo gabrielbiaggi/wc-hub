@@ -429,5 +429,18 @@ func (a *App) proxmoxRestoreBackup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 502, "proxmox_restore_failed", e.Error())
 		return
 	}
+	session := currentSession(r)
+	_ = a.audit.Append(r.Context(), auditrepo.Record{
+		ActorID:      session.User.ID,
+		Action:       "proxmox.backup.restore",
+		Scope:        security.ScopeRemote,
+		ResourceType: "virtual_machine",
+		ResourceID:   strconv.Itoa(in.VMID),
+		TargetName:   c.ID() + "/" + node + "/" + strconv.Itoa(in.VMID),
+		Risk:         security.RiskCritical,
+		Decision:     "allowed",
+		RequestID:    requestID(r.Context()),
+		SourceIP:     remoteIP(r),
+	})
 	writeJSON(w, 202, map[string]string{"status": "accepted"})
 }

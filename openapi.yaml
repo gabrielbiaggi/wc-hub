@@ -3220,6 +3220,109 @@ paths:
         '200':
           description: Operação concluída
 
+  /api/v1/github/repos/{owner}/{repo}/actions/runs/{run_id}/logs:
+    get:
+      summary: GET /api/v1/github/repos/{owner}/{repo}/actions/runs/{run_id}/logs
+      operationId: get_github_repos_owner_repo_actions_runs_run_id_logs
+      tags: [github]
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/github/repos/{owner}/{repo}/releases:
+    post:
+      summary: POST /api/v1/github/repos/{owner}/{repo}/releases
+      operationId: post_github_repos_owner_repo_releases
+      tags: [github]
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/github/repos/{owner}/{repo}/releases/{id}:
+    delete:
+      summary: DELETE /api/v1/github/repos/{owner}/{repo}/releases/{id}
+      operationId: delete_github_repos_owner_repo_releases_id
+      tags: [github]
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/terraform/state:
+    get:
+      summary: GET /api/v1/terraform/state
+      operationId: get_terraform_state
+      tags: [terraform]
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/proxmox/nodes/{node}/restore:
+    post:
+      summary: POST /api/v1/proxmox/nodes/{node}/restore
+      operationId: post_proxmox_nodes_node_restore
+      tags: [proxmox]
+      parameters:
+        - name: node
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/storage/rebalance:
+    post:
+      summary: POST /api/v1/storage/rebalance
+      operationId: post_storage_rebalance
+      tags: [storage]
+      responses:
+        '200':
+          description: Operação concluída
+
   /api/v1/kubernetes/apply:
     post:
       summary: POST /api/v1/kubernetes/apply
