@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
 	dockeradapter "github.com/webcreations/wc-hub/back/internal/adapters/docker"
 )
+
+var resourceNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
 
 type Reader interface {
 	Health(context.Context) (dockeradapter.Health, error)
@@ -419,8 +422,8 @@ func (h *Handler) CreateVolume(w http.ResponseWriter, r *http.Request) {
 		Name   string `json:"name"`
 		Driver string `json:"driver"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || strings.TrimSpace(input.Name) == "" {
-		writeError(w, 400, "invalid_request", "Nome do volume é obrigatório.")
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || strings.TrimSpace(input.Name) == "" || !resourceNamePattern.MatchString(input.Name) {
+		writeError(w, 400, "invalid_request", "Nome do volume é inválido ou contém caracteres não permitidos.")
 		return
 	}
 	if err := controller.CreateVolume(r.Context(), input.Name, input.Driver); err != nil {
@@ -476,8 +479,8 @@ func (h *Handler) CreateNetwork(w http.ResponseWriter, r *http.Request) {
 		Name   string `json:"name"`
 		Driver string `json:"driver"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || strings.TrimSpace(input.Name) == "" {
-		writeError(w, 400, "invalid_request", "Nome da rede é obrigatório.")
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || strings.TrimSpace(input.Name) == "" || !resourceNamePattern.MatchString(input.Name) {
+		writeError(w, 400, "invalid_request", "Nome da rede é inválido ou contém caracteres não permitidos.")
 		return
 	}
 	if err := controller.CreateNetwork(r.Context(), input.Name, input.Driver); err != nil {

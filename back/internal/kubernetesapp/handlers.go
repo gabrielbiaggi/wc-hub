@@ -127,18 +127,26 @@ func (h *Handler) ApplyManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		YAML string `json:"yaml"`
+		YAML   string `json:"yaml"`
+		DryRun bool   `json:"dry_run"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&input); err != nil || len(input.YAML) == 0 {
 		writeError(w, 400, "invalid_request", "Conteúdo do manifesto YAML é obrigatório.")
 		return
 	}
-	applied, err := h.client.ApplyManifest(r.Context(), input.YAML)
+	if !input.DryRun && r.URL.Query().Get("dry_run") == "true" {
+		input.DryRun = true
+	}
+	applied, err := h.client.ApplyManifest(r.Context(), input.YAML, input.DryRun)
 	if err != nil {
 		writeError(w, 502, "kubernetes_apply_failed", "Falha ao aplicar o manifesto Kubernetes: "+err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]any{"status": "applied", "resources": applied})
+	status := "applied"
+	if input.DryRun {
+		status = "dry_run_successful"
+	}
+	writeJSON(w, 200, map[string]any{"status": status, "resources": applied})
 }
 
 func isDestructiveDeploymentAction(action string) bool {

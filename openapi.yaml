@@ -2957,6 +2957,114 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/docker/images/prune:
+    post:
+      summary: POST /api/v1/docker/images/prune
+      operationId: post_docker_images_prune
+      tags: [docker]
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/docker/images/pull:
+    post:
+      summary: POST /api/v1/docker/images/pull
+      operationId: post_docker_images_pull
+      tags: [docker]
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/docker/images/{id}:
+    delete:
+      summary: DELETE /api/v1/docker/images/{id}
+      operationId: delete_docker_images_id
+      tags: [docker]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/docker/networks:
+    post:
+      summary: POST /api/v1/docker/networks
+      operationId: post_docker_networks
+      tags: [docker]
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/docker/networks/prune:
+    post:
+      summary: POST /api/v1/docker/networks/prune
+      operationId: post_docker_networks_prune
+      tags: [docker]
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/docker/networks/{id}:
+    delete:
+      summary: DELETE /api/v1/docker/networks/{id}
+      operationId: delete_docker_networks_id
+      tags: [docker]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/docker/volumes:
+    post:
+      summary: POST /api/v1/docker/volumes
+      operationId: post_docker_volumes
+      tags: [docker]
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/docker/volumes/prune:
+    post:
+      summary: POST /api/v1/docker/volumes/prune
+      operationId: post_docker_volumes_prune
+      tags: [docker]
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/docker/volumes/{name}:
+    delete:
+      summary: DELETE /api/v1/docker/volumes/{name}
+      operationId: delete_docker_volumes_name
+      tags: [docker]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Operação concluída
+
+  /api/v1/kubernetes/apply:
+    post:
+      summary: POST /api/v1/kubernetes/apply
+      operationId: post_kubernetes_apply
+      tags: [kubernetes]
+      responses:
+        '200':
+          description: Operação concluída
+
 components:
   securitySchemes:
     cookieAuth:

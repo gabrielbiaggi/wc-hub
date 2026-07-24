@@ -136,7 +136,9 @@ type PVCItem struct {
 	Capacity string   `json:"capacity"`
 }
 type Overview struct {
+	CapturedAt  time.Time       `json:"captured_at"`
 	GeneratedAt time.Time       `json:"generated_at"`
+	Source      string          `json:"source,omitempty"`
 	Nodes       []Node          `json:"nodes"`
 	Deployments []Deployment    `json:"deployments"`
 	ProblemPods []Pod           `json:"problem_pods"`
@@ -146,6 +148,7 @@ type Overview struct {
 	ConfigMaps  []ConfigMapItem `json:"config_maps"`
 	Secrets     []SecretItem    `json:"secrets"`
 	PVCs        []PVCItem       `json:"pvcs"`
+	Warnings    []string        `json:"warnings"`
 }
 
 var resourceNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`)
@@ -210,7 +213,8 @@ func (c *Client) Overview(ctx context.Context) (Overview, error) {
 	if c == nil || c.clientset == nil {
 		return Overview{}, errors.New("Kubernetes adapter is not configured")
 	}
-	result := Overview{GeneratedAt: time.Now().UTC(), Nodes: []Node{}, Deployments: []Deployment{}, Pods: []Pod{}, ProblemPods: []Pod{}, Events: []Event{}}
+	now := time.Now().UTC()
+	result := Overview{CapturedAt: now, GeneratedAt: now, Source: c.source, Nodes: []Node{}, Deployments: []Deployment{}, Pods: []Pod{}, ProblemPods: []Pod{}, Events: []Event{}, Warnings: []string{}}
 	nodes, err := c.listNodes(ctx)
 	if err != nil {
 		return result, err
@@ -499,7 +503,7 @@ func validPodTarget(namespace, pod, container string) bool {
 	return resourceNamePattern.MatchString(namespace) && resourceNamePattern.MatchString(pod) && (container == "" || resourceNamePattern.MatchString(container))
 }
 
-func (c *Client) ApplyManifest(ctx context.Context, yamlContent string) ([]string, error) {
+func (c *Client) ApplyManifest(ctx context.Context, yamlContent string, dryRun bool) ([]string, error) {
 	if c == nil || c.clientset == nil || c.config == nil {
 		return nil, errors.New("Kubernetes adapter is not configured")
 	}
@@ -548,7 +552,11 @@ func (c *Client) ApplyManifest(ctx context.Context, yamlContent string) ([]strin
 			return applied, fmt.Errorf("marshal object: %w", err)
 		}
 		force := true
-		_, err = dr.Patch(ctx, obj.GetName(), types.ApplyPatchType, data, metav1.PatchOptions{FieldManager: "wc-hub", Force: &force})
+		patchOpts := metav1.PatchOptions{FieldManager: "wc-hub", Force: &force}
+		if dryRun {
+			patchOpts.DryRun = []string{metav1.DryRunAll}
+		}
+		_, err = dr.Patch(ctx, obj.GetName(), types.ApplyPatchType, data, patchOpts)
 		if err != nil {
 			return applied, fmt.Errorf("apply resource %s/%s: %w", obj.GetKind(), obj.GetName(), err)
 		}

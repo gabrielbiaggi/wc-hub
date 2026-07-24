@@ -924,10 +924,12 @@ export interface KubernetesPVC {
 }
 export interface KubernetesOverview {
   captured_at: string;
-  source: string;
+  generated_at?: string;
+  source?: string;
   nodes: KubernetesNode[];
   deployments: KubernetesDeployment[];
   pods: KubernetesPod[];
+  problem_pods?: KubernetesPod[];
   events: KubernetesEvent[];
   warnings: string[];
   ingresses?: KubernetesIngress[];
@@ -963,8 +965,8 @@ export const kubernetesPodExec = async (
       { headers: extraHeaders },
     )
   ).data;
-export const applyKubernetesManifest = async (yaml: string) =>
-  (await api.post<{ status: string; resources: string[] }>("/v1/kubernetes/apply", { yaml })).data;
+export const applyKubernetesManifest = async (yaml: string, dryRun?: boolean) =>
+  (await api.post<{ status: string; resources: string[] }>("/v1/kubernetes/apply", { yaml, dry_run: dryRun })).data;
 export const kubernetesDeploymentAction = async (
   namespace: string,
   name: string,
