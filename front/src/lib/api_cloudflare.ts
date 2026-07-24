@@ -86,3 +86,61 @@ export const getCloudflareZoneSettings=async(zoneID:string)=>(await api.get<{ite
 export const updateCloudflareZoneSetting=async(zoneID:string,setting:string,value:unknown)=>(await api.patch<CloudflareZoneSetting>(`/v1/cloudflare/zones/${encodeURIComponent(zoneID)}/settings/${encodeURIComponent(setting)}`,{value})).data
 export const purgeCloudflareCache=async(zoneID:string)=>(await api.post<{status:string}>(`/v1/cloudflare/zones/${encodeURIComponent(zoneID)}/purge-cache`,{})).data
 export const getCloudflareRulesets=async(zoneID:string)=>(await api.get<{items:CloudflareRuleset[]}>(`/v1/cloudflare/zones/${encodeURIComponent(zoneID)}/rulesets`)).data.items
+
+export interface CloudflareWorker {
+  id: string
+  etag: string
+  modified_on: string
+  usage_model: string
+}
+export interface CloudflareKVNamespace {
+  id: string
+  title: string
+}
+export interface CloudflareWAFRule {
+  id: string
+  action: string
+  description: string
+  filter: {
+    id: string
+    expression: string
+  }
+}
+export interface CloudflareZoneAnalytics {
+  total_requests: number
+  cached_requests: number
+  uncached_requests: number
+  total_bytes: number
+  cached_bytes: number
+  threats_blocked: number
+}
+
+export const getCloudflareWorkers = async (accountID: string) =>
+  (await api.get<{ items: CloudflareWorker[] }>(`/v1/cloudflare/accounts/${encodeURIComponent(accountID)}/workers`)).data.items
+
+export const uploadCloudflareWorker = async (accountID: string, name: string, code: string) =>
+  (await api.put<{ status: string; name: string }>(`/v1/cloudflare/accounts/${encodeURIComponent(accountID)}/workers/${encodeURIComponent(name)}`, { code })).data
+
+export const deleteCloudflareWorker = async (accountID: string, name: string) =>
+  (await api.delete<{ status: string; name: string }>(`/v1/cloudflare/accounts/${encodeURIComponent(accountID)}/workers/${encodeURIComponent(name)}`)).data
+
+export const getCloudflareKVNamespaces = async (accountID: string) =>
+  (await api.get<{ items: CloudflareKVNamespace[] }>(`/v1/cloudflare/accounts/${encodeURIComponent(accountID)}/kv`)).data.items
+
+export const createCloudflareKVNamespace = async (accountID: string, title: string) =>
+  (await api.post<{ status: string; id: string; title: string }>(`/v1/cloudflare/accounts/${encodeURIComponent(accountID)}/kv`, { title })).data
+
+export const deleteCloudflareKVNamespace = async (accountID: string, id: string) =>
+  (await api.delete<{ status: string; id: string }>(`/v1/cloudflare/accounts/${encodeURIComponent(accountID)}/kv/${encodeURIComponent(id)}`)).data
+
+export const getCloudflareWAFRules = async (zoneID: string) =>
+  (await api.get<{ items: CloudflareWAFRule[] }>(`/v1/cloudflare/zones/${encodeURIComponent(zoneID)}/waf`)).data.items
+
+export const createCloudflareWAFRule = async (zoneID: string, input: { action: string; expression: string; description: string }) =>
+  (await api.post<{ status: string; id: string }>(`/v1/cloudflare/zones/${encodeURIComponent(zoneID)}/waf`, input)).data
+
+export const deleteCloudflareWAFRule = async (zoneID: string, id: string) =>
+  (await api.delete<{ status: string; id: string }>(`/v1/cloudflare/zones/${encodeURIComponent(zoneID)}/waf/${encodeURIComponent(id)}`)).data
+
+export const getCloudflareZoneAnalytics = async (zoneID: string) =>
+  (await api.get<CloudflareZoneAnalytics>(`/v1/cloudflare/zones/${encodeURIComponent(zoneID)}/analytics`)).data

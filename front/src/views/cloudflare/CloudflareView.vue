@@ -34,12 +34,22 @@ import {
   updateCloudflareDNSRecord,
   updateCloudflareTunnel,
   updateCloudflareTunnelConfiguration,
+  getCloudflareWorkers,
+  uploadCloudflareWorker,
+  deleteCloudflareWorker,
+  getCloudflareKVNamespaces,
+  createCloudflareKVNamespace,
+  deleteCloudflareKVNamespace,
+  getCloudflareWAFRules,
+  createCloudflareWAFRule,
+  deleteCloudflareWAFRule,
+  getCloudflareZoneAnalytics,
   type CloudflareDNSRecord,
   type CloudflareProviderStatus,
   type CloudflareTunnelStatus,
 } from "@/lib/api_cloudflare";
 
-type InventoryMode = "tunnels" | "dns" | "administration";
+type InventoryMode = "tunnels" | "dns" | "workers" | "waf" | "analytics" | "administration";
 
 const mode = ref<InventoryMode>("tunnels");
 const queryClient = useQueryClient();
@@ -220,6 +230,79 @@ const purgeCache = () => {
     ) === phrase
   )
     zoneMutation.mutate({ action: "purge" });
+};
+
+const workersQuery = useQuery({
+  queryKey: ["cloudflare", "workers", selectedAccountID],
+  queryFn: () => getCloudflareWorkers(selectedAccountID.value),
+  enabled: computed(() => !!selectedAccountID.value),
+});
+const workerName = ref("");
+const workerCode = ref("// Cloudflare Worker Example\nexport default {\n  async fetch(request, env, ctx) {\n    return new Response('Hello World from WC-Hub!');\n  },\n};");
+const uploadWorkerMutation = useMutation({
+  mutationFn: () => uploadCloudflareWorker(selectedAccountID.value, workerName.value, workerCode.value),
+  onSuccess: () => {
+    workerName.value = "";
+    workersQuery.refetch();
+  },
+});
+const deleteWorkerMutation = useMutation({
+  mutationFn: (name: string) => deleteCloudflareWorker(selectedAccountID.value, name),
+  onSuccess: () => workersQuery.refetch(),
+});
+
+const kvQuery = useQuery({
+  queryKey: ["cloudflare", "kv", selectedAccountID],
+  queryFn: () => getCloudflareKVNamespaces(selectedAccountID.value),
+  enabled: computed(() => !!selectedAccountID.value),
+});
+const kvTitle = ref("");
+const createKVMutation = useMutation({
+  mutationFn: () => createCloudflareKVNamespace(selectedAccountID.value, kvTitle.value),
+  onSuccess: () => {
+    kvTitle.value = "";
+    kvQuery.refetch();
+  },
+});
+const deleteKVMutation = useMutation({
+  mutationFn: (id: string) => deleteCloudflareKVNamespace(selectedAccountID.value, id),
+  onSuccess: () => kvQuery.refetch(),
+});
+
+const wafQuery = useQuery({
+  queryKey: ["cloudflare", "waf", selectedZoneID],
+  queryFn: () => getCloudflareWAFRules(selectedZoneID.value),
+  enabled: computed(() => !!selectedZoneID.value),
+});
+const wafAction = ref("block");
+const wafDescription = ref("");
+const wafExpression = ref('(http.request.uri.path contains "/admin")');
+const createWAFMutation = useMutation({
+  mutationFn: () => createCloudflareWAFRule(selectedZoneID.value, {
+    action: wafAction.value,
+    description: wafDescription.value,
+    expression: wafExpression.value,
+  }),
+  onSuccess: () => {
+    wafDescription.value = "";
+    wafQuery.refetch();
+  },
+});
+const deleteWAFMutation = useMutation({
+  mutationFn: (id: string) => deleteCloudflareWAFRule(selectedZoneID.value, id),
+  onSuccess: () => wafQuery.refetch(),
+});
+
+const analyticsQuery = useQuery({
+  queryKey: ["cloudflare", "analytics", selectedZoneID],
+  queryFn: () => getCloudflareZoneAnalytics(selectedZoneID.value),
+  enabled: computed(() => !!selectedZoneID.value),
+});
+const formatBytes = (value = 0) => {
+  if (!value) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"],
+    index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), 4);
+  return `${(value / 1024 ** index).toFixed(index > 2 ? 1 : 0)} ${units[index]}`;
 };
 
 const providerTone = (status?: CloudflareProviderStatus) =>
@@ -410,6 +493,9 @@ const shortID = (value: string) =>
                 v-for="item in [
                   { id: 'tunnels', label: 'Túneis' },
                   { id: 'dns', label: 'DNS' },
+                  { id: 'workers', label: 'Workers & KV' },
+                  { id: 'waf', label: 'WAF & Regras' },
+                  { id: 'analytics', label: 'Analytics' },
                   { id: 'administration', label: 'Administração' },
                 ]"
                 :key="item.id"
@@ -625,6 +711,95 @@ const shortID = (value: string) =>
               </div>
             </div>
           </div>
+
+          <div v-else-if="mode === 'workers'" class="divide-y divide-line/60" role="tabpanel">
+            <div class="p-5 space-y-4">
+              <h3 class="text-sm font-medium text-slate-200">Deploy de Cloudflare Worker</h3>
+              <div class="grid gap-3 md:grid-cols-2">
+                <input v-model="workerName" placeholder="Nome do Worker (ex: api-proxy)" class="rounded-lg border border-line bg-slate-950 p-2 text-xs font-mono text-slate-200" />
+                <Button :disabled="!workerName.trim() || uploadWorkerMutation.isPending.value" @click="uploadWorkerMutation.mutate()">Deploy Worker</Button>
+              </div>
+              <textarea v-model="workerCode" rows="8" class="w-full rounded-lg border border-line bg-slate-950 p-3 font-mono text-xs text-slate-200"></textarea>
+            </div>
+            <div class="p-5">
+              <h3 class="text-sm font-medium text-slate-200 mb-3">Workers Ativos</h3>
+              <div v-for="worker in workersQuery.data.value" :key="worker.id" class="flex items-center justify-between p-3 rounded border border-line/60 bg-panel mb-2">
+                <div>
+                  <p class="text-sm font-mono text-signal">{{ worker.id }}</p>
+                  <p class="text-[10px] text-muted">Modelo: {{ worker.usage_model || 'standard' }} · Modificado: {{ worker.modified_on }}</p>
+                </div>
+                <Button variant="danger" size="sm" :disabled="deleteWorkerMutation.isPending.value" @click="deleteWorkerMutation.mutate(worker.id)"><Trash2 class="h-3.5 w-3.5" /></Button>
+              </div>
+              <p v-if="!workersQuery.data.value?.length" class="text-xs text-muted">Nenhum Worker encontrado nesta conta.</p>
+            </div>
+            <div class="p-5 border-t border-line/60 space-y-4">
+              <h3 class="text-sm font-medium text-slate-200">Gestão de KV Storage Namespaces</h3>
+              <div class="flex gap-2">
+                <input v-model="kvTitle" placeholder="Título do KV (ex: SESSION_CACHE)" class="w-full rounded-lg border border-line bg-slate-950 p-2 text-xs font-mono text-slate-200" />
+                <Button :disabled="!kvTitle.trim() || createKVMutation.isPending.value" @click="createKVMutation.mutate()">Criar KV</Button>
+              </div>
+              <div v-for="kv in kvQuery.data.value" :key="kv.id" class="flex items-center justify-between p-3 rounded border border-line/60 bg-panel">
+                <div>
+                  <p class="text-sm font-medium text-slate-200">{{ kv.title }}</p>
+                  <p class="text-[10px] font-mono text-muted">ID: {{ kv.id }}</p>
+                </div>
+                <Button variant="danger" size="sm" :disabled="deleteKVMutation.isPending.value" @click="deleteKVMutation.mutate(kv.id)"><Trash2 class="h-3.5 w-3.5" /></Button>
+              </div>
+              <p v-if="!kvQuery.data.value?.length" class="text-xs text-muted">Nenhum KV Namespace encontrado nesta conta.</p>
+            </div>
+          </div>
+
+          <div v-else-if="mode === 'waf'" class="divide-y divide-line/60" role="tabpanel">
+            <div class="p-5 space-y-4">
+              <h3 class="text-sm font-medium text-slate-200">Adicionar Regra WAF (Firewall de Borda)</h3>
+              <div class="grid gap-3 md:grid-cols-[140px_1fr_auto]">
+                <select v-model="wafAction" class="rounded-lg border border-line bg-slate-950 p-2 text-xs text-slate-200">
+                  <option value="block">Block</option>
+                  <option value="challenge">Challenge</option>
+                  <option value="js_challenge">JS Challenge</option>
+                  <option value="allow">Allow</option>
+                </select>
+                <input v-model="wafDescription" placeholder="Descrição da regra (ex: Bloquear /admin externo)" class="rounded-lg border border-line bg-slate-950 p-2 text-xs text-slate-200" />
+                <Button :disabled="!wafExpression.trim() || createWAFMutation.isPending.value" @click="createWAFMutation.mutate()">Adicionar Regra</Button>
+              </div>
+              <input v-model="wafExpression" placeholder="Expressão Wirefilter" class="w-full rounded-lg border border-line bg-slate-950 p-2 font-mono text-xs text-slate-200" />
+            </div>
+            <div class="p-5">
+              <h3 class="text-sm font-medium text-slate-200 mb-3">Regras de WAF Ativas na Zona</h3>
+              <div v-for="rule in wafQuery.data.value" :key="rule.id" class="p-4 rounded border border-line/60 bg-panel mb-3 space-y-2">
+                <div class="flex items-center justify-between">
+                  <span class="rounded px-2 py-0.5 font-mono text-xs uppercase" :class="rule.action === 'block' ? 'bg-danger/20 text-danger' : 'bg-signal/20 text-signal'">{{ rule.action }}</span>
+                  <Button variant="danger" size="sm" :disabled="deleteWAFMutation.isPending.value" @click="deleteWAFMutation.mutate(rule.id)"><Trash2 class="h-3.5 w-3.5" /></Button>
+                </div>
+                <p class="text-xs text-slate-200 font-medium">{{ rule.description || 'Sem descrição' }}</p>
+                <p class="text-[10px] font-mono text-slate-400 bg-slate-950/80 p-2 rounded">{{ rule.filter?.expression || 'Sem filtro' }}</p>
+              </div>
+              <p v-if="!wafQuery.data.value?.length" class="text-xs text-muted">Nenhuma regra WAF customizada nesta zona.</p>
+            </div>
+          </div>
+
+          <div v-else-if="mode === 'analytics'" class="p-5 space-y-5" role="tabpanel">
+            <h3 class="text-sm font-medium text-slate-200">Métricas & Tráfego em Tempo Real (Últimas 24h)</h3>
+            <div v-if="analyticsQuery.data.value" class="grid gap-4 md:grid-cols-3">
+              <div class="rounded-xl border border-line bg-panel p-4">
+                <p class="text-xs text-muted">Total de Requisições</p>
+                <p class="mt-2 font-mono text-2xl text-white">{{ analyticsQuery.data.value.total_requests.toLocaleString('pt-BR') }}</p>
+                <p class="mt-1 text-[10px] text-signal">{{ analyticsQuery.data.value.cached_requests.toLocaleString('pt-BR') }} em cache</p>
+              </div>
+              <div class="rounded-xl border border-line bg-panel p-4">
+                <p class="text-xs text-muted">Banda Transferida</p>
+                <p class="mt-2 font-mono text-2xl text-white">{{ formatBytes(analyticsQuery.data.value.total_bytes) }}</p>
+                <p class="mt-1 text-[10px] text-signal">{{ formatBytes(analyticsQuery.data.value.cached_bytes) }} economizados via CDN</p>
+              </div>
+              <div class="rounded-xl border border-line bg-panel p-4">
+                <p class="text-xs text-muted">Ameaças Bloqueadas (WAF)</p>
+                <p class="mt-2 font-mono text-2xl text-danger">{{ analyticsQuery.data.value.threats_blocked.toLocaleString('pt-BR') }}</p>
+                <p class="mt-1 text-[10px] text-muted">Mitigação na borda</p>
+              </div>
+            </div>
+            <div v-else class="p-8 text-center text-xs text-muted">Carregando dados de analytics da Cloudflare...</div>
+          </div>
+
           <div v-else class="space-y-px bg-line/60" role="tabpanel">
             <header class="flex flex-wrap items-end gap-3 bg-panel p-5">
               <label class="min-w-72 flex-1 text-xs text-muted"

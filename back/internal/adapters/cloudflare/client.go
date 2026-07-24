@@ -799,3 +799,187 @@ func zero(value []byte) {
 		value[index] = 0
 	}
 }
+
+type WorkerScript struct {
+	ID         string    `json:"id"`
+	ETag       string    `json:"etag"`
+	ModifiedOn time.Time `json:"modified_on"`
+	UsageModel string    `json:"usage_model"`
+}
+
+func (c *Client) ListWorkers(ctx context.Context, accountID string) ([]WorkerScript, error) {
+	if !c.AccountAllowed(accountID) {
+		return nil, ErrAccountNotAllowed
+	}
+	path := "/accounts/" + url.PathEscape(accountID) + "/workers/scripts"
+	var result []WorkerScript
+	err := c.list(ctx, path, url.Values{"per_page": {"100"}}, &result)
+	return result, err
+}
+
+func (c *Client) UploadWorker(ctx context.Context, accountID, scriptName, code string) error {
+	if !c.AccountAllowed(accountID) {
+		return ErrAccountNotAllowed
+	}
+	path := "/accounts/" + url.PathEscape(accountID) + "/workers/scripts/" + url.PathEscape(scriptName)
+	var raw any
+	_, err := c.do(ctx, http.MethodPut, path, nil, []byte(code), &raw)
+	return err
+}
+
+func (c *Client) DeleteWorker(ctx context.Context, accountID, scriptName string) error {
+	if !c.AccountAllowed(accountID) {
+		return ErrAccountNotAllowed
+	}
+	path := "/accounts/" + url.PathEscape(accountID) + "/workers/scripts/" + url.PathEscape(scriptName)
+	var raw any
+	_, err := c.do(ctx, http.MethodDelete, path, nil, nil, &raw)
+	return err
+}
+
+type KVNamespace struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+}
+
+func (c *Client) ListKVNamespaces(ctx context.Context, accountID string) ([]KVNamespace, error) {
+	if !c.AccountAllowed(accountID) {
+		return nil, ErrAccountNotAllowed
+	}
+	path := "/accounts/" + url.PathEscape(accountID) + "/storage/kv/namespaces"
+	var result []KVNamespace
+	err := c.list(ctx, path, url.Values{"per_page": {"100"}}, &result)
+	return result, err
+}
+
+func (c *Client) CreateKVNamespace(ctx context.Context, accountID, title string) (string, error) {
+	if !c.AccountAllowed(accountID) {
+		return "", ErrAccountNotAllowed
+	}
+	path := "/accounts/" + url.PathEscape(accountID) + "/storage/kv/namespaces"
+	body, _ := json.Marshal(map[string]string{"title": title})
+	var raw struct {
+		ID string `json:"id"`
+	}
+	if _, err := c.do(ctx, http.MethodPost, path, nil, body, &raw); err != nil {
+		return "", err
+	}
+	return raw.ID, nil
+}
+
+func (c *Client) DeleteKVNamespace(ctx context.Context, accountID, namespaceID string) error {
+	if !c.AccountAllowed(accountID) {
+		return ErrAccountNotAllowed
+	}
+	path := "/accounts/" + url.PathEscape(accountID) + "/storage/kv/namespaces/" + url.PathEscape(namespaceID)
+	var raw any
+	_, err := c.do(ctx, http.MethodDelete, path, nil, nil, &raw)
+	return err
+}
+
+type WAFRule struct {
+	ID          string `json:"id"`
+	Action      string `json:"action"`
+	Description string `json:"description"`
+	Filter      struct {
+		ID         string `json:"id"`
+		Expression string `json:"expression"`
+	} `json:"filter"`
+}
+
+func (c *Client) ListWAFRules(ctx context.Context, zoneID string) ([]WAFRule, error) {
+	if !c.ZoneAllowed(zoneID) {
+		return nil, ErrZoneNotAllowed
+	}
+	path := "/zones/" + url.PathEscape(zoneID) + "/firewall/rules"
+	var result []WAFRule
+	err := c.list(ctx, path, url.Values{"per_page": {"100"}}, &result)
+	return result, err
+}
+
+type CreateWAFRuleInput struct {
+	Action      string `json:"action"`
+	Expression  string `json:"expression"`
+	Description string `json:"description"`
+}
+
+func (c *Client) CreateWAFRule(ctx context.Context, zoneID string, input CreateWAFRuleInput) (string, error) {
+	if !c.ZoneAllowed(zoneID) {
+		return "", ErrZoneNotAllowed
+	}
+	path := "/zones/" + url.PathEscape(zoneID) + "/firewall/rules"
+	payload := []map[string]any{
+		{
+			"action":      input.Action,
+			"description": input.Description,
+			"filter": map[string]string{
+				"expression": input.Expression,
+			},
+		},
+	}
+	body, _ := json.Marshal(payload)
+	var raw []struct {
+		ID string `json:"id"`
+	}
+	if _, err := c.do(ctx, http.MethodPost, path, nil, body, &raw); err != nil {
+		return "", err
+	}
+	if len(raw) > 0 {
+		return raw[0].ID, nil
+	}
+	return "", nil
+}
+
+func (c *Client) DeleteWAFRule(ctx context.Context, zoneID, ruleID string) error {
+	if !c.ZoneAllowed(zoneID) {
+		return ErrZoneNotAllowed
+	}
+	path := "/zones/" + url.PathEscape(zoneID) + "/firewall/rules/" + url.PathEscape(ruleID)
+	var raw any
+	_, err := c.do(ctx, http.MethodDelete, path, nil, nil, &raw)
+	return err
+}
+
+type ZoneAnalytics struct {
+	TotalRequests    int64 `json:"total_requests"`
+	CachedRequests   int64 `json:"cached_requests"`
+	UncachedRequests int64 `json:"uncached_requests"`
+	TotalBytes       int64 `json:"total_bytes"`
+	CachedBytes      int64 `json:"cached_bytes"`
+	ThreatsBlocked   int64 `json:"threats_blocked"`
+}
+
+func (c *Client) GetZoneAnalytics(ctx context.Context, zoneID string) (ZoneAnalytics, error) {
+	if !c.ZoneAllowed(zoneID) {
+		return ZoneAnalytics{}, ErrZoneNotAllowed
+	}
+	path := "/zones/" + url.PathEscape(zoneID) + "/analytics/dashboard"
+	var raw struct {
+		Totals struct {
+			Requests struct {
+				All      int64 `json:"all"`
+				Cached   int64 `json:"cached"`
+				Uncached int64 `json:"uncached"`
+			} `json:"requests"`
+			Bandwidth struct {
+				All    int64 `json:"all"`
+				Cached int64 `json:"cached"`
+			} `json:"bandwidth"`
+			Threats struct {
+				All int64 `json:"all"`
+			} `json:"threats"`
+		} `json:"totals"`
+	}
+	if _, err := c.do(ctx, http.MethodGet, path, url.Values{"since": {"-1440"}}, nil, &raw); err != nil {
+		return ZoneAnalytics{}, err
+	}
+	t := raw.Totals
+	return ZoneAnalytics{
+		TotalRequests:    t.Requests.All,
+		CachedRequests:   t.Requests.Cached,
+		UncachedRequests: t.Requests.Uncached,
+		TotalBytes:       t.Bandwidth.All,
+		CachedBytes:      t.Bandwidth.Cached,
+		ThreatsBlocked:   t.Threats.All,
+	}, nil
+}

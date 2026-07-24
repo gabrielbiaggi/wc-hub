@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	cloudflareadapter "github.com/webcreations/wc-hub/back/internal/adapters/cloudflare"
@@ -539,6 +540,175 @@ func (h *Handler) Rulesets(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"items": items})
+}
+
+func (h *Handler) ListWorkers(w http.ResponseWriter, r *http.Request) {
+	accountID := r.PathValue("account_id")
+	client, ok := h.reader.(*cloudflareadapter.Client)
+	if !ok || client == nil {
+		writeError(w, 503, "cloudflare_unavailable", "Cloudflare adapter client unavailable.")
+		return
+	}
+	items, err := client.ListWorkers(r.Context(), accountID)
+	if err != nil {
+		writeError(w, 502, "cloudflare_workers_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"items": items})
+}
+
+func (h *Handler) UploadWorker(w http.ResponseWriter, r *http.Request) {
+	accountID := r.PathValue("account_id")
+	name := r.PathValue("name")
+	client, ok := h.reader.(*cloudflareadapter.Client)
+	if !ok || client == nil {
+		writeError(w, 503, "cloudflare_unavailable", "Cloudflare adapter client unavailable.")
+		return
+	}
+	var input struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || strings.TrimSpace(input.Code) == "" {
+		writeError(w, 400, "invalid_request", "Código JavaScript do Worker é obrigatório.")
+		return
+	}
+	if err := client.UploadWorker(r.Context(), accountID, name, input.Code); err != nil {
+		writeError(w, 502, "upload_worker_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "uploaded", "name": name})
+}
+
+func (h *Handler) DeleteWorker(w http.ResponseWriter, r *http.Request) {
+	accountID := r.PathValue("account_id")
+	name := r.PathValue("name")
+	client, ok := h.reader.(*cloudflareadapter.Client)
+	if !ok || client == nil {
+		writeError(w, 503, "cloudflare_unavailable", "Cloudflare adapter client unavailable.")
+		return
+	}
+	if err := client.DeleteWorker(r.Context(), accountID, name); err != nil {
+		writeError(w, 502, "delete_worker_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "deleted", "name": name})
+}
+
+func (h *Handler) ListKVNamespaces(w http.ResponseWriter, r *http.Request) {
+	accountID := r.PathValue("account_id")
+	client, ok := h.reader.(*cloudflareadapter.Client)
+	if !ok || client == nil {
+		writeError(w, 503, "cloudflare_unavailable", "Cloudflare adapter client unavailable.")
+		return
+	}
+	items, err := client.ListKVNamespaces(r.Context(), accountID)
+	if err != nil {
+		writeError(w, 502, "cloudflare_kv_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"items": items})
+}
+
+func (h *Handler) CreateKVNamespace(w http.ResponseWriter, r *http.Request) {
+	accountID := r.PathValue("account_id")
+	client, ok := h.reader.(*cloudflareadapter.Client)
+	if !ok || client == nil {
+		writeError(w, 503, "cloudflare_unavailable", "Cloudflare adapter client unavailable.")
+		return
+	}
+	var input struct {
+		Title string `json:"title"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || strings.TrimSpace(input.Title) == "" {
+		writeError(w, 400, "invalid_request", "Título do KV Namespace é obrigatório.")
+		return
+	}
+	id, err := client.CreateKVNamespace(r.Context(), accountID, input.Title)
+	if err != nil {
+		writeError(w, 502, "create_kv_failed", err.Error())
+		return
+	}
+	writeJSON(w, 201, map[string]string{"status": "created", "id": id, "title": input.Title})
+}
+
+func (h *Handler) DeleteKVNamespace(w http.ResponseWriter, r *http.Request) {
+	accountID := r.PathValue("account_id")
+	id := r.PathValue("id")
+	client, ok := h.reader.(*cloudflareadapter.Client)
+	if !ok || client == nil {
+		writeError(w, 503, "cloudflare_unavailable", "Cloudflare adapter client unavailable.")
+		return
+	}
+	if err := client.DeleteKVNamespace(r.Context(), accountID, id); err != nil {
+		writeError(w, 502, "delete_kv_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "deleted", "id": id})
+}
+
+func (h *Handler) ListWAFRules(w http.ResponseWriter, r *http.Request) {
+	zoneID := r.PathValue("zone_id")
+	client, ok := h.reader.(*cloudflareadapter.Client)
+	if !ok || client == nil {
+		writeError(w, 503, "cloudflare_unavailable", "Cloudflare adapter client unavailable.")
+		return
+	}
+	items, err := client.ListWAFRules(r.Context(), zoneID)
+	if err != nil {
+		writeError(w, 502, "cloudflare_waf_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"items": items})
+}
+
+func (h *Handler) CreateWAFRule(w http.ResponseWriter, r *http.Request) {
+	zoneID := r.PathValue("zone_id")
+	client, ok := h.reader.(*cloudflareadapter.Client)
+	if !ok || client == nil {
+		writeError(w, 503, "cloudflare_unavailable", "Cloudflare adapter client unavailable.")
+		return
+	}
+	var input cloudflareadapter.CreateWAFRuleInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, 400, "invalid_request", "Dados da regra WAF são inválidos.")
+		return
+	}
+	id, err := client.CreateWAFRule(r.Context(), zoneID, input)
+	if err != nil {
+		writeError(w, 502, "create_waf_failed", err.Error())
+		return
+	}
+	writeJSON(w, 201, map[string]string{"status": "created", "id": id})
+}
+
+func (h *Handler) DeleteWAFRule(w http.ResponseWriter, r *http.Request) {
+	zoneID := r.PathValue("zone_id")
+	id := r.PathValue("id")
+	client, ok := h.reader.(*cloudflareadapter.Client)
+	if !ok || client == nil {
+		writeError(w, 503, "cloudflare_unavailable", "Cloudflare adapter client unavailable.")
+		return
+	}
+	if err := client.DeleteWAFRule(r.Context(), zoneID, id); err != nil {
+		writeError(w, 502, "delete_waf_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "deleted", "id": id})
+}
+
+func (h *Handler) ZoneAnalytics(w http.ResponseWriter, r *http.Request) {
+	zoneID := r.PathValue("zone_id")
+	client, ok := h.reader.(*cloudflareadapter.Client)
+	if !ok || client == nil {
+		writeError(w, 503, "cloudflare_unavailable", "Cloudflare adapter client unavailable.")
+		return
+	}
+	analytics, err := client.GetZoneAnalytics(r.Context(), zoneID)
+	if err != nil {
+		writeError(w, 502, "cloudflare_analytics_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, analytics)
 }
 
 func (h *Handler) emit(ctx context.Context, event AuditEvent) {
