@@ -761,3 +761,98 @@ func (c *Client) CloneStack(ctx context.Context, containerID, suffix string) (st
 	return newContainerName, nil
 }
 
+func (c *Client) PullImage(ctx context.Context, imageTag string) error {
+	path := "/images/create?fromImage=" + url.QueryEscape(imageTag)
+	resp, err := c.do(ctx, http.MethodPost, path, nil, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("pull image failed with status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func (c *Client) DeleteImage(ctx context.Context, imageID string) error {
+	path := "/images/" + url.PathEscape(imageID) + "?force=true"
+	resp, err := c.do(ctx, http.MethodDelete, path, nil, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("delete image failed with status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func (c *Client) PruneImages(ctx context.Context) error {
+	path := "/images/prune"
+	resp, err := c.do(ctx, http.MethodPost, path, nil, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return nil
+}
+
+func (c *Client) CreateVolume(ctx context.Context, name, driver string) error {
+	if driver == "" {
+		driver = "local"
+	}
+	payload := map[string]any{"Name": name, "Driver": driver}
+	_, err := c.postRaw(ctx, "/volumes/create", payload)
+	return err
+}
+
+func (c *Client) DeleteVolume(ctx context.Context, name string) error {
+	path := "/volumes/" + url.PathEscape(name) + "?force=true"
+	resp, err := c.do(ctx, http.MethodDelete, path, nil, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return nil
+}
+
+func (c *Client) PruneVolumes(ctx context.Context) error {
+	path := "/volumes/prune"
+	resp, err := c.do(ctx, http.MethodPost, path, nil, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return nil
+}
+
+func (c *Client) CreateNetwork(ctx context.Context, name, driver string) error {
+	if driver == "" {
+		driver = "bridge"
+	}
+	payload := map[string]any{"Name": name, "Driver": driver}
+	_, err := c.postRaw(ctx, "/networks/create", payload)
+	return err
+}
+
+func (c *Client) DeleteNetwork(ctx context.Context, id string) error {
+	path := "/networks/" + url.PathEscape(id)
+	resp, err := c.do(ctx, http.MethodDelete, path, nil, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return nil
+}
+
+func (c *Client) PruneNetworks(ctx context.Context) error {
+	path := "/networks/prune"
+	resp, err := c.do(ctx, http.MethodPost, path, nil, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return nil
+}
+

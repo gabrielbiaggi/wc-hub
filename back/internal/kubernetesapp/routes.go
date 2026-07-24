@@ -31,4 +31,5 @@ func MountRoutesWithPolicy(mux *http.ServeMux, auth AuthMiddleware, policyEnforc
 	mux.HandleFunc("POST /api/v1/kubernetes/namespaces/{namespace}/deployments/{name}/{action}", auth("kubernetes.manage", handler.DeploymentAction))
 	mux.HandleFunc("GET /api/v1/kubernetes/namespaces/{namespace}/pods/{pod}/logs", auth("kubernetes.read", handler.PodLogs))
 	mux.HandleFunc("POST /api/v1/kubernetes/namespaces/{namespace}/pods/{pod}/exec", auth("kubernetes.manage", handler.PodExec))
+	mux.HandleFunc("POST /api/v1/kubernetes/apply", auth("kubernetes.manage", handler.ApplyManifest))
 }

@@ -121,6 +121,26 @@ func (h *Handler) DeploymentAction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 202, map[string]any{"namespace": namespace, "name": name, "action": action, "status": "accepted"})
 }
 
+func (h *Handler) ApplyManifest(w http.ResponseWriter, r *http.Request) {
+	if h.client == nil {
+		writeError(w, 503, "kubernetes_unconfigured", h.unconfiguredMessage())
+		return
+	}
+	var input struct {
+		YAML string `json:"yaml"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&input); err != nil || len(input.YAML) == 0 {
+		writeError(w, 400, "invalid_request", "Conteúdo do manifesto YAML é obrigatório.")
+		return
+	}
+	applied, err := h.client.ApplyManifest(r.Context(), input.YAML)
+	if err != nil {
+		writeError(w, 502, "kubernetes_apply_failed", "Falha ao aplicar o manifesto Kubernetes: "+err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"status": "applied", "resources": applied})
+}
+
 func isDestructiveDeploymentAction(action string) bool {
 	destructive := map[string]bool{
 		"restart": true, "delete": true,

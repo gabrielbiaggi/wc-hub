@@ -34,4 +34,13 @@ func MountRoutesWithPolicy(mux *http.ServeMux, authMiddleware AuthMiddleware, po
 	mux.HandleFunc("POST /api/v1/docker/containers/{id}/exec", authMiddleware("docker.manage", handler.Exec))
 	mux.HandleFunc("GET /api/v1/docker/containers/{id}/update-stream", authMiddleware("docker.manage", handler.UpdateStream))
 	mux.HandleFunc("POST /api/v1/docker/stacks/clone", authMiddleware("docker.clone", handler.CloneStack))
+	mux.HandleFunc("POST /api/v1/docker/images/pull", authMiddleware("docker.manage", handler.PullImage))
+	mux.HandleFunc("DELETE /api/v1/docker/images/{id}", authMiddleware("docker.manage", handler.DeleteImage))
+	mux.HandleFunc("POST /api/v1/docker/images/prune", authMiddleware("docker.manage", handler.PruneImages))
+	mux.HandleFunc("POST /api/v1/docker/volumes", authMiddleware("docker.manage", handler.CreateVolume))
+	mux.HandleFunc("DELETE /api/v1/docker/volumes/{name}", authMiddleware("docker.manage", handler.DeleteVolume))
+	mux.HandleFunc("POST /api/v1/docker/volumes/prune", authMiddleware("docker.manage", handler.PruneVolumes))
+	mux.HandleFunc("POST /api/v1/docker/networks", authMiddleware("docker.manage", handler.CreateNetwork))
+	mux.HandleFunc("DELETE /api/v1/docker/networks/{id}", authMiddleware("docker.manage", handler.DeleteNetwork))
+	mux.HandleFunc("POST /api/v1/docker/networks/prune", authMiddleware("docker.manage", handler.PruneNetworks))
 }

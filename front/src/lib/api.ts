@@ -904,6 +904,24 @@ export interface KubernetesEvent {
   first_timestamp: string;
   last_timestamp: string;
 }
+export interface KubernetesIngress {
+  metadata: KubernetesMetadata;
+  rules: string[];
+}
+export interface KubernetesConfigMap {
+  metadata: KubernetesMetadata;
+  dataKeys: string[];
+}
+export interface KubernetesSecret {
+  metadata: KubernetesMetadata;
+  type: string;
+  dataKeys: string[];
+}
+export interface KubernetesPVC {
+  metadata: KubernetesMetadata;
+  phase: string;
+  capacity: string;
+}
 export interface KubernetesOverview {
   captured_at: string;
   source: string;
@@ -912,6 +930,10 @@ export interface KubernetesOverview {
   pods: KubernetesPod[];
   events: KubernetesEvent[];
   warnings: string[];
+  ingresses?: KubernetesIngress[];
+  config_maps?: KubernetesConfigMap[];
+  secrets?: KubernetesSecret[];
+  pvcs?: KubernetesPVC[];
 }
 export const getKubernetesOverview = async (): Promise<KubernetesOverview> =>
   (await api.get("/v1/kubernetes/overview")).data;
@@ -941,6 +963,8 @@ export const kubernetesPodExec = async (
       { headers: extraHeaders },
     )
   ).data;
+export const applyKubernetesManifest = async (yaml: string) =>
+  (await api.post<{ status: string; resources: string[] }>("/v1/kubernetes/apply", { yaml })).data;
 export const kubernetesDeploymentAction = async (
   namespace: string,
   name: string,

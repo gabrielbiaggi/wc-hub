@@ -21,6 +21,15 @@ type Reader interface {
 type Controller interface {
 	ContainerAction(context.Context, string, string) error
 	Exec(context.Context, string, []string) (string, error)
+	PullImage(context.Context, string) error
+	DeleteImage(context.Context, string) error
+	PruneImages(context.Context) error
+	CreateVolume(context.Context, string, string) error
+	DeleteVolume(context.Context, string) error
+	PruneVolumes(context.Context) error
+	CreateNetwork(context.Context, string, string) error
+	DeleteNetwork(context.Context, string) error
+	PruneNetworks(context.Context) error
 }
 
 func (h *Handler) Exec(w http.ResponseWriter, r *http.Request) {
@@ -339,5 +348,175 @@ func (h *Handler) CloneStack(w http.ResponseWriter, r *http.Request) {
 		"new_stack_name":  newContainerName,
 		"environment":     req.Suffix,
 	})
+}
+
+func (h *Handler) PullImage(w http.ResponseWriter, r *http.Request) {
+	if !h.available(w) {
+		return
+	}
+	controller, ok := h.reader.(Controller)
+	if !ok {
+		writeError(w, 503, "docker_unavailable", "Docker client not configured.")
+		return
+	}
+	var input struct {
+		Image string `json:"image"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || strings.TrimSpace(input.Image) == "" {
+		writeError(w, 400, "invalid_request", "Nome da imagem é obrigatório.")
+		return
+	}
+	if err := controller.PullImage(r.Context(), input.Image); err != nil {
+		writeError(w, 502, "pull_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "pulled", "image": input.Image})
+}
+
+func (h *Handler) DeleteImage(w http.ResponseWriter, r *http.Request) {
+	if !h.available(w) {
+		return
+	}
+	controller, ok := h.reader.(Controller)
+	if !ok {
+		writeError(w, 503, "docker_unavailable", "Docker client not configured.")
+		return
+	}
+	id := r.PathValue("id")
+	if err := controller.DeleteImage(r.Context(), id); err != nil {
+		writeError(w, 502, "delete_image_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "deleted", "image_id": id})
+}
+
+func (h *Handler) PruneImages(w http.ResponseWriter, r *http.Request) {
+	if !h.available(w) {
+		return
+	}
+	controller, ok := h.reader.(Controller)
+	if !ok {
+		writeError(w, 503, "docker_unavailable", "Docker client not configured.")
+		return
+	}
+	if err := controller.PruneImages(r.Context()); err != nil {
+		writeError(w, 502, "prune_images_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "pruned"})
+}
+
+func (h *Handler) CreateVolume(w http.ResponseWriter, r *http.Request) {
+	if !h.available(w) {
+		return
+	}
+	controller, ok := h.reader.(Controller)
+	if !ok {
+		writeError(w, 503, "docker_unavailable", "Docker client not configured.")
+		return
+	}
+	var input struct {
+		Name   string `json:"name"`
+		Driver string `json:"driver"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || strings.TrimSpace(input.Name) == "" {
+		writeError(w, 400, "invalid_request", "Nome do volume é obrigatório.")
+		return
+	}
+	if err := controller.CreateVolume(r.Context(), input.Name, input.Driver); err != nil {
+		writeError(w, 502, "create_volume_failed", err.Error())
+		return
+	}
+	writeJSON(w, 201, map[string]string{"status": "created", "name": input.Name})
+}
+
+func (h *Handler) DeleteVolume(w http.ResponseWriter, r *http.Request) {
+	if !h.available(w) {
+		return
+	}
+	controller, ok := h.reader.(Controller)
+	if !ok {
+		writeError(w, 503, "docker_unavailable", "Docker client not configured.")
+		return
+	}
+	name := r.PathValue("name")
+	if err := controller.DeleteVolume(r.Context(), name); err != nil {
+		writeError(w, 502, "delete_volume_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "deleted", "name": name})
+}
+
+func (h *Handler) PruneVolumes(w http.ResponseWriter, r *http.Request) {
+	if !h.available(w) {
+		return
+	}
+	controller, ok := h.reader.(Controller)
+	if !ok {
+		writeError(w, 503, "docker_unavailable", "Docker client not configured.")
+		return
+	}
+	if err := controller.PruneVolumes(r.Context()); err != nil {
+		writeError(w, 502, "prune_volumes_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "pruned"})
+}
+
+func (h *Handler) CreateNetwork(w http.ResponseWriter, r *http.Request) {
+	if !h.available(w) {
+		return
+	}
+	controller, ok := h.reader.(Controller)
+	if !ok {
+		writeError(w, 503, "docker_unavailable", "Docker client not configured.")
+		return
+	}
+	var input struct {
+		Name   string `json:"name"`
+		Driver string `json:"driver"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || strings.TrimSpace(input.Name) == "" {
+		writeError(w, 400, "invalid_request", "Nome da rede é obrigatório.")
+		return
+	}
+	if err := controller.CreateNetwork(r.Context(), input.Name, input.Driver); err != nil {
+		writeError(w, 502, "create_network_failed", err.Error())
+		return
+	}
+	writeJSON(w, 201, map[string]string{"status": "created", "name": input.Name})
+}
+
+func (h *Handler) DeleteNetwork(w http.ResponseWriter, r *http.Request) {
+	if !h.available(w) {
+		return
+	}
+	controller, ok := h.reader.(Controller)
+	if !ok {
+		writeError(w, 503, "docker_unavailable", "Docker client not configured.")
+		return
+	}
+	id := r.PathValue("id")
+	if err := controller.DeleteNetwork(r.Context(), id); err != nil {
+		writeError(w, 502, "delete_network_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "deleted", "network_id": id})
+}
+
+func (h *Handler) PruneNetworks(w http.ResponseWriter, r *http.Request) {
+	if !h.available(w) {
+		return
+	}
+	controller, ok := h.reader.(Controller)
+	if !ok {
+		writeError(w, 503, "docker_unavailable", "Docker client not configured.")
+		return
+	}
+	if err := controller.PruneNetworks(r.Context()); err != nil {
+		writeError(w, 502, "prune_networks_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "pruned"})
 }
 

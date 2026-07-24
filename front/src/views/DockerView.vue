@@ -21,9 +21,18 @@ import StatusBadge from "@/components/ui/StatusBadge.vue";
 import ActionGuardModal from "@/components/ActionGuardModal.vue";
 import { usePermissions } from "@/composables/usePermissions";
 import {
+  createDockerNetwork,
+  createDockerVolume,
+  deleteDockerImage,
+  deleteDockerNetwork,
+  deleteDockerVolume,
   dockerContainerAction,
   dockerContainerExec,
   getDockerInventory,
+  pruneDockerImages,
+  pruneDockerNetworks,
+  pruneDockerVolumes,
+  pullDockerImage,
   type DockerContainer,
   buildActionHeaders,
 } from "@/lib/api";
@@ -59,6 +68,57 @@ const execContainer = useMutation({
   onSuccess: (data) => {
     execOutput.value = data.output;
   },
+});
+
+const pullImageForm = ref("");
+const pullMutation = useMutation({
+  mutationFn: () => pullDockerImage(pullImageForm.value),
+  onSuccess: () => {
+    pullImageForm.value = "";
+    client.invalidateQueries({ queryKey: ["docker-inventory"] });
+  },
+});
+const pruneImagesMut = useMutation({
+  mutationFn: pruneDockerImages,
+  onSuccess: () => client.invalidateQueries({ queryKey: ["docker-inventory"] }),
+});
+const deleteImageMut = useMutation({
+  mutationFn: (id: string) => deleteDockerImage(id),
+  onSuccess: () => client.invalidateQueries({ queryKey: ["docker-inventory"] }),
+});
+
+const volumeNameForm = ref("");
+const createVolMut = useMutation({
+  mutationFn: () => createDockerVolume(volumeNameForm.value),
+  onSuccess: () => {
+    volumeNameForm.value = "";
+    client.invalidateQueries({ queryKey: ["docker-inventory"] });
+  },
+});
+const deleteVolMut = useMutation({
+  mutationFn: (name: string) => deleteDockerVolume(name),
+  onSuccess: () => client.invalidateQueries({ queryKey: ["docker-inventory"] }),
+});
+const pruneVolMut = useMutation({
+  mutationFn: pruneDockerVolumes,
+  onSuccess: () => client.invalidateQueries({ queryKey: ["docker-inventory"] }),
+});
+
+const networkNameForm = ref("");
+const createNetMut = useMutation({
+  mutationFn: () => createDockerNetwork(networkNameForm.value),
+  onSuccess: () => {
+    networkNameForm.value = "";
+    client.invalidateQueries({ queryKey: ["docker-inventory"] });
+  },
+});
+const deleteNetMut = useMutation({
+  mutationFn: (id: string) => deleteDockerNetwork(id),
+  onSuccess: () => client.invalidateQueries({ queryKey: ["docker-inventory"] }),
+});
+const pruneNetMut = useMutation({
+  mutationFn: pruneDockerNetworks,
+  onSuccess: () => client.invalidateQueries({ queryKey: ["docker-inventory"] }),
 });
 
 const providerError = computed(() =>
@@ -451,14 +511,19 @@ const submitClone = async () => {
       </div>
     </article>
     <article class="overflow-hidden rounded-xl border border-line bg-panel/65">
-      <header class="border-b border-line p-4">
-        <h2 class="text-sm font-medium">Imagens</h2>
+      <header class="flex flex-wrap items-center justify-between gap-3 border-b border-line p-4">
+        <h2 class="text-sm font-medium">Imagens Docker</h2>
+        <div class="flex items-center gap-2">
+          <input v-model="pullImageForm" placeholder="nginx:latest" class="rounded border border-line bg-slate-950 px-2 py-1 font-mono text-xs text-slate-200" />
+          <Button size="sm" :disabled="pullMutation.isPending.value || !pullImageForm.trim()" @click="pullMutation.mutate()"><Upload class="h-3.5 w-3.5" />Pull</Button>
+          <Button variant="outline" size="sm" :disabled="pruneImagesMut.isPending.value" @click="pruneImagesMut.mutate()">Prune Imagens</Button>
+        </div>
       </header>
       <div class="divide-y divide-line/60">
         <div
           v-for="image in inventory.data.value?.images"
           :key="image.id"
-          class="grid gap-3 p-4 md:grid-cols-[1fr_180px_180px]"
+          class="grid gap-3 p-4 md:grid-cols-[1fr_140px_140px_100px] md:items-center"
         >
           <div>
             <p class="text-sm text-slate-200">
@@ -484,6 +549,9 @@ const submitClone = async () => {
               Compartilhado: {{ formatBytes(image.shared_size) }}
             </p>
           </div>
+          <div>
+            <Button variant="danger" size="sm" :disabled="deleteImageMut.isPending.value" @click="deleteImageMut.mutate(image.id)"><Trash2 class="h-3.5 w-3.5" />Remover</Button>
+          </div>
         </div>
         <p
           v-if="!inventory.data.value?.images?.length"
@@ -491,6 +559,32 @@ const submitClone = async () => {
         >
           Nenhuma imagem encontrada.
         </p>
+      </div>
+    </article>
+
+    <article class="overflow-hidden rounded-xl border border-line bg-panel/65">
+      <header class="flex flex-wrap items-center justify-between gap-3 border-b border-line p-4">
+        <h2 class="text-sm font-medium">Gestão de Volumes & Redes Docker</h2>
+        <div class="flex items-center gap-2">
+          <Button variant="outline" size="sm" :disabled="pruneVolMut.isPending.value" @click="pruneVolMut.mutate()">Prune Volumes</Button>
+          <Button variant="outline" size="sm" :disabled="pruneNetMut.isPending.value" @click="pruneNetMut.mutate()">Prune Redes</Button>
+        </div>
+      </header>
+      <div class="grid gap-5 p-5 md:grid-cols-2">
+        <div class="space-y-3">
+          <h3 class="text-xs font-medium text-slate-300">Criar Volume de Bloco</h3>
+          <div class="flex gap-2">
+            <input v-model="volumeNameForm" placeholder="ex: meu-volume-dados" class="w-full rounded border border-line bg-slate-950 p-2 text-xs font-mono text-slate-200" />
+            <Button size="sm" :disabled="createVolMut.isPending.value || !volumeNameForm.trim()" @click="createVolMut.mutate()">Criar Volume</Button>
+          </div>
+        </div>
+        <div class="space-y-3">
+          <h3 class="text-xs font-medium text-slate-300">Criar Rede (Bridge/Overlay)</h3>
+          <div class="flex gap-2">
+            <input v-model="networkNameForm" placeholder="ex: rede-interna-app" class="w-full rounded border border-line bg-slate-950 p-2 text-xs font-mono text-slate-200" />
+            <Button size="sm" :disabled="createNetMut.isPending.value || !networkNameForm.trim()" @click="createNetMut.mutate()">Criar Rede</Button>
+          </div>
+        </div>
       </div>
     </article>
     <article

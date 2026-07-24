@@ -20,6 +20,7 @@ import StatusBadge from "@/components/ui/StatusBadge.vue";
 import ActionGuardModal from "@/components/ActionGuardModal.vue";
 import { usePermissions } from "@/composables/usePermissions";
 import {
+  applyKubernetesManifest,
   getKubernetesOverview,
   getKubernetesPodLogs,
   kubernetesDeploymentAction,
@@ -30,8 +31,17 @@ import {
 } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/api_error";
 
-type Tab = "nodes" | "deployments" | "pods" | "events";
+type Tab = "nodes" | "deployments" | "pods" | "ingresses" | "configmaps" | "secrets" | "pvcs" | "events" | "yaml";
 const tab = ref<Tab>("deployments");
+const yamlContent = ref("");
+const yamlResult = ref<string[]>([]);
+const applyMutation = useMutation({
+  mutationFn: () => applyKubernetesManifest(yamlContent.value),
+  onSuccess: (data) => {
+    yamlResult.value = data.resources;
+    client.invalidateQueries({ queryKey: ["kubernetes-overview"] });
+  },
+});
 const client = useQueryClient();
 const { hasPermission } = usePermissions();
 const canManage = computed(() => hasPermission("kubernetes.manage"));
@@ -322,7 +332,12 @@ const selectedExecPod = computed(() =>
               { id: 'deployments', label: 'Deployments' },
               { id: 'pods', label: 'Pods' },
               { id: 'nodes', label: 'Nodes' },
+              { id: 'ingresses', label: 'Ingresses' },
+              { id: 'configmaps', label: 'ConfigMaps' },
+              { id: 'secrets', label: 'Secrets' },
+              { id: 'pvcs', label: 'PVCs' },
               { id: 'events', label: 'Eventos' },
+              { id: 'yaml', label: 'Aplicar YAML' },
             ]"
             :key="item.id"
             :class="[
@@ -526,12 +541,69 @@ const selectedExecPod = computed(() =>
             </p>
           </div>
         </div>
+        </div>
         <p
           v-if="!overview.data.value?.events?.length"
           class="p-10 text-center text-sm text-muted"
         >
           Nenhum evento encontrado.
         </p>
+      </div>
+
+      <div v-else-if="tab === 'ingresses'" class="divide-y divide-line/60">
+        <div v-for="ing in overview.data.value?.ingresses" :key="ing.metadata.uid" class="p-4">
+          <p class="text-sm font-medium text-slate-200">{{ ing.metadata.name }} <span class="text-xs text-muted">({{ ing.metadata.namespace }})</span></p>
+          <p class="mt-1 font-mono text-xs text-signal">Hosts: {{ ing.rules?.join(', ') || 'Nenhum host específico' }}</p>
+        </div>
+        <p v-if="!overview.data.value?.ingresses?.length" class="p-10 text-center text-sm text-muted">Nenhum Ingress encontrado.</p>
+      </div>
+
+      <div v-else-if="tab === 'configmaps'" class="divide-y divide-line/60">
+        <div v-for="cm in overview.data.value?.config_maps" :key="cm.metadata.uid" class="p-4">
+          <p class="text-sm font-medium text-slate-200">{{ cm.metadata.name }} <span class="text-xs text-muted">({{ cm.metadata.namespace }})</span></p>
+          <p class="mt-1 font-mono text-xs text-slate-400">Chaves: {{ cm.dataKeys?.join(', ') || 'Sem dados' }}</p>
+        </div>
+        <p v-if="!overview.data.value?.config_maps?.length" class="p-10 text-center text-sm text-muted">Nenhum ConfigMap encontrado.</p>
+      </div>
+
+      <div v-else-if="tab === 'secrets'" class="divide-y divide-line/60">
+        <div v-for="sec in overview.data.value?.secrets" :key="sec.metadata.uid" class="p-4">
+          <p class="text-sm font-medium text-slate-200">{{ sec.metadata.name }} <span class="text-xs text-muted">({{ sec.metadata.namespace }}) · {{ sec.type }}</span></p>
+          <p class="mt-1 font-mono text-xs text-slate-400">Chaves: {{ sec.dataKeys?.join(', ') || 'Sem dados' }}</p>
+        </div>
+        <p v-if="!overview.data.value?.secrets?.length" class="p-10 text-center text-sm text-muted">Nenhum Secret encontrado.</p>
+      </div>
+
+      <div v-else-if="tab === 'pvcs'" class="divide-y divide-line/60">
+        <div v-for="pvc in overview.data.value?.pvcs" :key="pvc.metadata.uid" class="p-4">
+          <p class="text-sm font-medium text-slate-200">{{ pvc.metadata.name }} <span class="text-xs text-muted">({{ pvc.metadata.namespace }})</span></p>
+          <p class="mt-1 font-mono text-xs text-signal">Fase: {{ pvc.phase }} · Capacidade: {{ pvc.capacity || 'não definida' }}</p>
+        </div>
+        <p v-if="!overview.data.value?.pvcs?.length" class="p-10 text-center text-sm text-muted">Nenhum PersistentVolumeClaim encontrado.</p>
+      </div>
+
+      <div v-else-if="tab === 'yaml'" class="p-5 space-y-4">
+        <h3 class="text-sm font-medium text-slate-200">Aplicar Manifesto Kubernetes (YAML)</h3>
+        <p class="text-xs text-muted">Cole um ou múltiplos manifestos YAML (separados por ---) para aplicar diretamente no cluster (Server-Side Apply).</p>
+        <textarea
+          v-model="yamlContent"
+          rows="12"
+          placeholder="apiVersion: apps/v1&#10;kind: Deployment&#10;metadata:&#10;  name: my-app&#10;..."
+          class="w-full rounded-lg border border-line bg-slate-950 p-3 font-mono text-xs text-slate-200"
+        ></textarea>
+        <Button :disabled="applyMutation.isPending.value || !yamlContent.trim()" @click="applyMutation.mutate()">
+          <Play class="h-4 w-4" />Aplicar Manifesto
+        </Button>
+
+        <div v-if="yamlResult.length" class="rounded-lg border border-line bg-slate-950 p-4">
+          <p class="text-xs font-medium text-signal mb-2">Recursos Aplicados com Sucesso:</p>
+          <ul class="list-disc list-inside font-mono text-xs text-slate-300">
+            <li v-for="res in yamlResult" :key="res">{{ res }}</li>
+          </ul>
+        </div>
+        <div v-if="applyMutation.isError.value" class="rounded-lg border border-danger/20 bg-danger/5 p-3 text-xs text-danger">
+          Erro ao aplicar manifesto: {{ applyMutation.error.value?.message }}
+        </div>
       </div>
     </article>
     <div

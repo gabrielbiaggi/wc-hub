@@ -17,9 +17,14 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/serializer/yaml"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/remotecommand"
 )
@@ -112,13 +117,35 @@ type Event struct {
 		UID       string `json:"uid"`
 	} `json:"involvedObject"`
 }
+type IngressItem struct {
+	Metadata Metadata `json:"metadata"`
+	Rules    []string `json:"rules"`
+}
+type ConfigMapItem struct {
+	Metadata Metadata `json:"metadata"`
+	DataKeys []string `json:"dataKeys"`
+}
+type SecretItem struct {
+	Metadata Metadata `json:"metadata"`
+	Type     string   `json:"type"`
+	DataKeys []string `json:"dataKeys"`
+}
+type PVCItem struct {
+	Metadata Metadata `json:"metadata"`
+	Phase    string   `json:"phase"`
+	Capacity string   `json:"capacity"`
+}
 type Overview struct {
-	GeneratedAt time.Time    `json:"generated_at"`
-	Nodes       []Node       `json:"nodes"`
-	Deployments []Deployment `json:"deployments"`
-	ProblemPods []Pod        `json:"problem_pods"`
-	Pods        []Pod        `json:"pods"`
-	Events      []Event      `json:"events"`
+	GeneratedAt time.Time       `json:"generated_at"`
+	Nodes       []Node          `json:"nodes"`
+	Deployments []Deployment    `json:"deployments"`
+	ProblemPods []Pod           `json:"problem_pods"`
+	Pods        []Pod           `json:"pods"`
+	Events      []Event         `json:"events"`
+	Ingresses   []IngressItem   `json:"ingresses"`
+	ConfigMaps  []ConfigMapItem `json:"config_maps"`
+	Secrets     []SecretItem    `json:"secrets"`
+	PVCs        []PVCItem       `json:"pvcs"`
 }
 
 var resourceNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`)
@@ -222,7 +249,59 @@ func (c *Client) Overview(ctx context.Context) (Overview, error) {
 	if len(result.Events) > 50 {
 		result.Events = result.Events[len(result.Events)-50:]
 	}
+
+	if ingresses, err := c.clientset.NetworkingV1().Ingresses("").List(ctx, metav1.ListOptions{Limit: 200}); err == nil {
+		for _, item := range ingresses.Items {
+			ing := IngressItem{Metadata: mapMetadata(&item.ObjectMeta)}
+			for _, r := range item.Spec.Rules {
+				ing.Rules = append(ing.Rules, r.Host)
+			}
+			result.Ingresses = append(result.Ingresses, ing)
+		}
+	}
+	if configMaps, err := c.clientset.CoreV1().ConfigMaps("").List(ctx, metav1.ListOptions{Limit: 200}); err == nil {
+		for _, item := range configMaps.Items {
+			cm := ConfigMapItem{Metadata: mapMetadata(&item.ObjectMeta), DataKeys: make([]string, 0, len(item.Data))}
+			for k := range item.Data {
+				cm.DataKeys = append(cm.DataKeys, k)
+			}
+			result.ConfigMaps = append(result.ConfigMaps, cm)
+		}
+	}
+	if secrets, err := c.clientset.CoreV1().Secrets("").List(ctx, metav1.ListOptions{Limit: 200}); err == nil {
+		for _, item := range secrets.Items {
+			sec := SecretItem{Metadata: mapMetadata(&item.ObjectMeta), Type: string(item.Type), DataKeys: make([]string, 0, len(item.Data))}
+			for k := range item.Data {
+				sec.DataKeys = append(sec.DataKeys, k)
+			}
+			result.Secrets = append(result.Secrets, sec)
+		}
+	}
+	if pvcs, err := c.clientset.CoreV1().PersistentVolumeClaims("").List(ctx, metav1.ListOptions{Limit: 200}); err == nil {
+		for _, item := range pvcs.Items {
+			pvc := PVCItem{Metadata: mapMetadata(&item.ObjectMeta), Phase: string(item.Status.Phase)}
+			if qty, ok := item.Status.Capacity[corev1.ResourceStorage]; ok {
+				pvc.Capacity = qty.String()
+			}
+			result.PVCs = append(result.PVCs, pvc)
+		}
+	}
+
 	return result, nil
+}
+
+func (c *Client) RESTConfig() *rest.Config {
+	if c == nil {
+		return nil
+	}
+	return c.config
+}
+
+func (c *Client) Clientset() kubernetes.Interface {
+	if c == nil {
+		return nil
+	}
+	return c.clientset
 }
 
 func (c *Client) PodLogs(ctx context.Context, namespace, pod, container string, tailLines int) (string, error) {
@@ -418,4 +497,63 @@ func hasContainerProblem(pod Pod) bool {
 }
 func validPodTarget(namespace, pod, container string) bool {
 	return resourceNamePattern.MatchString(namespace) && resourceNamePattern.MatchString(pod) && (container == "" || resourceNamePattern.MatchString(container))
+}
+
+func (c *Client) ApplyManifest(ctx context.Context, yamlContent string) ([]string, error) {
+	if c == nil || c.clientset == nil || c.config == nil {
+		return nil, errors.New("Kubernetes adapter is not configured")
+	}
+	dyn, err := dynamic.NewForConfig(c.config)
+	if err != nil {
+		return nil, fmt.Errorf("create dynamic client: %w", err)
+	}
+	groupResources, err := restmapper.GetAPIGroupResources(c.clientset.Discovery())
+	if err != nil {
+		return nil, fmt.Errorf("get api group resources: %w", err)
+	}
+	mapper := restmapper.NewDiscoveryRESTMapper(groupResources)
+	decoder := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
+
+	docs := strings.Split(yamlContent, "---")
+	applied := make([]string, 0, len(docs))
+
+	for _, doc := range docs {
+		doc = strings.TrimSpace(doc)
+		if doc == "" {
+			continue
+		}
+		obj := &unstructured.Unstructured{}
+		_, gvk, err := decoder.Decode([]byte(doc), nil, obj)
+		if err != nil {
+			return applied, fmt.Errorf("decode YAML doc: %w", err)
+		}
+		mapping, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+		if err != nil {
+			return applied, fmt.Errorf("map GVK %s: %w", gvk.String(), err)
+		}
+
+		var dr dynamic.ResourceInterface
+		if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
+			ns := obj.GetNamespace()
+			if ns == "" {
+				ns = "default"
+			}
+			dr = dyn.Resource(mapping.Resource).Namespace(ns)
+		} else {
+			dr = dyn.Resource(mapping.Resource)
+		}
+
+		data, err := json.Marshal(obj)
+		if err != nil {
+			return applied, fmt.Errorf("marshal object: %w", err)
+		}
+		force := true
+		_, err = dr.Patch(ctx, obj.GetName(), types.ApplyPatchType, data, metav1.PatchOptions{FieldManager: "wc-hub", Force: &force})
+		if err != nil {
+			return applied, fmt.Errorf("apply resource %s/%s: %w", obj.GetKind(), obj.GetName(), err)
+		}
+		applied = append(applied, fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName()))
+	}
+
+	return applied, nil
 }

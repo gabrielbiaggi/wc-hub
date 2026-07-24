@@ -141,3 +141,30 @@ export const approveWorker = async (id: string) =>
 export const rejectWorker = async (id: string) =>
   (await api.post<WorkerNode>(`/v1/workers/${encodeURIComponent(id)}/reject`)).data;
 
+export const pullDockerImage = async (image: string) =>
+  (await api.post("/v1/docker/images/pull", { image })).data;
+
+export const deleteDockerImage = async (id: string) =>
+  (await api.delete(`/v1/docker/images/${encodeURIComponent(id)}`)).data;
+
+export const pruneDockerImages = async () =>
+  (await api.post("/v1/docker/images/prune")).data;
+
+export const createDockerVolume = async (name: string, driver?: string) =>
+  (await api.post("/v1/docker/volumes", { name, driver })).data;
+
+export const deleteDockerVolume = async (name: string) =>
+  (await api.delete(`/v1/docker/volumes/${encodeURIComponent(name)}`)).data;
+
+export const pruneDockerVolumes = async () =>
+  (await api.post("/v1/docker/volumes/prune")).data;
+
+export const createDockerNetwork = async (name: string, driver?: string) =>
+  (await api.post("/v1/docker/networks", { name, driver })).data;
+
+export const deleteDockerNetwork = async (id: string) =>
+  (await api.delete(`/v1/docker/networks/${encodeURIComponent(id)}`)).data;
+
+export const pruneDockerNetworks = async () =>
+  (await api.post("/v1/docker/networks/prune")).data;
+
