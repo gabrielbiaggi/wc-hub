@@ -702,6 +702,77 @@ export const createProxmoxVNCProxyTicket = async (
     )
   ).data;
 
+export interface ProxmoxNodeService {
+  service: string;
+  name: string;
+  desc: string;
+  state: string;
+  unit: string;
+}
+
+export const getProxmoxNodeServices = async (
+  cluster: string,
+  node: string,
+): Promise<ProxmoxNodeService[]> =>
+  (
+    await api.get<{ services: ProxmoxNodeService[] }>(
+      `/v1/proxmox/nodes/${encodeURIComponent(node)}/services`,
+      { params: { cluster } },
+    )
+  ).data.services;
+
+export const restartProxmoxNodeService = async (
+  cluster: string,
+  node: string,
+  service: string,
+) =>
+  (
+    await api.post(
+      `/v1/proxmox/nodes/${encodeURIComponent(node)}/services/${encodeURIComponent(service)}/restart`,
+      {},
+      { params: { cluster } },
+    )
+  ).data;
+
+export interface ProxmoxClusterLogItem {
+  time: number;
+  node: string;
+  tag: string;
+  user: string;
+  msg: string;
+}
+
+export const getProxmoxClusterLog = async (
+  cluster?: string,
+): Promise<ProxmoxClusterLogItem[]> =>
+  (
+    await api.get<{ logs: ProxmoxClusterLogItem[] }>(
+      "/v1/proxmox/cluster/log",
+      { params: { cluster } },
+    )
+  ).data.logs;
+
+export interface ProxmoxCloudInitInput {
+  ciuser?: string;
+  cipassword?: string;
+  sshkeys?: string;
+  ipconfig0?: string;
+}
+
+export const updateProxmoxCloudInit = async (
+  cluster: string,
+  node: string,
+  vmid: number,
+  input: ProxmoxCloudInitInput,
+) =>
+  (
+    await api.put(
+      `/v1/proxmox/nodes/${encodeURIComponent(node)}/qemu/${vmid}/cloud-init`,
+      input,
+      { params: { cluster } },
+    )
+  ).data;
+
 export interface DockerHealth {
   reachable: boolean;
   source?: string;

@@ -884,6 +884,67 @@ func (c *Client) CreateVNCProxy(ctx context.Context, node, kind string, vmid int
 	return &ticket, nil
 }
 
+type NodeService struct {
+	Service string `json:"service"`
+	Name    string `json:"name"`
+	Desc    string `json:"desc"`
+	State   string `json:"state"`
+	Unit    string `json:"unit"`
+}
+
+func (c *Client) GetNodeServices(ctx context.Context, node string) ([]NodeService, error) {
+	if !nodeNamePattern.MatchString(node) {
+		return nil, fmt.Errorf("invalid node name")
+	}
+	var out []NodeService
+	err := c.get(ctx, fmt.Sprintf("/api2/json/nodes/%s/services", url.PathEscape(node)), &out)
+	return out, err
+}
+
+func (c *Client) RestartNodeService(ctx context.Context, node, service string) error {
+	if !nodeNamePattern.MatchString(node) || service == "" {
+		return fmt.Errorf("invalid service restart parameters")
+	}
+	return c.requestForm(ctx, http.MethodPost, fmt.Sprintf("/api2/json/nodes/%s/services/%s/restart", url.PathEscape(node), url.PathEscape(service)), nil, nil)
+}
+
+type ClusterLogItem struct {
+	Time int64  `json:"time"`
+	Node string `json:"node"`
+	Tag  string `json:"tag"`
+	User string `json:"user"`
+	Msg  string `json:"msg"`
+}
+
+func (c *Client) GetClusterLog(ctx context.Context) ([]ClusterLogItem, error) {
+	var out []ClusterLogItem
+	err := c.get(ctx, "/api2/json/cluster/log?max=100", &out)
+	return out, err
+}
+
+func (c *Client) SetCloudInitConfig(ctx context.Context, node string, vmid int, ciuser, cipassword, sshkeys, ipconfig0 string) error {
+	if !nodeNamePattern.MatchString(node) || vmid < 1 {
+		return fmt.Errorf("invalid cloud-init parameters")
+	}
+	values := url.Values{}
+	if ciuser != "" {
+		values.Set("ciuser", ciuser)
+	}
+	if cipassword != "" {
+		values.Set("cipassword", cipassword)
+	}
+	if sshkeys != "" {
+		values.Set("sshkeys", sshkeys)
+	}
+	if ipconfig0 != "" {
+		values.Set("ipconfig0", ipconfig0)
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	return c.requestForm(ctx, http.MethodPut, fmt.Sprintf("/api2/json/nodes/%s/qemu/%d/config", url.PathEscape(node), vmid), values, nil)
+}
+
 func (c *Client) get(ctx context.Context, path string, destination any) error {
 	return c.request(ctx, http.MethodGet, path, destination)
 }

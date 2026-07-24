@@ -514,6 +514,94 @@ func (a *App) proxmoxVNCProxyTicket(w http.ResponseWriter, r *http.Request) {
 	_ = a.audit.Append(r.Context(), auditrepo.Record{ActorID: session.User.ID, Action: "proxmox.vnc.ticket", Scope: security.ScopeRemote, ResourceType: kind, ResourceID: strconv.Itoa(vmid), TargetName: node, Risk: security.RiskSafe, Decision: "allowed", RequestID: requestID(r.Context()), SourceIP: remoteIP(r)})
 	writeJSON(w, 200, ticket)
 }
+
+func (a *App) proxmoxNodeServices(w http.ResponseWriter, r *http.Request) {
+	node := r.PathValue("node")
+	client := a.proxmoxClientFor(r.URL.Query().Get("cluster"))
+	if client == nil && len(a.proxmoxClients) > 0 {
+		client = a.proxmoxClients[0]
+	}
+	if client == nil {
+		writeError(w, 404, "proxmox_cluster_not_found", "Cluster não encontrado")
+		return
+	}
+	services, err := client.GetNodeServices(r.Context(), node)
+	if err != nil {
+		writeError(w, 502, "proxmox_services_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"services": services})
+}
+
+func (a *App) proxmoxRestartNodeService(w http.ResponseWriter, r *http.Request) {
+	node := r.PathValue("node")
+	service := r.PathValue("service")
+	client := a.proxmoxClientFor(r.URL.Query().Get("cluster"))
+	if client == nil && len(a.proxmoxClients) > 0 {
+		client = a.proxmoxClients[0]
+	}
+	if client == nil {
+		writeError(w, 404, "proxmox_cluster_not_found", "Cluster não encontrado")
+		return
+	}
+	if err := client.RestartNodeService(r.Context(), node, service); err != nil {
+		writeError(w, 502, "proxmox_service_restart_failed", err.Error())
+		return
+	}
+	session := currentSession(r)
+	_ = a.audit.Append(r.Context(), auditrepo.Record{ActorID: session.User.ID, Action: "proxmox.service.restart", Scope: security.ScopeRemote, ResourceType: "service", ResourceID: service, TargetName: node, Risk: security.RiskDangerous, Decision: "allowed", RequestID: requestID(r.Context()), SourceIP: remoteIP(r)})
+	writeJSON(w, 200, map[string]any{"status": "restarted", "service": service})
+}
+
+func (a *App) proxmoxClusterLog(w http.ResponseWriter, r *http.Request) {
+	client := a.proxmoxClientFor(r.URL.Query().Get("cluster"))
+	if client == nil && len(a.proxmoxClients) > 0 {
+		client = a.proxmoxClients[0]
+	}
+	if client == nil {
+		writeError(w, 404, "proxmox_cluster_not_found", "Cluster não encontrado")
+		return
+	}
+	logs, err := client.GetClusterLog(r.Context())
+	if err != nil {
+		writeError(w, 502, "proxmox_cluster_log_failed", err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"logs": logs})
+}
+
+func (a *App) proxmoxSetCloudInitConfig(w http.ResponseWriter, r *http.Request) {
+	node := r.PathValue("node")
+	vmid, err := strconv.Atoi(r.PathValue("vmid"))
+	if err != nil {
+		writeError(w, 400, "invalid_vmid", "VMID inválido")
+		return
+	}
+	var input struct {
+		CIUser     string `json:"ciuser"`
+		CIPassword string `json:"cipassword"`
+		SSHKeys    string `json:"sshkeys"`
+		IPConfig0  string `json:"ipconfig0"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	client := a.proxmoxClientFor(r.URL.Query().Get("cluster"))
+	if client == nil && len(a.proxmoxClients) > 0 {
+		client = a.proxmoxClients[0]
+	}
+	if client == nil {
+		writeError(w, 404, "proxmox_cluster_not_found", "Cluster não encontrado")
+		return
+	}
+	if err := client.SetCloudInitConfig(r.Context(), node, vmid, input.CIUser, input.CIPassword, input.SSHKeys, input.IPConfig0); err != nil {
+		writeError(w, 502, "proxmox_cloudinit_failed", err.Error())
+		return
+	}
+	session := currentSession(r)
+	_ = a.audit.Append(r.Context(), auditrepo.Record{ActorID: session.User.ID, Action: "proxmox.cloudinit.update", Scope: security.ScopeRemote, ResourceType: "qemu", ResourceID: strconv.Itoa(vmid), TargetName: node, Risk: security.RiskDangerous, Decision: "allowed", RequestID: requestID(r.Context()), SourceIP: remoteIP(r)})
+	writeJSON(w, 200, map[string]any{"status": "updated", "vmid": vmid})
+}
 func (a *App) createTerminalTicket(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		HostID string `json:"host_id"`
