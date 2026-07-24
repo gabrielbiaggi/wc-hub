@@ -9,6 +9,7 @@ import (
 )
 
 func (a *App) listIntegrations(w http.ResponseWriter, r *http.Request) {
+	a.syncEnvironmentIntegrations(r.Context())
 	items, err := a.inventory.ListIntegrations(r.Context())
 	if err != nil {
 		a.logger.Error("list integrations failed", "error", err)

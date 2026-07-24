@@ -317,7 +317,134 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*App, fun
 	})
 	runner.Start(workerCtx)
 	schedulerrepo.NewPostgres(pool, application.jobs).Start(workerCtx)
+	go application.syncEnvironmentIntegrations(workerCtx)
+	go application.syncProxmoxOnBoot(workerCtx)
 	return application, func() { cancelWorkers(); pool.Close() }, nil
+}
+
+func (a *App) syncEnvironmentIntegrations(ctx context.Context) {
+	if a.inventory == nil {
+		return
+	}
+	// 1. Proxmox
+	if len(a.proxmoxClients) > 0 {
+		for _, c := range a.proxmoxClients {
+			name := c.ID()
+			if name == "" {
+				name = "Proxmox Cluster"
+			} else {
+				name = "Proxmox " + name
+			}
+			_ = a.inventory.UpsertIntegration(ctx, name, "proxmox", "connected", map[string]any{
+				"cluster":           c.ID(),
+				"credential_source": "environment",
+			})
+		}
+	} else if errStr := a.adapterError("proxmox"); errStr != "" {
+		_ = a.inventory.UpsertIntegration(ctx, "Proxmox Cluster", "proxmox", "error", map[string]any{"error": errStr})
+	}
+
+	// 2. Docker
+	if a.dockerClient != nil {
+		name := a.cfg.DockerSourceName
+		if name == "" {
+			name = "Docker Engine"
+		}
+		_ = a.inventory.UpsertIntegration(ctx, name, "docker", "connected", map[string]any{
+			"endpoint":          a.cfg.DockerEndpoint,
+			"credential_source": "environment",
+		})
+	} else if errStr := a.adapterError("docker"); errStr != "" {
+		_ = a.inventory.UpsertIntegration(ctx, "Docker Engine", "docker", "error", map[string]any{"error": errStr})
+	}
+
+	// 3. Kubernetes
+	if a.kubernetesClient != nil {
+		_ = a.inventory.UpsertIntegration(ctx, "Kubernetes Cluster", "kubernetes", "connected", map[string]any{
+			"endpoint":          a.cfg.KubernetesURL,
+			"credential_source": "environment",
+		})
+	} else if errStr := a.adapterError("kubernetes"); errStr != "" {
+		_ = a.inventory.UpsertIntegration(ctx, "Kubernetes Cluster", "kubernetes", "error", map[string]any{"error": errStr})
+	}
+
+	// 4. Cloudflare
+	if a.cloudflareHandler != nil {
+		_ = a.inventory.UpsertIntegration(ctx, "Cloudflare Edge", "cloudflare", "connected", map[string]any{
+			"credential_source": "environment",
+		})
+	}
+
+	// 5. GitHub
+	if a.githubClient != nil {
+		_ = a.inventory.UpsertIntegration(ctx, "GitHub API", "github", "connected", map[string]any{
+			"repositories":      a.cfg.GitHubRepositories,
+			"credential_source": "environment",
+		})
+	}
+
+	// 6. Oracle Cloud (OCI)
+	if a.ociHandler != nil {
+		_ = a.inventory.UpsertIntegration(ctx, "Oracle Cloud Infrastructure", "oracle", "connected", map[string]any{
+			"config_path":       a.cfg.OCIConfigPath,
+			"profile":           a.cfg.OCIConfigProfile,
+			"credential_source": "environment",
+		})
+	} else if errStr := a.adapterError("oci"); errStr != "" {
+		_ = a.inventory.UpsertIntegration(ctx, "Oracle Cloud Infrastructure", "oracle", "error", map[string]any{"error": errStr})
+	}
+
+	// 7. Terraform
+	if a.terraformRunner != nil {
+		_ = a.inventory.UpsertIntegration(ctx, "Terraform Worker", "terraform", "connected", map[string]any{
+			"worker_url":        a.cfg.TerraformWorkerURL,
+			"workspaces":        a.cfg.TerraformWorkspaces,
+			"credential_source": "environment",
+		})
+	}
+
+	// 8. MergerFS Storage
+	if a.storageClient != nil {
+		_ = a.inventory.UpsertIntegration(ctx, "MergerFS Storage Pool", "storage", "connected", map[string]any{
+			"root":              a.cfg.MergerFSRoot,
+			"ssh_address":       a.cfg.MergerFSSSHAddress,
+			"credential_source": "environment",
+		})
+	}
+
+	// 9. PBS Backup
+	if a.pbsClient != nil || a.cfg.PBSURL != "" {
+		_ = a.inventory.UpsertIntegration(ctx, "Proxmox Backup Server", "pbs", "connected", map[string]any{
+			"url":               a.cfg.PBSURL,
+			"credential_source": "environment",
+		})
+	}
+
+	// 10. Power NUT
+	if a.powerClient != nil || a.cfg.PowerNUTAddress != "" {
+		_ = a.inventory.UpsertIntegration(ctx, "NUT Power Manager", "power", "connected", map[string]any{
+			"nut_address":       a.cfg.PowerNUTAddress,
+			"credential_source": "environment",
+		})
+	}
+}
+
+func (a *App) syncProxmoxOnBoot(ctx context.Context) {
+	if len(a.proxmoxClients) == 0 {
+		return
+	}
+	for _, client := range a.proxmoxClients {
+		snapshot, err := client.Snapshot(ctx)
+		if err != nil {
+			a.logger.Error("boot Proxmox snapshot failed", "cluster", client.ID(), "error", err)
+			continue
+		}
+		if _, syncErr := a.proxmox.Sync(ctx, snapshot, client.ID()); syncErr != nil {
+			a.logger.Error("boot Proxmox sync failed", "cluster", client.ID(), "error", syncErr)
+		} else {
+			a.logger.Info("boot Proxmox sync completed successfully", "cluster", client.ID(), "vms", len(snapshot.VMs), "nodes", len(snapshot.Nodes))
+		}
+	}
 }
 
 func (a *App) setAdapterError(provider string, err error) {

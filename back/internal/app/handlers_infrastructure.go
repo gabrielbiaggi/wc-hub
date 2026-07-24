@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	proxmoxadapter "github.com/webcreations/wc-hub/back/internal/adapters/proxmox"
 	auditrepo "github.com/webcreations/wc-hub/back/internal/audit/repository"
@@ -15,6 +16,14 @@ import (
 
 func (a *App) proxmoxSummary(w http.ResponseWriter, r *http.Request) {
 	summary, err := a.proxmox.Summary(r.Context(), a.proxmoxClient != nil)
+	if err == nil && summary.Nodes == 0 && len(a.proxmoxClients) > 0 {
+		for _, client := range a.proxmoxClients {
+			if snap, snapErr := client.Snapshot(r.Context()); snapErr == nil {
+				_, _ = a.proxmox.Sync(r.Context(), snap, client.ID())
+			}
+		}
+		summary, err = a.proxmox.Summary(r.Context(), a.proxmoxClient != nil)
+	}
 	if err != nil {
 		writeError(w, 500, "proxmox_summary_failed", err.Error())
 		return
@@ -58,6 +67,10 @@ func (a *App) proxmoxInventory(w http.ResponseWriter, r *http.Request) {
 		snapshot.VMs = append(snapshot.VMs, cluster.VMs...)
 		snapshot.Containers = append(snapshot.Containers, cluster.Containers...)
 		snapshot.Storage = append(snapshot.Storage, cluster.Storage...)
+
+		go func(cID string, snap proxmoxadapter.Snapshot) {
+			_, _ = a.proxmox.Sync(context.Background(), snap, cID)
+		}(client.ID(), cluster)
 	}
 	writeJSON(w, 200, snapshot)
 }

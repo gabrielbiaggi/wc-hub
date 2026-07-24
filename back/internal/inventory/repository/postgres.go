@@ -39,6 +39,21 @@ func (r *Postgres) CreateIntegration(ctx context.Context, item domain.Integratio
 	err := r.db.QueryRow(ctx, `INSERT INTO integrations(name,provider,status,config,created_by) VALUES($1,$2,'pending',$3,$4) RETURNING id::text,status::text,created_at`, item.Name, item.Provider, raw, actorID).Scan(&item.ID, &item.Status, &item.CreatedAt)
 	return item, err
 }
+func (r *Postgres) UpsertIntegration(ctx context.Context, name, provider, status string, config map[string]any) error {
+	if name == "" || provider == "" {
+		return nil
+	}
+	if status == "" {
+		status = "connected"
+	}
+	raw, _ := json.Marshal(config)
+	_, err := r.db.Exec(ctx, `
+		INSERT INTO integrations(name, provider, status, config, last_checked_at)
+		VALUES($1, $2, $3::integration_status, $4, now())
+		ON CONFLICT(provider, name) DO UPDATE SET status=EXCLUDED.status, config=EXCLUDED.config, last_checked_at=now(), updated_at=now()
+	`, name, provider, status, raw)
+	return err
+}
 func (r *Postgres) ListHosts(ctx context.Context) ([]domain.Host, error) {
 	rows, err := r.db.Query(ctx, `SELECT id::text,integration_id::text,name,hostname,scope::text,status::text,self_protected,labels,facts,last_seen_at,created_at FROM hosts ORDER BY self_protected DESC,name`)
 	if err != nil {

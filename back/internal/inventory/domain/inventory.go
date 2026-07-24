@@ -30,6 +30,7 @@ type Host struct {
 type Repository interface {
 	ListIntegrations(context.Context) ([]Integration, error)
 	CreateIntegration(context.Context, Integration, string) (Integration, error)
+	UpsertIntegration(ctx context.Context, name, provider, status string, config map[string]any) error
 	ListHosts(context.Context) ([]Host, error)
 	CreateHost(context.Context, Host, string) (Host, error)
 }
