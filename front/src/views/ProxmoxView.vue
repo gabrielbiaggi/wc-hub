@@ -1156,14 +1156,17 @@ const backupGuest = (guest: ProxmoxGuest) => {
                 :status="store.active ? 'healthy' : 'critical'"
                 :label="store.status"
               />
-              <p class="font-mono text-xs text-muted">
+              <div class="font-mono text-xs text-muted">
                 {{ formatBytes(store.used) }} /
                 {{ formatBytes(store.total) }} ({{
                   store.total
                     ? ((store.used / store.total) * 100).toFixed(1)
                     : 0
                 }}%)
-              </p>
+                <p class="mt-1 text-emerald-300">
+                  Disponível {{ formatBytes(store.avail) }}
+                </p>
+              </div>
             </div>
           </div>
           <div v-else-if="tab === 'network'" class="divide-y divide-line/60">
